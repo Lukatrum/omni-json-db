@@ -460,7 +460,7 @@ Network Mode
 .. code-block:: python
 
    >> from omni_json_db import run_files_server
-   >> run_files_server(host='127.0.0.1', port=59698, files='net_storage.jdb')
+   >> run_files_server(host='127.0.0.1', port=59898, files='net_storage.jdb')
 
 **Client side:**
 
