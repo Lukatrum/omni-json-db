@@ -1,0 +1,32 @@
+[run]
+branch = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError.* 
+    raise AttributeError.*
+    raise TypeError.*
+    raise ValueError.*
+    raise RuntimeError.*
+    raise IOError.*
+    raise BlockingIOError.*
+    except FileNotFoundError.*
+    excpet FileLockException.*
+    except.*ImportError.*
+    except.*ModuleNotFoundError.*
+    warnings\.warn.*
+    print\(Style\(.*
+    def __repr__
+    def __str__
+    def main()
+    def _missing_
+    .*GITHUB=NO.*
+    def Style
+    debug_break
+    breakpoint
+    if has_SIGINT().*
+    if False and .*
+    if 0 and .*
+    if __name__ == .__main__.:
+

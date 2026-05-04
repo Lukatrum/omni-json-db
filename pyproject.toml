@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools >= 77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni_json_db"
+version = "2.07.00"
+authors = [
+	{ name="Lukatrum", email="lukatrum@gmail.com"}
+]
+description = "A zero-config, serverless high-performance JSON database with compression. No schema, no setup, just data."
+readme = "README.rst"
+requires-python = ">=3.7"
+keywords = [
+	"database",
+	"JSON",
+	"msgpack",
+	"marshal",
+	"pickle",
+	"nosql",
+	"memory",
+	"network",
+	"compression",
+	"big data",
+	"storage",
+]
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.7",
+	"Programming Language :: Python :: 3.8",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Programming Language :: Python :: 3.14",	
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Database",
+    "Topic :: Utilities",    
+]
+dependencies = [
+	"bitarray>=3.8.0",
+	"brotli>=1.2.0",
+	"msgpack>=1.0.5",
+	"zstandard>=0.21.0",
+	"lz4>=4.3.2",
+	"orjson>=3.9.7",
+	"ormsgpack>=1.2.6",
+	"BTrees>=5.2",
+	"portalocker>=2.7.0; os_name == 'nt'",
+]
+license="MIT"
+license-files = ["LICEN[CS]E*"]
+
+# [project.optional-dependencies]
+# extra_feature = [
+# ]
+
+[project.urls]
+"Homepage" = "https://github.com/lukatrum/omni-json-db"
+"Bug Tracker" = "https://github.com/lukatrum/omni-json-db/issues"
