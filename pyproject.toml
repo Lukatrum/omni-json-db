@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omni_json_db"
-version = "2.07.00"
+version = "2.07.10"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
