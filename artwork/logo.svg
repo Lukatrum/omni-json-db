@@ -1,0 +1,13 @@
+<svg width="600" height="200" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="transparent"/>
+  
+  <text x="50%" y="90" text-anchor="middle" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="800" font-size="52">
+    <tspan fill="#1A73E8">omni-</tspan>
+    <tspan fill="#F29900">JSON</tspan>
+    <tspan fill="#3C4043">-db</tspan>
+  </text>
+  
+  <text x="50%" y="145" text-anchor="middle" font-family="'Courier New', Courier, monospace" font-weight="bold" font-size="18" fill="#5F6368">
+    {free-NESS : [schema-LESS, server-LESS, SQL-LESS]}
+  </text>
+</svg>
