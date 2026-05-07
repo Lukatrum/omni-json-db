@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'omni_json_db/**'
-      - 'pylint.yml'
+      - '.github/workflows/pylint.yml'
 
 jobs:
   build:

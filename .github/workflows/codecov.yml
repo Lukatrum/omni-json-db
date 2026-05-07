@@ -5,7 +5,7 @@ on:
     paths:
         - 'omni_json_db/**'
         - 'tests/test.py'
-        - 'codecov.yml'
+        - '.github/workflows/codecov.yml'
 
 jobs:
   test:
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v3
