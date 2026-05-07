@@ -1,6 +1,6 @@
 |Logo|
 
-|Version| |Build Status| |Pylint| |License|
+|Version| |Build Status| |Pylint| |Coverage| |License|
 
 👉 Quick Links
 **************
@@ -23,7 +23,6 @@
 
 🚀 Features
 ***********
-
 * **Extreme Performance**: Leverages ``orjson`` and ``ormsgpack`` for serialization. [refer to `Supported Data Formats`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism.
@@ -47,7 +46,7 @@
 📌 Supported Python Versions
 ****************************
 
-``omni-json-db`` has been tested with Python 3.7 - 3.14.
+``omni-json-db`` has been tested with Python 3.7 - 3.14 and PyPy3.
 
 🛠️ Quick Start
 **************
@@ -634,19 +633,24 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
       :height: 280px
       :target: https://pypi.python.org/pypi/omni-json-db/
 
-.. |Build Status| image:: https://img.shields.io/pypi/status/omni-json-db
+.. |Build Status| image:: https://img.shields.io/pypi/status/omni-json-db?logo=python&logoColor=white
    :alt: PyPI - Status
    :target: https://github.com/lukatrum/omni-json-db
 
-.. |Version| image:: https://img.shields.io/pypi/v/omni-json-db
+.. |Version| image:: https://img.shields.io/pypi/v/omni-json-db?logo=pypi&logoColor=white
    :alt: PyPI - Version
    :target: https://pypi.python.org/pypi/omni-json-db/
 
-.. |License| image:: https://img.shields.io/github/license/lukatrum/omni-json-db
-   :alt: GitHub License
+.. |License| image:: https://img.shields.io/pypi/l/omni-json-db?color=800080&logo=ticktick&logoColor=white
+   :alt: PyPI - License
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/LICENSE
 
-.. |Pylint| image:: https://img.shields.io/github/actions/workflow/status/lukatrum/omni-json-db/pylint.yml?label=pylint
+.. |Pylint| image:: https://img.shields.io/github/actions/workflow/status/lukatrum/omni-json-db/pylint.yml?label=pylint&logo=lintcode&logoColor=white
    :alt: GitHub Actions Workflow Status
    :target: https://github.com/Lukatrum/omni-json-db/actions/workflows/pylint.yml
+
+.. |Coverage| image:: https://img.shields.io/codecov/c/github/lukatrum/omni-json-db?logo=codecov&logoColor=white
+   :alt: Codecov
+   :target: https://github.com/Lukatrum/omni-json-db/actions/workflows/codecov.yml
+
 

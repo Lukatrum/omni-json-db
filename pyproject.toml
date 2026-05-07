@@ -2,9 +2,12 @@
 requires = ["setuptools >= 77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+exclude = ["artwork", "tests"]
+
 [project]
 name = "omni_json_db"
-version = "2.07.10"
+version = "2.08.00"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -12,17 +15,39 @@ description = "A zero-config, serverless high-performance JSON database with com
 readme = "README.rst"
 requires-python = ">=3.7"
 keywords = [
-	"database",
-	"JSON",
-	"msgpack",
-	"marshal",
-	"pickle",
-	"nosql",
-	"memory",
-	"network",
-	"compression",
+	"backup",
 	"big data",
+	"binary",
+	"caching",
+	"cluster",
+	"compression",
+	"concurrency",
+	"csv",
+	"data",
+	"database",
+	"date-lookup",
+	"db",
+	"dict",
+	"file-based",
+	"in-memory",
+	"json",
+	"key-value",
+	"marshal",
+	"mrsw-lock",
+	"msgpack",
+	"multiprocessing",
+	"multithread",	
+	"network",
+	"nosql",
+	"pickle",
+	"restore",
+	"revertable",
+	"search",
+	"serialization",
+	"serverless",
 	"storage",
+	"sync",
+	"query",
 ]
 classifiers = [
 	"Programming Language :: Python :: 3",
@@ -33,12 +58,18 @@ classifiers = [
 	"Programming Language :: Python :: 3.11",
 	"Programming Language :: Python :: 3.12",
 	"Programming Language :: Python :: 3.13",
-	"Programming Language :: Python :: 3.14",	
+	"Programming Language :: Python :: 3.14",
+	"Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",	
     "Operating System :: OS Independent",
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Database",
-    "Topic :: Utilities",    
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: File Formats :: JSON",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 dependencies = [
 	"bitarray>=3.8.0",
@@ -46,8 +77,8 @@ dependencies = [
 	"msgpack>=1.0.5",
 	"zstandard>=0.21.0",
 	"lz4>=4.3.2",
-	"orjson>=3.9.7",
-	"ormsgpack>=1.2.6",
+	"orjson>=3.9.7; platform_python_implementation != 'PyPy'",
+	"ormsgpack>=1.2.6; platform_python_implementation != 'PyPy'",
 	"BTrees>=5.2",
 	"portalocker>=2.7.0; os_name == 'nt'",
 ]
@@ -59,5 +90,6 @@ license-files = ["LICEN[CS]E*"]
 # ]
 
 [project.urls]
-"Homepage" = "https://github.com/lukatrum/omni-json-db"
+"Homepage" = "https://github.com/lukatrum"
+"Repository" = "https://github.com/lukatrum/omni-json-db"
 "Bug Tracker" = "https://github.com/lukatrum/omni-json-db/issues"
