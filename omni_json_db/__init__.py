@@ -4,7 +4,8 @@ omni-json-db: A Three-LESS (Schema-LESS + Server-LESS + SQL-LESS) High-Performan
 Provides rapid JSON and MsgPack serialization with robust concurrency controls
 for many-read single-write multithreading/multiprocessing environments.
 """
-from typing import Union
+from threading import Thread
+from typing import Union, Optional, Any
 from re import match as re_match
 from .jdb import JDb
 from .jdb_lite import JDbReader, SEP_SYM, JFlag
@@ -17,7 +18,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, serverless JSON-based KV database. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.08.03'
+__version__         = '2.08.04'
 
 __all__ = [
     'JDb',
@@ -35,7 +36,7 @@ __all__ = [
 loads = JDb.z_loads
 dumps = JDb.z_dumps
 
-def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, verbose:int=0): # pragma: no cover
+def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, daemon:bool=False, verbose:int=0) -> Optional[Thread]: # pragma: no cover
     """
     Initializes and runs a multi-threaded TCP server to expose the JDb object.
     
@@ -49,7 +50,8 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
             > [JMemFiles] memory files object for JDb
             > [JNetFiles] network files object for JDb
             > [JDbReader] JDb files object
-            > [default=None] JMemFiles()            
+            > [default=None] JMemFiles()       
+        daemon (bool, optional): True = run in background
         verbose (int, optional): Logging level (-ve: off, 0: limit, 1: err, 4: debug).
             > -ve = disable
             > 0~4 = enable
@@ -57,11 +59,14 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
                 > 1=ERROR 
                 > 2=WARNING 
                 > 3=INFO
-                > 4=DEBUG    
+                > 4=DEBUG
+    Return:
+        None: if daemon == False
+        Thread object: if daemon = True
+
     Raises:
         TypeError: If the provided `files` parameter is invalid.    
     """
-
     if files is None or isinstance(files, bytearray):
         files_obj = JMemFiles(files)
     elif isinstance(files, JDbReader):
@@ -84,5 +89,15 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
 
     assert isinstance(files_obj, JFilesBase)
     print(f'staring server at {host}:{port} -> {files_obj} (files={type(files)})')
-    with ThreadedTCPServer((host, port), ServerHandler, files_obj=files_obj, verbose=verbose) as server:
-        server.serve_forever()
+    def _run_server(host:str, port:int, files_obj:Any, verbose:int=verbose):
+        with ThreadedTCPServer((host, port), ServerHandler, files_obj=files_obj, verbose=verbose) as server:
+            server.serve_forever()
+
+    if not daemon:
+        _run_server(host, port, files_obj, verbose)
+        return None
+
+    thd = Thread(target=_run_server, args=(host, port, files_obj, verbose), daemon=True)
+    thd.start()
+    return thd
+#

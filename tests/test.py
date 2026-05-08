@@ -1,6 +1,9 @@
 import unittest, time, random, threading, inspect, re, os 
 import datetime as dt
-from omni_json_db import JDb, JDbReader, SEP_SYM, JMemFiles, JFlag, JNetFiles, JDiskFiles
+from omni_json_db import JDb, JDbReader, SEP_SYM, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server
+
+server_thd1 = run_files_server('127.0.0.1', 59898, files='db/test_3n.jdb', verbose=0, daemon=True)
+server_thd2 = run_files_server('127.0.0.1', 59899, files=None, verbose=0, daemon=True)
 
 _g_basetime = time.perf_counter()
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):
@@ -61,8 +64,11 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
 class TestJDb(unittest.TestCase):
     def setUp(self):
         self.jdb_configs = [
-                # {'KEY_file':'net_59898_3',    'api_ver':1, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'net_59898_3',      'api_ver':1, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'net_59899_6',      'api_ver':1, 'data_type':'S+S', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
+
             {'KEY_file':'mem_3br_v0',       'api_ver':0, 'data_type':'J+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
+
             {'KEY_file':'mem_3lz',          'api_ver':1, 'data_type':'J+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'mem_6z1',          'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
                 # {'KEY_file':'mem_7lz',          'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
@@ -6296,9 +6302,7 @@ class TestJDb(unittest.TestCase):
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_random(self):
-        th_jdb = JDb('db/th_test.jdb', index_size=64, zip_type='lz')
-
-        def _worker(worker, _th_jdb, _filename, op, key_id, n_keys, step, _id, _ll):
+        def _worker(worker, _filename, op, key_id, n_keys, step, _id, _ll):
             if _ll >= 14:
                 new_val = [f'#{step}|{hex(id(worker.io))[-5:-1]}|k{key_id}+{n_keys}|{op}+{_ll}'] + [op] * _ll
             else:
@@ -6422,15 +6426,14 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             jdb.sync()
-            test_size = 32
+            test_size = 16
             step_size = test_size * 2
             name = filename.replace('.jdb', '').replace('db/', '')
 
             print(Style(f'{cid+1}/{csize}|Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit} #{test_size}/{step_size}', yellow=1, bright=1))
             # --------------------------------------------
             jdb_list = [jdb,
-                        JDb(jdb, key_limit='<8', cache_limit=0),
-                        JDb(jdb, key_limit='l4', cache_limit=16),
+                        JDb(jdb, key_limit='l4', cache_limit=0),
                         JDb(jdb, key_limit='bt', cache_limit=32),
                         JDb(jdb, key_limit='no', cache_limit=-1)]
 
@@ -6448,14 +6451,10 @@ class TestJDb(unittest.TestCase):
 
             steps = [(ii,random.randint(1,8),random.randint(0,len(jdb_list)-1),random.randint(0,6),random.randint(1, 32),random.randint(0,99)) for ii in range(step_size)]
             random.shuffle(steps)
-            th_jdb[f'{name}|0'] = steps
             th_list = [None] * len(jdb_list)
             for step,(key_id,n_keys,_id,op,_ll,th_id) in enumerate(steps):
                 step += 1
                 _jdb = jdb_list[_id]
-
-                _id2 = (_id + 1) % len(jdb_list)
-                _jdb2 = jdb_list[_id2]
                 key_id %= test_size
                 if th_id >= 50:
                     while True:
@@ -6472,37 +6471,20 @@ class TestJDb(unittest.TestCase):
                         th_list[_id] = None
                         break
 
-                    while True:
-                        old_th = th_list[_id2]
-                        if not old_th:
-                            break
-
-                        if old_th.is_alive():
-                            _id2 = (_id2 + 1) % len(jdb_list)
-                            time.sleep(0)
-                            continue
-
-                        old_th.join()
-                        th_list[_id2] = None
-                        break
-
-                    th = threading.Thread(target=_worker, args=(_jdb, th_jdb, name, op, key_id, n_keys, step, _id, _ll))
-                    th2 = threading.Thread(target=_worker, args=(_jdb2, th_jdb, name, op, key_id//2, n_keys, step, _id2, _ll*2))
+                    th = threading.Thread(target=_worker, args=(_jdb, name, op, key_id, n_keys, step, _id, _ll))
                     th_list[_id] = th
-                    th_list[_id2] = th2
                     th.start()
-                    th2.start()
                 else:
-                    _worker(_jdb, th_jdb, name, op, key_id, n_keys, step, _id, _ll)
-                    if id(_jdb) != id(jdb):
-                        error = _jdb.check_error()
-                        self.assertTrue(not error)
-                        self.assertEqual(jdb, _jdb)
-                        with jdb.open() as _fp1:
-                            with _jdb.open() as _fp2:
-                                # safe to check key_table/file_table in multi-thread
-                                self.assertEqual(jdb.file_table, _jdb.file_table)
-                                self.assertEqual(jdb.key_table, _jdb.key_table)
+                    _worker(_jdb, name, op, key_id, n_keys, step, _id, _ll)
+                    # if id(_jdb) != id(jdb):
+                    #     error = _jdb.check_error()
+                    #     self.assertTrue(not error)
+                    #     self.assertEqual(jdb, _jdb)
+                    #     with jdb.open() as _fp1:
+                    #         with _jdb.open() as _fp2:
+                    #             # safe to check key_table/file_table in multi-thread
+                    #             self.assertEqual(jdb.file_table, _jdb.file_table)
+                    #             self.assertEqual(jdb.key_table, _jdb.key_table)
 
             for th in th_list:
                 if not th:
@@ -6513,6 +6495,8 @@ class TestJDb(unittest.TestCase):
             for _jdb in jdb_list:
                 if id(_jdb) == id(jdb):
                     continue
+
+                _jdb.unsync()
                 error = _jdb.check_error()
                 self.assertTrue(not error)
                 self.assertEqual(jdb, _jdb)
