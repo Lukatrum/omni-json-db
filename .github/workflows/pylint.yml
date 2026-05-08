@@ -3,8 +3,8 @@ name: Pylint
 on:
   push:
     paths:
-      - 'omni_json_db/**'
-      - '.github/workflows/pylint.yml'
+      - 'omni_json_db/*.py'
+      # - '.github/workflows/pylint.yml'
 
 jobs:
   build:
