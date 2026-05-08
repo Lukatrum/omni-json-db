@@ -1631,7 +1631,7 @@ class JDbReader:
     @property
     def zip_type(self) -> str:
         return self.io.zip_type_str
-        
+
     @property
     def key_limit(self) -> str:
         return self.io.key_limit_str

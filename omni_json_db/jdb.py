@@ -3610,7 +3610,7 @@ class JDb(JDbReader):
                             dead_h = safe_line
                             if dead_row > dead_h:
                                 # DEAD[h] -> DEAD[t+1] or DEAD[m]
-                                _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)                                
+                                _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)
                             else:
                                 pass
 

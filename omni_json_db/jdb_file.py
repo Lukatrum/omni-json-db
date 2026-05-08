@@ -1,16 +1,18 @@
+# pylint: disable=ungrouped-imports,W1514,R1732
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from io import RawIOBase
 from typing import Optional, IO
 from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd, O_APPEND, O_CREAT
-from os import open as os_open, close as os_close, remove as os_remove, stat as os_stat
+from os import remove as os_remove, stat as os_stat
 from os.path import basename, dirname, join as path_join, exists as path_exists
 from datetime import datetime
 from threading import RLock, get_ident
 #-----------------------------------------------------------------------------
-OPEN_FLAGS = O_APPEND | O_CREAT
 
 try:
+    OPEN_FLAGS = O_APPEND | O_CREAT
+    from os import oen as os_open, close as os_close
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
 
     def file_rlock(fd:int, LCK_file:str) -> int:
@@ -45,34 +47,34 @@ try:
 except ImportError:
     from portalocker import LOCK_SH, LOCK_NB, LOCK_EX, lock as pl_lock, unlock as pl_unlock, LockException
 
-    def file_rlock(fd:int, LCK_file:str) -> int:
+    def file_rlock(fd:IO, LCK_file:str) -> IO:
         if not fd:
-            fd = os_open(LCK_file, OPEN_FLAGS)
+            fd = open(LCK_file, 'a+')
 
         try:
             pl_lock(fd, LOCK_SH | LOCK_NB)
             return fd
 
         except (IOError, OSError, LockException) as e: # pragma: no cover
-            os_close(fd)
+            fd.close()
             raise BlockingIOError from e
 
-    def file_wlock(fd:int, LCK_file:str) -> int:
+    def file_wlock(fd:IO, LCK_file:str) -> IO:
         if not fd:
-            fd = os_open(LCK_file, OPEN_FLAGS)
+            fd = open(LCK_file, 'a+')
 
         try:
             pl_lock(fd, LOCK_EX | LOCK_NB)
             return fd
 
         except (IOError, OSError, LockException) as e: # pragma: no cover
-            os_close(fd)
+            fd.close()
             raise BlockingIOError from e
 
-    def file_unlock(fd:int):
+    def file_unlock(fd:IO):
         if fd:
             pl_unlock(fd)
-            os_close(fd)
+            fd.close()
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -597,21 +599,17 @@ class JDiskFiles(JFilesBase):
         self.LCK_fp = file_wlock(self.LCK_fp, self.LCK_file)
 
     def LCK_unlock(self):
-        if self.LCK_fp is not None:
+        if self.LCK_fp:
             file_unlock(self.LCK_fp)
             self.LCK_fp = None
 
     def LCK_close(self): # pragma: no cover
         if self.LCK_fp:
-            os_close(self.LCK_fp)
-
-        self.LCK_fp = None
+            file_unlock(self.LCK_fp)
+            self.LCK_fp = None
 
     def LCK_remove(self): # pragma: no cover
-        if self.LCK_fp:
-            self.LCK_close()
-
+        self.LCK_close()
         os_remove(self.LCK_file)
-        self.LCK_fp = None
 
 # Pylint=8.16
