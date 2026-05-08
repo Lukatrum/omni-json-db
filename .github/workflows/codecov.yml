@@ -2,11 +2,12 @@ name: Codecov
 
 on: 
   push:
+    branches:
+      - 'main'
     paths:
-        - 'omni_json_db/**'
-        - 'tests/test.py'
-        - '.github/workflows/codecov.yml'
-
+      - 'omni_json_db/**'
+      - 'tests/**'
+      - '.github/workflows/**'
 jobs:
   test:
     runs-on: ${{ matrix.os }}
