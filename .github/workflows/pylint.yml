@@ -2,10 +2,12 @@ name: Pylint
 
 on:
   push:
-    paths:
-      - 'omni_json_db/*.py'
-      # - '.github/workflows/pylint.yml'
-
+    branches:
+      - main
+      - release/*
+    paths: 
+      - 'omni_json_db/**'
+    
 jobs:
   build:
     runs-on: ${{ matrix.os }}
