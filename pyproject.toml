@@ -7,21 +7,22 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.08.00"
+version = "2.08.02"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
-description = "A zero-config, serverless high-performance JSON database with compression. No schema, no setup, just data."
+description = "A zero-config, powerful JSON database with compression. No schema, no setup, just data."
 readme = "README.rst"
 requires-python = ">=3.7"
 keywords = [
 	"backup",
-	"big data",
+	"big-data",
 	"binary",
 	"caching",
 	"cluster",
 	"compression",
 	"concurrency",
+	"configuration",
 	"csv",
 	"data",
 	"database",
@@ -29,6 +30,7 @@ keywords = [
 	"db",
 	"dict",
 	"file-based",
+	"filelock",
 	"in-memory",
 	"json",
 	"key-value",
@@ -36,9 +38,10 @@ keywords = [
 	"mrsw-lock",
 	"msgpack",
 	"multiprocessing",
-	"multithread",	
+	"multithreading",	
 	"network",
 	"nosql",
+	"persistence",
 	"pickle",
 	"restore",
 	"revertable",

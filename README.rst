@@ -1,7 +1,7 @@
 |Logo|
 
 .. highlights::
-   "Quick and clever, the tiny squirrel stores a grand harvest of chestnuts!"
+   One tiny, nimble squirrel swiftly gathering a golden forest’s worth of acorns!
 
 |Version| |Build Status| |Pylint| |Coverage| |License|
 
@@ -32,15 +32,15 @@
 
 * **Advanced Compression**: Supports LZ4 (speed-focused), Zstandard (balanced), and Brotli (size-focused) to minimize storage footprint. [refer to `Supported Zip Formats`_]
 
-* **Powerful Querying**: Search using Regular Expressions (RE), Lambda filters, or modification timestamps (Time-Travel query).
+* **Powerful Querying**: Search using Regular Expressions (RE), Lambda filters, or modification timestamps (Time-Travel query). [refer to `Query`_]
 
 * **Memory Caching**: Adjustable cache_limit to balance RAM usage and I/O speed.
 
-* **Network Mode** (``JNetFiles``): Transform a local ``omni-json-db`` instance into a networked service with a single command using run_files_server. [refer to `Network Mode`_]
+* **Network Mode** (``JNetFiles``): Transform a local ``omni-json-db`` instance into a networked service with a single command using run_files_server. [refer to `Network`_]
 
-* **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for extreme performance (ideal for real-time caches or volatile session storage). [refer to `In-memory Mode`_]
+* **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for extreme performance (ideal for real-time caches or volatile session storage). [refer to `In-memory`_]
 
-* **Revertable**: Unlike traditional NoSQL stores, ``omni-json-db`` tracks internal states allowing you to unwrite (rollback a modification) or undelete a record. This provides a safety net similar to a manual "Undo" or a lightweight ACID rollback. [ref to `Rollback data`_]
+* **Revertable**: Unlike traditional NoSQL stores, ``omni-json-db`` tracks internal states allowing you to unwrite (rollback a modification) or undelete a record. This provides a safety net similar to a manual "Undo" or a lightweight ACID rollback. [ref to `Rollback`_]
 
 * **Native CSV Support**: Built-in hooks for DictReader and DictWriter allow you to import massive datasets from CSV files or export your ``omni-json-db`` collections for analysis in Excel or Pandas.
 
@@ -61,8 +61,8 @@ Installation
 
    pip install omni-json-db
 
-Basic usage
------------
+Basic
+-----
 
 .. code-block:: python
 
@@ -72,51 +72,47 @@ Basic usage
    jdb = JDb("example.jdb")
 
    # Store data
-   jdb["user:001"] = {"name" : "Ryan", "role": "Developer"}
+   jdb["user1"] = {"name" : "Ryan", "role": "Developer"}
    
    # Retrieve data
-   user = jdb["user:001"]
-   print(user["name"]) # Output: Ryan
+   user = jdb["user1"]
+   print(user["name"], user["role"]) # Output: Ryan Developer
    
-All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``pop()``, ``setdefault()``, ``update()``.
+All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
 
-In-memory Mode
---------------
+In-memory
+---------
 
 .. code-block:: python
 
    from omni_json_db import JDb
    # Initialize the database in memory
-   # Key-Value is Json+Msgpack with Gzip compression
-   jdb = JDb(data_type="J+S", zip_type="gz")
+   jdb1 = JDb()
 
    # Store data
-   jdb += {"user:001" : {"name" : "Joe", "role": "Senior Developer"}}
+   jdb1 += {"user1" : {"name" : "Joe", "role": "Senior Developer"}}
    
    # Retrieve data
-   user = jdb["user:001"]
-   print(user["name"]) # Output: Joe
+   print(jdb1["user1"]["name"]) # Output: Joe
 
-   # create 2nd JDb with same memory
-   jdb2 = JDb(jdb)
+   # create 2nd JDb sharing same memory
+   jdb2 = JDb(jdb1)
 
-   # Store data
-   jdb2["user:002"] ={"name" : "Kathy", "role": "CEO"}
+   # Store data to 2nd JDb
+   jdb2["user2"] = {"name" : "Kathy", "role": "CEO"}
 
-   assert jdb == jdb2
-   assert len(jdb) == 2
-   print(jdb["user:002"]["name"]) # Output: Kathy
-   print(set(jdb)) # Output: {'user:001', 'user:002'}
+   # Retrieve the new inserted data (by 2nd JDb)
+   print(jdb1["user2"]["name"]) # Output: Kathy
 
-Rollback data
--------------
+Rollback
+--------
 
 .. code-block:: python
 
    from omni_json_db import JDb
    # Initialize the database from file
    # Key-Value is Json+Pickle with zstandard compression
-   jdb = JDb("fruit.jdb", data_type="J+P(zs)")
+   jdb = JDb("fruit.jdb", data_type="J+P", zip_type='zs')
 
    jdb["apple"] = "red"
    jdb["apple"] = "blue" # modify
@@ -129,8 +125,8 @@ Rollback data
    jdb.revert("apple") # unremove
    assert jdb["apple"] == "red"
 
-Query data
-----------
+Query
+-----
 
 .. code-block:: python
 
@@ -295,6 +291,8 @@ Operator
    assert jdb.has_any({'key10', 'key90', 'key110', 'key190'})
    assert jdb.is_disjoint({'key110', 'key190'})
 
+All standard ``set`` methods work: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
+
 Date Lookups
 ------------
 
@@ -372,8 +370,42 @@ Date Lookups
    jdb.keys[:] = today
    assert jdb[today] == fruits
 
-Advanced Usage
---------------
+Group
+-----
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   # Initialize the database from file
+   # Key-Value is Json+Json with no compression
+   jdb = JDb('fruit_group.jdb')
+
+   # add red group
+   r_jdb = jdb.add_group('red')
+   assert r_jdb is jdb['red']
+
+   # add yellow group
+   y_jdb = jdb.add_group('yellow')
+   assert y_jdb is jdb['yellow']
+
+   # add fruits to red group
+   r_jdb += {'apple': {'qty':1}, 'tomato': {'qty':2}}
+
+   # add fruits to yellow group
+   y_jdb += {'banana': {'qty':4}, 'lemon': {'qty':6}, 'mango': {'qty':8}}
+
+   # read group records
+   print(jdb['red']['apple']['qty'])   # Output: 1
+   print(jdb['red:::apple'])           # Output: {'red:::apple': {'qty': 1}}
+   print(jdb['yellow:::banana'])       # Output: {'yellow:::banana': {'qty': 4}}
+
+   # find fruits which contains 'a' from all groups
+   matches = jdb.find(r':::a')
+   print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+
+Advanced
+--------
 
 .. code-block:: python
 
@@ -458,8 +490,8 @@ Advanced Usage
 
    assert jdb == fruits
 
-Network Mode
--------------
+Network
+-------
 
 **Server side:**
 
@@ -565,7 +597,7 @@ Configure ``key_limit`` during initialization:
 
 * ``no``: ``dict`` for key_table (default)
 * ``bt``: ``BTree`` for key_table (save 44.3% vs ``dict``)
-* ``l0`` - ``l5``: ``LiteKeyTable`` modes (save 60-75%+ vs ``dict``)
+* ``l0`` - ``l5``: ``LiteKeyTable`` modes (save 60-75% vs ``dict``)
 
 **Table size = 3,241,854 keys**
 

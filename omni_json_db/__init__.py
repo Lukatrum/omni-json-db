@@ -8,16 +8,16 @@ from typing import Union
 from re import match as re_match
 from .jdb import JDb
 from .jdb_lite import JDbReader, SEP_SYM, JFlag
-from .jdb_file import JFilesBase, JBytesIO, JDiskFiles, JMemFiles
-from .jdb_io import JIo, LiteKeyTable, BTreeKeyTable
-from .jdb_net import JNetIO, JNetFiles, ThreadedTCPServer, ServerHandler
+from .jdb_file import JFilesBase, JDiskFiles, JMemFiles
+from .jdb_net import JNetFiles, ThreadedTCPServer, ServerHandler
+# from .jdb_io import JIo, LiteKeyTable, BTreeKeyTable
 
 __package_name__    = 'omni_json_db'
 __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, serverless JSON-based KV database. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.08.00'
+__version__         = '2.08.02'
 
 __all__ = [
     'JDb',
@@ -26,9 +26,10 @@ __all__ = [
     'JDiskFiles',
     'JMemFiles',
     'JNetFiles',
-    'loads',
+    'SEP_SYM',
     'dumps',
-    'run_files_server',
+    'loads',    
+    'run_files_server',    
 ]
 
 loads = JDb.z_loads

@@ -1,0 +1,9 @@
+bitarray
+brotli
+BTrees
+lz4
+msgpack
+orjson
+ormsgpack
+portalocker
+zstandard

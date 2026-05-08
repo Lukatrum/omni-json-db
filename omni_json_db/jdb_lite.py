@@ -1597,6 +1597,18 @@ class JDbReader:
         return self.io.n_lines
 
     @property
+    def index_size(self) -> int:
+        return self.io.index_size
+
+    @property
+    def reserved_rate(self) -> int:
+        return self.io.reserved_rate
+
+    @property
+    def min_value_size(self) -> int:
+        return self.io.min_value_size
+
+    @property
     def sync_id(self) -> int:
         return self.io.sync_id
 
@@ -1609,8 +1621,20 @@ class JDbReader:
         return self.io.remv_id
 
     @property
-    def key_limit(self) -> int:
-        return self.io._key_limit
+    def api_ver(self) -> int:
+        return self.io.api_ver
+
+    @property
+    def data_type(self) -> str:
+        return self.io.data_type_str
+
+    @property
+    def zip_type(self) -> str:
+        return self.io.zip_type_str
+        
+    @property
+    def key_limit(self) -> str:
+        return self.io.key_limit_str
 
     @key_limit.setter
     def key_limit(self, value:Union[int,str]):

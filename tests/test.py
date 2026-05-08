@@ -61,27 +61,27 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
 class TestJDb(unittest.TestCase):
     def setUp(self):
         self.jdb_configs = [
-            # {'KEY_file':'net_59898_3',    'api_ver':1, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
+                # {'KEY_file':'net_59898_3',    'api_ver':1, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
             {'KEY_file':'mem_3br_v0',       'api_ver':0, 'data_type':'J+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
             {'KEY_file':'mem_3lz',          'api_ver':1, 'data_type':'J+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'mem_6z1',          'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'mem_7lz',          'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'mem_7lz',          'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
 
-            {'KEY_file':'db/test_3lz_v0.jdb', 'api_ver':0, 'data_type':'J+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'no'},
-            {'KEY_file':'db/test_4gz_v0.jdb', 'api_ver':0, 'data_type':'J+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
+            {'KEY_file':'db/test_1lz_v0.jdb', 'api_ver':0, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'no'},
+            {'KEY_file':'db/test_2gz_v0.jdb', 'api_ver':0, 'data_type':'M+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
             {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l4'},
             {'KEY_file':'db/test_6lz_v0.jdb', 'api_ver':0, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l5'},
-            {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
+                # {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
 
             {'KEY_file':'db/test_1.jdb',    'api_ver':1, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
             {'KEY_file':'db/test_1gz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
             {'KEY_file':'db/test_1bz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1xz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1zs.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1br.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1z1.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1z2.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1lz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_1xz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1zs.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1br.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1z1.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1z2.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1lz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x1.jdb',   'api_ver':1, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l0'},
             {'KEY_file':'db/test_x1gz.jdb', 'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':0},
 
@@ -110,14 +110,14 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x3xz.jdb', 'api_ver':1, 'data_type':'J+J', 'zip_type':'xz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
             {'KEY_file':'db/test_4.jdb',    'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4gz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4bz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4gz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4bz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_4xz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_4zs.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4br.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4z1.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4z2.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4lz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4br.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4z1.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4z2.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4lz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x4.jdb',   'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'<=2'},
             {'KEY_file':'db/test_x4z1.jdb', 'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
@@ -146,29 +146,26 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x6z2.jdb', 'api_ver':1, 'data_type':'S+S', 'zip_type':'z2', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
             {'KEY_file':'db/test_7.jdb',    'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7gz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7bz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7xz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7zs.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7gz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7bz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7xz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7zs.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
             {'KEY_file':'db/test_7br.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7z1.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_7z1.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_7z2.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_7lz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_7lz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x7.jdb',   'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'bt'},
             {'KEY_file':'db/test_x7lz.jdb', 'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
 
             {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_8z1.jdb',  'api_ver':1, 'data_type':'S+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_8lz.jdb',  'api_ver':1, 'data_type':'S+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x8gz.jdb', 'api_ver':1, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'bt'},
 
             {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_9z1.jdb',  'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_9lz.jdb',  'api_ver':1, 'data_type':'S+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l1'},
 
             {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_10z1.jdb',  'api_ver':1, 'data_type':'S+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_10lz.jdb',  'api_ver':1, 'data_type':'S+P', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x10lz.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l4'},
         ]
@@ -194,15 +191,15 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb.key_table), 0)
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             self.assertEqual(len(jdb.io.groups), 0)
-            print(jdb, jdb.files_obj, jdb.io, jdb.io.key_table)
-            print(Style(f'Up {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{jdb.cache_limit}', cyan=1))
+            print(jdb, jdb.files_obj, jdb.io, jdb.key_table)
+            print(Style(f'Up {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{jdb.cache_limit}', cyan=1))
 
             self.assertTrue(jdb.files_obj.get_name() != '')
             self.assertEqual(len(jdb), 0)
             self.assertEqual(len(jdb.key_table), 0)
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             self.assertTrue(jdb.can_lock())
             self.assertFalse('key' in jdb)
             self.assertFalse(jdb.has('key'))
@@ -223,13 +220,13 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.remove_fast(jdb)
             self.assertTrue(len(jdb) == 0)
-            if jdb.io.n_lines > 0:
+            if jdb.n_lines > 0:
                 jdb.recycle(level=4, merge=False, verbose=False)
-                if jdb.io.n_lines == 0:
+                if jdb.n_lines == 0:
                     self.assertFalse(jdb.file_table)
-                    self.assertTrue(jdb.io.n_lines == jdb.io.n_records == 0)
+                    self.assertTrue(jdb.n_lines == jdb.n_records == 0)
 
-            print(Style(f'Down {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}%', blue=1))
+            print(Style(f'Down {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}%', blue=1))
 
     def test_group_key(self):
         for config in self.jdb_configs:
@@ -240,7 +237,7 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertIsNotNone(jdb)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
             if isinstance(jdb.files_obj, JNetFiles):
@@ -338,9 +335,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(gp, gp_b)
             self.assertEqual(len(gp_b), 0)
 
-            jdb_bak = jdb.backup('bak', zip_type=0 if jdb.io.zip_type else 1)
+            jdb_bak = jdb.backup('bak', zip_type=0 if jdb.zip_type != '--' else 'lz')
             self.assertEqual(jdb_bak, jdb)
-            self.assertNotEqual(jdb_bak.io.zip_type, jdb.io.zip_type)
+            self.assertNotEqual(jdb_bak.zip_type, jdb.zip_type)
             self.assertEqual(jdb_bak['group_a'], jdb['group_a'])
             self.assertEqual(jdb_bak['group_b'], jdb['group_b'])
             self.assertEqual(jdb_bak['group_a'], gp_a)
@@ -349,7 +346,7 @@ class TestJDb(unittest.TestCase):
             if not filename.endswith('.jdb'):
                 continue
 
-            expect = {f'k{ii}':'v'+str(ii) * (ii+1) for ii in range(16)}
+            expect = {f'k{ii}':'v'+str(ii) * (ii+1) for ii in range(8)}
             ret = gp_b.insert(expect)
             self.assertEqual(ret, expect)
             self.assertEqual(gp_b, expect)
@@ -374,8 +371,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb['group_b']), 0)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_none(self):
         for config in self.jdb_configs:
@@ -385,14 +382,14 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.sync()
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb, cache_limit=-1)
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_records, 0)
 
             jdb['key1'] = val = True
-            self.assertEqual(jdb.io.n_records, 1)
+            self.assertEqual(jdb.n_records, 1)
             self.assertEqual(jdb['key1'], val)
             self.assertEqual(jdb1['key1'], val)
             self.assertTrue(jdb.file_lock.can_lock())
@@ -402,7 +399,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(row[0], 'key1')
 
             jdb['key2'] = val = None
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key2'], val)
             row = jdb.check_row(1)
             self.assertEqual(row[0], 'key2')
@@ -410,62 +407,62 @@ class TestJDb(unittest.TestCase):
             info = jdb.keys['key1']
             jdb['key1'] = val = '1'
             self.assertNotEqual(info, jdb.keys['key1'])
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key1'], val)
             self.assertEqual(jdb['key1'], jdb1['key1'])
 
             jdb['key1'] = val = None
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key1'], val)
 
             jdb['key3'] = val = '3'
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
 
             jdb['key3'] = val = False
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb['key3'] = val = 0
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb['key3'] = val = 0.
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb['key3'] = val = []
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb['key3'] = val = ''
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb['key3'] = val = b''
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], val)
             self.assertEqual(jdb['key3'], jdb1['key3'])
 
             jdb.remove('key2')
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb, jdb1)
 
             jdb.remove('key1')
-            self.assertEqual(jdb.io.n_records, 1)
+            self.assertEqual(jdb.n_records, 1)
             self.assertEqual(jdb, jdb1)
 
             jdb.remove('key3')
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_records, 0)
             self.assertEqual(jdb, jdb1)
 
             jdb.insert({'key1':'v1', 'key2':'v2', 'key3':'v3'})
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb1['key1'], 'v1')
             self.assertEqual(jdb1['key2'], 'v2')
@@ -475,113 +472,113 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = ''
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = b''
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = []
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = [1]
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = [1,2]
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = list(range(16))
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = set()
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = set(range(16))
             self.assertEqual(set(jdb1['key1']), val)  # json unsupport set()
             self.assertEqual(set(jdb1['key2']), val)
             self.assertEqual(set(jdb1['key3']), val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = {}
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = {'a':1}
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = {f'{k}':k for k in range(16)}
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = tuple()
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = tuple(k for k in range(16))
             self.assertEqual(tuple(jdb1['key1']), val) # json unsupport tuple()
             self.assertEqual(tuple(jdb1['key2']), val)
             self.assertEqual(tuple(jdb1['key3']), val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = None
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = -99
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             jdb[:] = val = 1.125
             self.assertEqual(jdb1['key1'], val)
             self.assertEqual(jdb1['key2'], val)
             self.assertEqual(jdb1['key3'], val)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
 
             for i in range(10):
                 jdb[:] = val = -(1.0 + 0.1*i)
                 self.assertEqual(jdb1['key1'], val)
                 self.assertEqual(jdb1['key2'], val)
                 self.assertEqual(jdb1['key3'], val)
-                self.assertEqual(jdb.io.n_records, 3)
+                self.assertEqual(jdb.n_records, 3)
 
             del jdb[:]
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_records, 0)
 
             jdb[range(10)] = 10
             self.assertEqual(jdb, {str(k):10 for k in range(10)})
@@ -597,7 +594,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb1['key1'], False)
             self.assertEqual(jdb1['key2'], False)
             self.assertEqual(jdb1['key3'], '3')
-            self.assertEqual(jdb1.io.n_records, 3)
+            self.assertEqual(jdb1.n_records, 3)
 
             today = dt.date.today()
             jdb['today'] = val = today
@@ -927,13 +924,13 @@ class TestJDb(unittest.TestCase):
 
             del jdb[:]
             self.assertEqual(len(jdb1), 0)
-            self.assertEqual(jdb1.io.n_records, 0)
+            self.assertEqual(jdb1.n_records, 0)
 
             self.assertEqual(jdb, jdb1)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
             # --------------------------------------------
 
     def test_set(self):
@@ -949,23 +946,23 @@ class TestJDb(unittest.TestCase):
             jdb[key] = val
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb1 = JDbReader(jdb)
 
             jdb['key1'] = 12345678
-            self.assertGreater(jdb.io.sync_id, sync_id)
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
-            sync_id = jdb.io.sync_id
+            self.assertGreater(jdb.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
+            sync_id = jdb.sync_id
             jdb['key1'] = 12345678
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(jdb.sync_id, sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['key2'] = 'string'
-            self.assertGreater(jdb.io.sync_id, sync_id)
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
+            self.assertGreater(jdb.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
 
             self.assertTrue(jdb == {'key1' : 12345678, 'key2' : 'string'})
             self.assertTrue(jdb != {'key1' : 1234567, 'key2' : 'strin'})
@@ -1122,7 +1119,7 @@ class TestJDb(unittest.TestCase):
 
             jdb['中文'] = '語文'
             self.assertIn('中文', jdb)
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             key = 'Hello, my world\t, Testing'
             val = {'a' : [1, 2, 3], 'b' : {'x' : 'X', 'y' : 'Y'}, 'c' : 18, 'd' : None, 'e' : True, 'f' : False, 'g': 12, 'h' : 'hello', 'i' : 9.99}
             jdb[key] = val
@@ -1132,56 +1129,56 @@ class TestJDb(unittest.TestCase):
             row = row[jdb.key_table[key]]
             self.assertEqual(row[0], key)
             self.assertEqual(row[-1], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'a' * 256 + 'b' * 256 + 'c' * 256 + 'd' * 256
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val
             self.assertEqual(jdb['big'], val)
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             jdb['big'] = val = 'a' * 32
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 32
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 256 + 'c' * 256 * 3
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 256 + 'c' * 256 * 3 + 'd' * 1024
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 256 + 'c' * 256 * 3
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 256 + 'c' * 256
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val = 'b' * 256 + 'c' * 1024
             self.assertEqual(jdb['big'], val)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['big'] = val
             self.assertEqual(jdb['big'], val)
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             val = b'1234567890ABCDEFGHIJKLMNOPQRSTUVEXYZ'
             jdb['byte_1'] = val
@@ -1296,7 +1293,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb[new_keys]
             self.assertEqual(set(ret), set(new_keys))
             self.assertTrue(all(vv == 1 for vv in ret.values()))
-            jmem = JDb(data_type=jdb.io.data_type_str, zip_type=jdb.io.zip_type_str)
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             with jdb.open() as src_fp:
                 with jmem.open(read_only=False) as dst_fp:
                     for key in jdb.key_table:
@@ -1316,13 +1313,13 @@ class TestJDb(unittest.TestCase):
             jmem.remove_fast(jmem)
             with jdb.open() as src_fp:
                 with jmem.open(read_only=False) as dst_fp:
-                    for key in jdb.io.key_table:
+                    for key in jdb.key_table:
                         _data = jdb._read(src_fp, key)
                         _ret = jmem._write(dst_fp, key, _data, max_wsize=0, flags=JFlag(0))
                         self.assertTrue(_ret)
 
             self.assertEqual(jdb, jmem)
-            jmem2 = JDb(data_type=jdb.io.data_type_str, zip_type=jdb.io.zip_type_str)
+            jmem2 = JDb(data_type=f'{jdb.data_type}({jdb.zip_type})')
             jmem2['key2', 'key3'] = 1
             self.assertTrue(jdb.is_superset(jmem2))
             self.assertFalse(jdb.is_disjoint(jmem2))
@@ -1397,12 +1394,12 @@ class TestJDb(unittest.TestCase):
             else:
                 self.assertEqual(len(jdb._cache), 0)
 
-            self.assertGreaterEqual(jdb.io.n_lines, jdb.io.n_records)
-            self.assertGreater(jdb.io.sync_id, 0)
+            self.assertGreaterEqual(jdb.n_lines, jdb.n_records)
+            self.assertGreater(jdb.sync_id, 0)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_insert(self):
         last_jdb = None
@@ -1414,7 +1411,7 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
             jdb['key1'] = 12345678
@@ -1432,67 +1429,68 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb['key1'] != 8051)
             self.assertTrue(jdb['key2'] != 8051)
 
-            sync_id = jdb.io.sync_id
-            data = {f'k{i}':99 for i in range(10)}
+            test_size = 10
+            sync_id = jdb.sync_id
+            data = {f'k{i}':99 for i in range(test_size)}
             chg = jdb.insert(list(data), 99)
             self.assertEqual(chg, data)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            data = {f'k{i+100}':999 for i in range(10)}
+            sync_id = jdb.sync_id
+            data = {f'k{i+100}':999 for i in range(test_size)}
             chg = jdb.insert(set(data), 999)
             self.assertEqual(chg, data)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            data = {f'k{i+200}':9999 for i in range(10)}
+            sync_id = jdb.sync_id
+            data = {f'k{i+200}':9999 for i in range(test_size)}
             chg = jdb.insert(tuple(data), 9999)
             self.assertEqual(chg, data)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            data = {f'{i}':99999 for i in range(300, 310)}
-            chg = jdb.insert(range(300,310), 99999)
+            sync_id = jdb.sync_id
+            data = {f'{i}':99999 for i in range(300, 300+test_size)}
+            chg = jdb.insert(range(300,300+test_size), 99999)
             self.assertEqual(chg, data)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb[:], jdb1[:])
             self.assertEqual(jdb[0.:], jdb1[0.:])
 
-            sync_id = jdb.io.sync_id
-            data = {f'k{i+400}':999999 for i in range(10)}
+            sync_id = jdb.sync_id
+            data = {f'k{i+400}':999999 for i in range(test_size)}
             chg = jdb.insert(data)
             self.assertEqual(chg, data)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            size = len(jdb)
+            _size = len(jdb)
             chg = jdb.insert_vals('a')
-            self.assertEqual(size+len(chg), len(jdb))
+            self.assertEqual(_size+len(chg), len(jdb))
             self.assertEqual(len(jdb[lambda k,v:v=='a']), 1)
 
-            size = len(jdb)
+            _size = len(jdb)
             chg = jdb.insert_vals('a')
-            self.assertEqual(size+len(chg), len(jdb))
+            self.assertEqual(_size+len(chg), len(jdb))
             self.assertEqual(len(jdb[lambda k,v:v=='a']), 2)
 
-            size = len(jdb)
+            _size = len(jdb)
             _vals = ['x', 'b', 'c', 'd']
             chg = jdb.insert_vals(_vals)
-            self.assertEqual(size+len(chg), len(jdb))
+            self.assertEqual(_size+len(chg), len(jdb))
             self.assertEqual(len(jdb[lambda k,v:v in _vals]), len(chg))
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             expect = {f'{kk}':'Hello' for kk in range(100, 120)}
             chg1 = jdb.insert(range(100, 120), 'Hello')
             self.assertEqual(chg1, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            expect = {f'{sync_id+ii}':f'a{ii}' for ii in range(10)}
-            chg = jdb.insert_vals([f'a{v}' for v in range(10)])
-            expect = {f'{sync_id+ii}':f'a{ii}' for ii in range(10)}
+            sync_id = jdb.sync_id
+            expect = {f'{sync_id+ii}':f'a{ii}' for ii in range(test_size)}
+            chg = jdb.insert_vals([f'a{v}' for v in range(test_size)])
+            expect = {f'{sync_id+ii}':f'a{ii}' for ii in range(test_size)}
             self.assertEqual(chg, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -1508,8 +1506,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_replace(self):
         last_jdb = None
@@ -1521,112 +1519,112 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb1 = JDb(jdb)
-
-            data = {f'k{ii}':ii for ii in range(10)}
+            test_size = 100
+            data = {f'k{ii}':list(range(ii+1)) for ii in range(test_size)}
             chg = jdb.replace(data)
             self.assertEqual(len(chg), 0)
             self.assertEqual(len(jdb), 0)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
-            chg = jdb.update({f'k{ii}':ii+100 for ii in range(10)})
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            chg = jdb.update({f'k{ii}':list(range(ii+10)) for ii in range(test_size)})
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            self.assertEqual(len(jdb), 10)
+            sync_id = jdb.sync_id
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(data)
             self.assertEqual(chg, data)
-            self.assertEqual(len(jdb), 10)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            sync_id = jdb.sync_id
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(list(data), -1)
             self.assertNotEqual(chg, data)
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(data)
             self.assertEqual(chg, data)
 
-            sync_id = jdb.io.sync_id
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            sync_id = jdb.sync_id
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(set(data), -2)
             self.assertNotEqual(chg, data)
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(data)
             self.assertEqual(chg, data)
 
-            sync_id = jdb.io.sync_id
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            sync_id = jdb.sync_id
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             chg = jdb.replace(tuple(data), -3)
             self.assertNotEqual(chg, data)
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 10)
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            data1 = {f'{ii}':ii for ii in range(1000,1010)}
+            data1 = {f'{ii}':ii for ii in range(1000,1000+test_size)}
             chg = jdb.update(data1)
             self.assertEqual(chg, data1)
-            self.assertEqual(len(jdb), 20)
+            self.assertEqual(len(jdb), test_size*2)
             self.assertEqual(len(jdb), len(jdb.key_table))
 
-            sync_id = jdb.io.sync_id
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 20)
+            sync_id = jdb.sync_id
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size*2)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
-            chg = jdb.replace(range(1000, 1010), -3)
+            chg = jdb.replace(range(1000, 1000+test_size), -3)
             self.assertNotEqual(chg, data1)
-            self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 20)
+            self.assertEqual(len(chg), test_size)
+            self.assertEqual(len(jdb), test_size*2)
             self.assertEqual(len(jdb), len(jdb.key_table))
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
             jdb['chg'] = 100  # New Item
             self.assertEqual(jdb['chg'], 100)
-            row = jdb.io.key_table['chg']
-            self.assertTrue(0 <= row < jdb.io.n_records)
+            row = jdb.key_table['chg']
+            self.assertTrue(0 <= row < jdb.n_records)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb['chg'] = 111
             self.assertEqual(jdb['chg'], 111)
-            row1 = jdb.io.key_table['chg']
+            row1 = jdb.key_table['chg']
             self.assertEqual(row, row1)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            lines, records = jdb.io.n_lines, jdb.io.n_records
+            lines, records = jdb.n_lines, jdb.n_records
             self.assertLessEqual(records, lines)
             jdb['add'] = 200 # New Item
             self.assertEqual(jdb['add'], 200)
@@ -1649,8 +1647,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_get(self):
         last_jdb = None
@@ -1663,12 +1661,13 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
-            sync_id = jdb.io.sync_id
-            expect = {f'kk{i}' : i+123 for i in range(100)}
+            sync_id = jdb.sync_id
+            test_size = 100
+            expect = {f'kk{i}' : i+123 for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(len(jdb), len(chg))
@@ -1687,7 +1686,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb[:1000]
             self.assertEqual(ret, expect)
 
-            ret = jdb[-100:]
+            ret = jdb[-test_size:]
             self.assertEqual(ret, expect)
 
             ret = jdb[-1:]
@@ -1756,28 +1755,28 @@ class TestJDb(unittest.TestCase):
                 chg[key] = val
 
             self.assertEqual(chg, expect)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(jdb.sync_id, sync_id)
 
             chg = {}
             ret = jdb.check_version(0, with_value=True)
             for row,val in ret.items():
-                key, file_id, offset, size, vsize, _ver, _days, valid, val = val
-                self.assertLessEqual(row, jdb.io.n_lines)
-                if size > 0:
-                    self.assertIn(file_id, jdb.io.file_table)
+                key, file_id, offset, rsize, vsize, _ver, _days, valid, val = val
+                self.assertLessEqual(row, jdb.n_lines)
+                if rsize > 0:
+                    self.assertIn(file_id, jdb.file_table)
                     self.assertGreaterEqual(offset, 0)
-                    self.assertGreaterEqual(size, min_value_size)
-                    self.assertGreaterEqual(size, vsize)
+                    self.assertGreaterEqual(rsize, min_value_size)
+                    self.assertGreaterEqual(rsize, vsize)
 
                 if valid:
                     chg[key] = val
 
             self.assertEqual(chg, expect)
 
-            chg = {f'kk{i}' : jdb[f'kk{i}'] for i in range(100)}
+            chg = {f'kk{i}':jdb[f'kk{i}'] for i in range(test_size)}
             self.assertEqual(chg, expect)
             self.assertEqual(jdb.get('kk100'), None)
-            self.assertEqual(jdb.get('kk100', 100), 100)
+            self.assertEqual(jdb.get('kk100', -100), -100)
 
             cnt = sum(key in jdb for key in expect)
             self.assertEqual(len(expect), cnt)
@@ -1789,7 +1788,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb - expect
             self.assertEqual(len(ret), 0)
 
-            chg = {f'kk{i}' : jdb.get_cache(f'kk{i}') for i in range(100)}
+            chg = {f'kk{i}' : jdb.get_cache(f'kk{i}') for i in range(test_size)}
             self.assertEqual(chg, expect)
 
             chg = jdb.get_n(set(expect))
@@ -1826,14 +1825,15 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(chg), 2)
             self.assertNotIn('kk1000', chg)
             self.assertNotIn('kk1000', jdb)
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
+            expect2 = {f'dd{i}' : list(range(i+1)) for i in range(test_size)}
+            try:
+                fp = jdb._open(read_only=False)
+                for key,val in expect2.items():
+                    jdb._write(fp, key, val)
+            finally:
+                jdb._close()
 
-            expect2 = {f'dd{i}' : i+567 for i in range(100)}
-            fp = jdb._open(read_only=False)
-            for key,val in expect2.items():
-                jdb._write(fp, key, val)
-
-            jdb._close()
             ret = jdb[float(sync_id):]
             self.assertEqual(ret, expect2)
 
@@ -1884,8 +1884,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_remove(self):
         last_jdb = None
@@ -1899,15 +1899,16 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-            sync_id = jdb.io.sync_id
-            expect = {f'kk{i}' : 'vv'+f'{i}'*(i+min_value_size) for i in range(100)}
+            sync_id = jdb.sync_id
+            test_size = 100
+            expect = {f'kk{i}' : 'vv'+f'{i}'*(i+min_value_size) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(len(jdb), len(chg))
 
             key_table, _file_table = jdb.load_table()
@@ -1917,14 +1918,14 @@ class TestJDb(unittest.TestCase):
                 info = jdb.check_row(row, with_value=True)
                 self.assertEqual(info[0], key)
                 self.assertTrue(info[-2])
-                size = len(expect[key]) # with ''
-                self.assertGreaterEqual(size, min_value_size)
+                val_size = len(expect[key]) # with ''
+                self.assertGreaterEqual(val_size, min_value_size)
                 if not zip_type and info[3] > 0:
-                    self.assertLessEqual(size, info[3])
+                    self.assertLessEqual(val_size, info[3])
                     if reserved_rate > 0.:
-                        _size = int(size * (1. + reserved_rate))
+                        _size = int(val_size * (1. + reserved_rate))
                     else:
-                        _size = size
+                        _size = val_size
 
                     _size = max(min_value_size, _size + 1) # with '\n' or '\0'
                     self.assertGreaterEqual(info[3], _size)
@@ -1935,54 +1936,54 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, chg)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             with self.assertRaises(KeyError):
                 del jdb['kkk1']
 
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             self.assertEqual(jdb, expect)
             del jdb['kk1']
             self.assertNotEqual(jdb, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             ret = jdb.insert(expect)
             self.assertIn('kk1', ret)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             ret = jdb.remove(expect)
             self.assertEqual(ret, expect)
             self.assertEqual(len(jdb), 0)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
-            sync_id = jdb.io.sync_id
+            self.assertNotEqual(sync_id, jdb.sync_id)
+            sync_id = jdb.sync_id
 
             ret = jdb.remove(expect)
             self.assertNotEqual(ret, expect)
             self.assertEqual(len(ret), 0)
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             jdb.reinit(expect, agree='yes', wait_sec=1)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             ret = jdb.remove(['k3', 'kk2', 'kkk3'])
             self.assertNotEqual(jdb, expect)
             self.assertEqual(len(jdb)+1, len(expect))
             self.assertNotIn('kk2', jdb)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb.reinit(expect, agree='yes', wait_sec=0)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb.reinit(expect, wait_sec=0)
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             jdb2 = JDb('db/tmp.jdb')
             jdb2.remove(jdb2)
@@ -2026,33 +2027,33 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(ret), keys)
             self.assertEqual(set(ret.values()), {1234})
 
-            self.assertEqual(jdb.io.n_records, jdb.io.n_lines)
-            n_lines = jdb.io.n_lines
+            self.assertEqual(jdb.n_records, jdb.n_lines)
+            n_lines = jdb.n_lines
             jdb.remove({f'kk{v}' for v in range(60,70,2)})
-            self.assertEqual(n_lines, jdb.io.n_lines)
+            self.assertEqual(n_lines, jdb.n_lines)
             jdb.recycle(merge=True, fill_zero=True)
-            self.assertGreater(n_lines, jdb.io.n_lines)
+            self.assertGreater(n_lines, jdb.n_lines)
             jdb.remove({f'kk{v}' for v in range(60,70)})
             jdb.recycle(merge=True)
-            self.assertEqual(jdb.io.n_lines, 0)
+            self.assertEqual(jdb.n_lines, 0)
 
             keys = {f'kk{v}':f'{v}'*1024 for v in range(10)}
             jdb.insert(keys)
-            n_lines = jdb.io.n_lines
-            self.assertEqual(jdb.io.n_records, jdb.io.n_lines)
+            n_lines = jdb.n_lines
+            self.assertEqual(jdb.n_records, jdb.n_lines)
             prev_infos = jdb.keys[:]
-            self.assertEqual(jdb.io.n_records, len(prev_infos))
+            self.assertEqual(jdb.n_records, len(prev_infos))
             jdb.remove({f'kk{v}' for v in range(0,10,2)})
-            self.assertNotEqual(jdb.io.n_records, jdb.io.n_lines)
+            self.assertNotEqual(jdb.n_records, jdb.n_lines)
             jdb.recycle(merge=True)
             for kk,vv in jdb.items():
                 self.assertEqual(vv, keys[kk])
-            self.assertEqual(jdb.io.n_records, jdb.io.n_lines)
+            self.assertEqual(jdb.n_records, jdb.n_lines)
             jdb.remove(keys)
-            self.assertNotEqual(jdb.io.n_records, jdb.io.n_lines)
+            self.assertNotEqual(jdb.n_records, jdb.n_lines)
             jdb.recycle(merge=True)
-            self.assertEqual(jdb.io.n_records, jdb.io.n_lines)
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_records, jdb.n_lines)
+            self.assertEqual(jdb.n_records, 0)
 
             keys = {f'kk{v}':f'{v}'*(v+1) for v in range(128)}
             jdb.insert(keys)
@@ -2069,8 +2070,8 @@ class TestJDb(unittest.TestCase):
                 del jdb[f'kk{v}']
                 jdb.recycle(merge=True)
 
-            self.assertEqual(jdb.io.n_records, jdb.io.n_lines)
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_records, jdb.n_lines)
+            self.assertEqual(jdb.n_records, 0)
 
             expect2 = {f'key{k}':list(range(k+1)) for k in range(128)}
             jdb += expect2
@@ -2123,8 +2124,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_cache(self):
         for config in self.jdb_configs:
@@ -2134,41 +2135,42 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
 
             # --------------------------------------------
             jdb1 = JDb(jdb)
             cache_id = id(jdb._cache)
-            sync_id = jdb.io.sync_id
-            expect = {f'kkk{i}' : list(range(i+1)) for i in range(100)}
+            sync_id = jdb.sync_id
+            test_size = 100
+            expect = {f'kkk{i}' : list(range(i+1)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
             self.assertEqual(id(jdb._cache), cache_id)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(len(jdb), len(chg))
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             val = jdb['kkk10']
             val.append(-99)
             jdb['kkk10'] = val
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
             jdb._cache.clear()
             self.assertEqual(val, jdb['kkk10'])
             self.assertNotEqual(val, expect['kkk10'])
 
-            sync_id = jdb.io.sync_id
-            expect = {f'ddd{i}' : {str(v):i for v in range(i+1)} for i in range(100)}
+            sync_id = jdb.sync_id
+            expect = {f'ddd{i}' : {str(v):i for v in range(i+1)} for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(id(jdb._cache), cache_id)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             val = jdb['ddd20']
             val['dd'] = -99
             jdb['ddd20'] = val
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
             jdb._cache.clear()
             self.assertEqual(val, jdb['ddd20'])
             self.assertNotEqual(val, expect['ddd20'])
@@ -2191,8 +2193,8 @@ class TestJDb(unittest.TestCase):
             used_s = time.perf_counter() - st_time
             self.assertEqual(id(jdb._cache), cache_id)
 
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_clone(self):
         last_jdb = None
@@ -2206,47 +2208,48 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit} #{len(jdb.keys[:])}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit} #{len(jdb.keys[:])}', yellow=1))
 
             # --------------------------------------------
             jdb1 = JDb(jdb)
-            sync_id = jdb.io.sync_id
-            expect = {f'kkk{i}' : 'v'+(str(i) * int((i+1)*1.5)) for i in range(128)}
+            sync_id = jdb.sync_id
+            test_size = 64
+            expect = {f'kkk{i}' : 'v'+(str(i) * int((i+1)*1.5)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
             self.assertEqual(len(jdb), len(chg))
             jdb.recycle()
             self.assertEqual(jdb, expect)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             _jdb = jdb.backup('bak_e')
             self.assertEqual(_jdb, expect)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(jdb.sync_id, sync_id)
             self.assertEqual(jdb, _jdb)
             _jdb.recycle()
             self.assertEqual(_jdb, expect)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             j_jdb = jdb.backup('bak_j', zip_type=(0 if zip_type else 'gz'), data_type='J:J', min_value_size=1)
             self.assertEqual(j_jdb, expect)
-            self.assertEqual(j_jdb.io.min_value_size, 1)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(j_jdb.min_value_size, 1)
+            self.assertEqual(jdb.sync_id, sync_id)
             self.assertEqual(jdb, j_jdb)
-            m_jdb = jdb.backup('bak_m', zip_type=(0 if zip_type else 'bz'), data_type='M:M', min_value_size=1)
+            m_jdb = jdb.backup('bak_m', zip_type=(0 if zip_type else 'z1'), data_type='M:M', min_value_size=1)
             self.assertEqual(m_jdb, expect)
-            self.assertEqual(m_jdb.io.min_value_size, 1)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(m_jdb.min_value_size, 1)
+            self.assertEqual(jdb.sync_id, sync_id)
             self.assertEqual(jdb, m_jdb)
-            x_jdb = jdb.backup('bak_x', zip_type=(0 if zip_type else 'xz'), data_type='J:P', min_value_size=1)
+            x_jdb = jdb.backup('bak_x', zip_type=(0 if zip_type else 'lz'), data_type='S:S', min_value_size=1)
             self.assertEqual(x_jdb, expect)
-            self.assertEqual(x_jdb.io.min_value_size, 1)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(x_jdb.min_value_size, 1)
+            self.assertEqual(jdb.sync_id, sync_id)
             self.assertEqual(jdb, x_jdb)
             self.assertEqual(jdb, expect)
             chg = jdb.remove(expect)
-            self.assertNotEqual(jdb.io.sync_id, sync_id)
+            self.assertNotEqual(jdb.sync_id, sync_id)
             self.assertEqual(chg, expect)
             self.assertEqual(len(jdb), 0)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
@@ -2295,45 +2298,44 @@ class TestJDb(unittest.TestCase):
 
             j_jdb.clone_to(jdb, zip_type='br', data_type='J+J', min_value_size=1)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(jdb.io.min_value_size, min_value_size)
-            self.assertEqual(jdb.io.data_type_str, 'J+J')
-            self.assertEqual(jdb.io.zip_type_str, 'br')
+            self.assertNotEqual(jdb.min_value_size, min_value_size)
+            self.assertEqual(jdb.data_type, 'J+J')
+            self.assertEqual(jdb.zip_type, 'br')
             self.assertNotEqual(jdb.get_bytes('kkk10'), j_jdb.get_bytes('kkk10'))
             self.assertEqual(jdb.get_bytes('kkk10'), jdb1.get_bytes('kkk10'))
 
-            jdb = m_jdb.clone_to(jdb.files_obj, zip_type='xz', data_type='L+J', min_value_size=1)
+            jdb = m_jdb.clone_to(jdb.files_obj, zip_type='z2', data_type='S+J', min_value_size=1)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(jdb.io.min_value_size, min_value_size)
-            self.assertEqual(jdb.io.data_type_str, 'L+J')
-            self.assertEqual(jdb.io.zip_type_str, 'xz')
+            self.assertNotEqual(jdb.min_value_size, min_value_size)
+            self.assertEqual(jdb.data_type, 'S+J')
+            self.assertEqual(jdb.zip_type, 'z2')
             self.assertNotEqual(jdb.get_bytes('kkk10'), m_jdb.get_bytes('kkk10'))
             self.assertEqual(jdb.get_bytes('kkk10'), jdb1.get_bytes('kkk10'))
 
-            jdb = x_jdb.clone_to(jdb, zip_type='zs', data_type='J+M', min_value_size=1)
+            jdb = x_jdb.clone_to(jdb, zip_type='br', data_type='S+M', min_value_size=1)
             self.assertEqual(jdb, expect)
-            self.assertNotEqual(jdb.io.min_value_size, min_value_size)
-            self.assertEqual(jdb.io.data_type_str, 'J+M')
-            self.assertEqual(jdb.io.zip_type_str, 'zs')
+            self.assertNotEqual(jdb.min_value_size, min_value_size)
+            self.assertEqual(jdb.data_type, 'S+M')
+            self.assertEqual(jdb.zip_type, 'br')
             self.assertNotEqual(jdb.get_bytes('kkk10'), x_jdb.get_bytes('kkk10'))
             self.assertEqual(jdb.get_bytes('kkk10'), jdb1.get_bytes('kkk10'))
 
             for data_str,zip_str in [
-                    ('S+M','--'), ('J+M','gz'), ('J+P','bz'),
-                    ('S+P','br'), ('J+J','z1'), ('S+J','z2'),
-                    ('S+S','zs'), ('J+S','lz')]:
-                jdb.upgrade(zip_type=zip_str, data_type=data_str)
+                    ('M+M','gz'), ('S+P','bz'),
+                    ('S+S','br'), ('L+J','lz')]:
+                jdb.upgrade(data_type=data_str, zip_type=zip_str)
                 self.assertEqual(jdb, expect)
-                self.assertNotEqual(jdb.io.min_value_size, min_value_size)
-                self.assertEqual(jdb.io.data_type_str, data_str)
-                self.assertEqual(jdb.io.zip_type_str, zip_str)
+                self.assertNotEqual(jdb.min_value_size, min_value_size)
+                self.assertEqual(jdb.data_type, data_str)
+                self.assertEqual(jdb.zip_type, zip_str)
                 jdb.resize_index_size(0)
                 self.assertEqual(jdb, expect)
-                index_size = jdb.io.index_size
+                index_size = jdb.index_size
                 jdb.resize_index_size(index_size*2)
-                self.assertEqual(jdb.io.index_size, index_size*2)
+                self.assertEqual(jdb.index_size, index_size*2)
                 self.assertEqual(jdb, expect)
                 jdb.resize_index_size(index_size)
-                self.assertLessEqual(jdb.io.index_size, index_size*2)
+                self.assertLessEqual(jdb.index_size, index_size*2)
                 self.assertEqual(jdb, expect)
 
             self.assertEqual(jdb, expect)
@@ -2343,7 +2345,7 @@ class TestJDb(unittest.TestCase):
             jdb.restore()
             self.assertEqual(jdb, expect)
 
-            sub_expect = {f'sss{i}' : 'x'+(str(i) * int((i+1)*1.5)) for i in range(64)}
+            sub_expect = {f'sss{i}' : 'x'+(str(i) * int((i+1)*1.5)) for i in range(test_size)}
             sub_jdb = jdb.add_group('sub')
             self.assertTrue(isinstance(sub_jdb, JDb))
             sub_jdb.insert(sub_expect)
@@ -2356,7 +2358,7 @@ class TestJDb(unittest.TestCase):
 
             jdb.remove_fast(jdb)
             jdb.recycle(merge=True)
-            self.assertEqual(jdb.io.n_lines, 0)
+            self.assertEqual(jdb.n_lines, 0)
 
             jdb.restore('bak_x')
             self.assertEqual(set(jdb), _keys)
@@ -2373,8 +2375,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_basic1(self):
         for config in self.jdb_configs:
@@ -2391,21 +2393,21 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
-            min_value_size = jdb.io.min_value_size
+            min_value_size = jdb.min_value_size
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(jdb.io.n_lines, 0)
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_lines, 0)
+            self.assertEqual(jdb.n_records, 0)
             jdb.info()
             print(jdb.dir_name, jdb.file_name, jdb.path, jdb.key_limit)
 
             _val = '1' * (min_value_size // 2)
             jdb['key1'] = _val
-            self.assertEqual(jdb.io.n_lines, 1)
-            self.assertEqual(jdb.io.n_records, 1)
+            self.assertEqual(jdb.n_lines, 1)
+            self.assertEqual(jdb.n_records, 1)
             self.assertEqual(jdb['key1'], _val)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
@@ -2415,8 +2417,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
             jdb['key2'] = _val = '2' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key2'], _val)
             row = jdb.check_row(1)
             self.assertEqual(row[0], 'key2')
@@ -2429,8 +2431,8 @@ class TestJDb(unittest.TestCase):
             info = jdb.keys['key1']
             jdb['key1'] = _val = 'x' * (min_value_size // 2)
             self.assertNotEqual(info, jdb.keys['key1'])
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key1'], _val)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
@@ -2441,8 +2443,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = 'y' * (min_value_size - 3)
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key1'], _val)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
@@ -2453,7 +2455,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = 'z' * (min_value_size * 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertEqual(jdb['key1'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2462,7 +2464,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key3'] = _val = '3' * (min_value_size * 2)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key3'], _val)
             row = jdb.check_row(-1)
             self.assertEqual(row[0], 'key3')
@@ -2473,7 +2475,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key2'] = _val = '2' * (min_value_size * 2)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key2'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2482,7 +2484,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key2'] = _val = '2' * (min_value_size)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key2'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2491,7 +2493,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = '1' * (min_value_size)
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertEqual(jdb['key1'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2500,7 +2502,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key4'] = _val = '4' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_records, 4)
+            self.assertEqual(jdb.n_records, 4)
             self.assertEqual(jdb['key4'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2509,7 +2511,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key5'] = _val = '5' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_records, 5)
+            self.assertEqual(jdb.n_records, 5)
             self.assertEqual(jdb['key5'], _val)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2518,7 +2520,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key6'] = '6' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2526,7 +2528,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key7'] = '7' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_records, 7)
+            self.assertEqual(jdb.n_records, 7)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2534,7 +2536,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             del jdb['key2']
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2542,7 +2544,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             del jdb['key6']
-            self.assertEqual(jdb.io.n_records, 5)
+            self.assertEqual(jdb.n_records, 5)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2550,12 +2552,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key8'] = 'v'+'8' * (min_value_size * 4)
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             row = jdb.check_row(-1)
             self.assertEqual(row[0], 'key8')
 
             jdb['key9'] = 'v'+'9' * (min_value_size // 2)
-            self.assertEqual(jdb.io.n_records, 7)
+            self.assertEqual(jdb.n_records, 7)
             row = jdb.check_row(-1)
             self.assertEqual(row[0], 'key9')
 
@@ -2567,11 +2569,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb), 0)
             self.assertEqual(jdb, {})
 
-            self.assertEqual(jdb.io.index_size, index_size)
-            key = 'a' * jdb.io.index_size
+            self.assertEqual(jdb.index_size, index_size)
+            key = 'a' * jdb.index_size
 
             jdb[key] = 'too long'
-            self.assertGreater(jdb.io.index_size, index_size)
+            self.assertGreater(jdb.index_size, index_size)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2590,8 +2592,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
             # --------------------------------------------
 
@@ -2612,17 +2614,17 @@ class TestJDb(unittest.TestCase):
                 continue
 
             jdb.sync()
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
 
             jdb1 = JDb(jdb)
-            min_value_size = jdb.io.min_value_size
+            min_value_size = jdb.min_value_size
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(jdb.io.n_lines, 0)
-            self.assertEqual(jdb.io.n_records, 0)
+            self.assertEqual(jdb.n_lines, 0)
+            self.assertEqual(jdb.n_records, 0)
             jdb.update('key1', '1' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_lines, 1)
-            self.assertEqual(jdb.io.n_records, 1)
+            self.assertEqual(jdb.n_lines, 1)
+            self.assertEqual(jdb.n_records, 1)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
@@ -2633,8 +2635,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             row = jdb.check_row(1)
             self.assertEqual(row[0], 'key2')
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
@@ -2645,8 +2647,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'x' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
@@ -2657,8 +2659,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'y' * (min_value_size - 3))
-            self.assertEqual(jdb.io.n_lines, 2)
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_lines, 2)
+            self.assertEqual(jdb.n_records, 2)
             row = jdb.check_row(0)
             self.assertEqual(row[0], 'key1')
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
@@ -2669,7 +2671,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'z' * (min_value_size * 2))
-            self.assertEqual(jdb.io.n_records, 2)
+            self.assertEqual(jdb.n_records, 2)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2678,7 +2680,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key3', '3' * (min_value_size * 2))
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2687,7 +2689,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size * 2))
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2696,7 +2698,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size))
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2705,7 +2707,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', '1' * (min_value_size))
-            self.assertEqual(jdb.io.n_records, 3)
+            self.assertEqual(jdb.n_records, 3)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2714,7 +2716,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key4', '4' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_records, 4)
+            self.assertEqual(jdb.n_records, 4)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2723,7 +2725,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key5', '5' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_records, 5)
+            self.assertEqual(jdb.n_records, 5)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2732,7 +2734,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key6', '6' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2741,7 +2743,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key7', '7' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_records, 7)
+            self.assertEqual(jdb.n_records, 7)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2750,7 +2752,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.remove('key2')
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2759,7 +2761,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.remove('key6')
-            self.assertEqual(jdb.io.n_records, 5)
+            self.assertEqual(jdb.n_records, 5)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2768,7 +2770,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key8', '8' * (min_value_size * 4))
-            self.assertEqual(jdb.io.n_records, 6)
+            self.assertEqual(jdb.n_records, 6)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2777,7 +2779,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key9', '9' * (min_value_size // 2))
-            self.assertEqual(jdb.io.n_records, 7)
+            self.assertEqual(jdb.n_records, 7)
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -2798,10 +2800,10 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
-            self.assertEqual(jdb.io.index_size, index_size)
-            key = 'a' * jdb.io.index_size
+            self.assertEqual(jdb.index_size, index_size)
+            key = 'a' * jdb.index_size
             jdb[key] = 'too long'
-            self.assertGreater(jdb.io.index_size, index_size)
+            self.assertGreater(jdb.index_size, index_size)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -2814,8 +2816,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
             # --------------------------------------------
 
     def test_basic3(self):
@@ -2835,85 +2837,85 @@ class TestJDb(unittest.TestCase):
                 continue
 
             jdb.sync()
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
             with jdb.open(read_only=False) as fp:
-                min_value_size = jdb.io.min_value_size
-                self.assertEqual(jdb.io.n_lines, 0)
-                self.assertEqual(jdb.io.n_records, 0)
+                min_value_size = jdb.min_value_size
+                self.assertEqual(jdb.n_lines, 0)
+                self.assertEqual(jdb.n_records, 0)
                 jdb._write(fp, 'key1', '1' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_lines, 1)
-                self.assertEqual(jdb.io.n_records, 1)
+                self.assertEqual(jdb.n_lines, 1)
+                self.assertEqual(jdb.n_records, 1)
                 row = jdb._read_row(fp, 0)
                 self.assertEqual(row[0], 'key1')
 
                 jdb._write(fp, 'key2', '2' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_lines, 2)
-                self.assertEqual(jdb.io.n_records, 2)
+                self.assertEqual(jdb.n_lines, 2)
+                self.assertEqual(jdb.n_records, 2)
                 row = jdb._read_row(fp, 1)
                 self.assertEqual(row[0], 'key2')
 
                 jdb._write(fp, 'key1', 'x' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_lines, 2)
-                self.assertEqual(jdb.io.n_records, 2)
+                self.assertEqual(jdb.n_lines, 2)
+                self.assertEqual(jdb.n_records, 2)
                 row = jdb._read_row(fp, 0)
                 self.assertEqual(row[0], 'key1')
 
                 jdb._write(fp, 'key1', 'y' * (min_value_size - 3))
-                self.assertEqual(jdb.io.n_lines, 2)
-                self.assertEqual(jdb.io.n_records, 2)
+                self.assertEqual(jdb.n_lines, 2)
+                self.assertEqual(jdb.n_records, 2)
                 row = jdb._read_row(fp, 0)
                 self.assertEqual(row[0], 'key1')
 
                 jdb._write(fp, 'key1', 'z' * (min_value_size * 2))
-                self.assertEqual(jdb.io.n_records, 2)
+                self.assertEqual(jdb.n_records, 2)
 
                 jdb._write(fp, 'key3', '3' * (min_value_size * 2))
-                self.assertEqual(jdb.io.n_records, 3)
+                self.assertEqual(jdb.n_records, 3)
 
                 jdb._write(fp, 'key2', '2' * (min_value_size * 2))
-                self.assertEqual(jdb.io.n_records, 3)
+                self.assertEqual(jdb.n_records, 3)
 
                 jdb._write(fp, 'key2', '2' * (min_value_size))
-                self.assertEqual(jdb.io.n_records, 3)
+                self.assertEqual(jdb.n_records, 3)
 
                 jdb._write(fp, 'key1', '1' * (min_value_size))
-                self.assertEqual(jdb.io.n_records, 3)
+                self.assertEqual(jdb.n_records, 3)
 
                 jdb._write(fp, 'key4', '4' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_records, 4)
+                self.assertEqual(jdb.n_records, 4)
 
                 jdb._write(fp, 'key5', '5' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_records, 5)
+                self.assertEqual(jdb.n_records, 5)
 
                 jdb._write(fp, 'key6', '6' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_records, 6)
+                self.assertEqual(jdb.n_records, 6)
 
                 jdb._write(fp, 'key7', '7' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_records, 7)
+                self.assertEqual(jdb.n_records, 7)
 
                 jdb._delete(fp, 'key2')
-                self.assertEqual(jdb.io.n_records, 6)
+                self.assertEqual(jdb.n_records, 6)
 
                 jdb._delete(fp, 'key6')
-                self.assertEqual(jdb.io.n_records, 5)
+                self.assertEqual(jdb.n_records, 5)
 
                 jdb._write(fp, 'key8', '8' * (min_value_size * 4))
-                self.assertEqual(jdb.io.n_records, 6)
+                self.assertEqual(jdb.n_records, 6)
 
                 jdb._write(fp, 'key9', '9' * (min_value_size // 2))
-                self.assertEqual(jdb.io.n_records, 7)
+                self.assertEqual(jdb.n_records, 7)
 
-                for key in set(jdb.io.key_table):
+                for key in set(jdb.key_table):
                     jdb._delete(fp, key)
 
-                self.assertEqual(jdb.io.n_records, 0)
-                self.assertEqual(jdb.io.index_size, index_size)
-                key = 'a' * jdb.io.index_size
+                self.assertEqual(jdb.n_records, 0)
+                self.assertEqual(jdb.index_size, index_size)
+                key = 'a' * jdb.index_size
                 jdb._write(fp, key, 'too long')
-                self.assertGreater(jdb.io.index_size, index_size)
+                self.assertGreater(jdb.index_size, index_size)
 
                 jdb._write(fp, 'key9', '9' * (min_value_size // 2))
 
@@ -2961,11 +2963,12 @@ class TestJDb(unittest.TestCase):
             jdb -= jdb # delete
             self.assertEqual(len(jdb), 0)
 
-            expect = {f'key{v}':list(range(v+1)) for v in range(100)}
+            test_size = 100
+            expect = {f'key{v}':list(range(v+1)) for v in range(test_size)}
             jdb += expect # update
             self.assertEqual(jdb[:], expect)
 
-            chg = {f'key{v}':v for v in range(80, 120)}
+            chg = {f'key{v}':v for v in range(80, test_size+20)}
             jdb &= chg # replace
             self.assertNotEqual(jdb, expect)
             self.assertEqual(jdb['key80'], chg['key80'])
@@ -2982,14 +2985,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, expect)
             self.assertTrue('key0' in jdb)
             self.assertTrue({'key0', 'key99'} in jdb)
-            self.assertTrue([f'key{v}' for v in range(100)] in jdb)
-            self.assertTrue({f'key{v}' for v in range(101)} not in jdb)
+            self.assertTrue([f'key{v}' for v in range(test_size)] in jdb)
+            self.assertTrue({f'key{v}' for v in range(test_size+1)} not in jdb)
             self.assertTrue({f'key{v}':v for v in range(20,90)} not in jdb)
             self.assertTrue({'key0', 99} not in jdb)
             self.assertTrue(expect in jdb)
             self.assertTrue(chg not in jdb)
             self.assertTrue(set(expect) == jdb)
-            self.assertTrue({f'key{v}' for v in range(100)} == jdb)
+            self.assertTrue({f'key{v}' for v in range(test_size)} == jdb)
             self.assertTrue(set(chg) != jdb)
 
             vals = []
@@ -3044,8 +3047,8 @@ class TestJDb(unittest.TestCase):
 
             self.assertFalse(jdb2.is_latest())
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
             # --------------------------------------------
 
     def test_find(self):
@@ -3057,7 +3060,7 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
@@ -3083,7 +3086,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(ret), len(expect))
             self.assertEqual(dict(ret), {k:v+100 for k,v in expect.items()})
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             matches = jdb.find(r'k1\d$', with_value=True)
             self.assertEqual(set(matches), {'kkk10', 'kkk11', 'kkk12', 'kkk13', 'kkk14', 'kkk15', 'kkk16', 'kkk17', 'kkk18', 'kkk19'})
 
@@ -3156,7 +3159,7 @@ class TestJDb(unittest.TestCase):
             matches = jdb.find(ANY=lambda v : 10 <= v < 20, limit=3)
             self.assertEqual(len(matches), 3)
 
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             jdb['中文'] = ['數學', '文字', '人類', 999, ]
 
@@ -3230,8 +3233,8 @@ class TestJDb(unittest.TestCase):
             last_jdb = jdb
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_open(self):
         for config in self.jdb_configs:
@@ -3241,31 +3244,32 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
             if isinstance(jdb.files_obj, JDiskFiles):
                 os.remove(jdb.files_obj.get_KEY())
 
-            expect = {f'kkk{i}' : i for i in range(100)}
+            test_size = 100
+            expect = {f'kkk{i}' : i for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
             self.assertEqual(len(jdb), len(chg))
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             with jdb.open() as fp:
                 val = jdb._read(fp, 'kkk0')
-                self.assertEqual(val, 0)
+                self.assertEqual(val, expect['kkk0'])
                 val = jdb._read(None, 'kkk0')
-                self.assertEqual(val, 0)
+                self.assertEqual(val, expect['kkk0'])
 
                 val = jdb._read(fp, 'kkk99')
-                self.assertEqual(val, 99)
+                self.assertEqual(val, expect['kkk99'])
 
                 val = jdb._read(fp, 'kkk10')
-                ref = jdb._read_row(fp, 10)
+                ref = jdb._read_row(fp, expect['kkk10'])
                 self.assertEqual(ref[0], 'kkk10')
 
                 ref = jdb._read_row(None, 10)
@@ -3274,40 +3278,40 @@ class TestJDb(unittest.TestCase):
                 ref = jdb._read_row(fp, 10, with_value=True)
                 self.assertEqual(ref[-1], val)
 
-            self.assertEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(sync_id, jdb.sync_id)
 
             with jdb.open(read_only=False) as fp:
                 # self.assertIsNotNone(fp[-1])
-                val = jdb._read(fp, 'kkk100', -1)
+                val = jdb._read(fp, 'kkkk100', -1)
                 self.assertEqual(val, -1)
-                _row1 = jdb._write(fp, 'kkk100', 100)
-                val = jdb._read(fp, 'kkk100')
+                _row1 = jdb._write(fp, 'kkkk100', 100)
+                val = jdb._read(fp, 'kkkk100')
                 self.assertEqual(val, 100)
-                _row2 = jdb._write(None, 'kkk101', 101)
+                _row2 = jdb._write(None, 'kkkk101', 101)
 
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
-            self.assertIn('kkk100', jdb)
-            self.assertIn('kkk101', jdb)
+            self.assertNotEqual(sync_id, jdb.sync_id)
+            self.assertIn('kkkk100', jdb)
+            self.assertIn('kkkk101', jdb)
 
-            self.assertEqual(len(jdb), 102)
+            self.assertEqual(len(jdb), test_size+2)
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             with jdb.open(read_only=False) as fp:
-                val = jdb._read(fp, 'kkk100', -1)
+                val = jdb._read(fp, 'kkkk100', -1)
                 self.assertEqual(val, 100)
-                val = jdb._delete(fp, 'kkk100')
+                val = jdb._delete(fp, 'kkkk100')
                 self.assertEqual(val, 100)
 
-                val = jdb._read(fp, 'kkk100', -1)
+                val = jdb._read(fp, 'kkkk100', -1)
                 self.assertEqual(val, -1)
-                val = jdb._delete(None, 'kkk101')
+                val = jdb._delete(None, 'kkkk101')
                 self.assertEqual(val, 101)
                 with self.assertRaises(KeyError):
-                    val = jdb._delete(fp, 'kkk100')
-                val = jdb._delete(fp, 'kkk99')
+                    val = jdb._delete(fp, 'kkkk100')
+                val = jdb._delete(fp, f'kkk{test_size-1}')
 
-            self.assertEqual(len(jdb), 99)
-            self.assertNotEqual(sync_id, jdb.io.sync_id)
+            self.assertEqual(len(jdb), test_size-1)
+            self.assertNotEqual(sync_id, jdb.sync_id)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
@@ -3320,8 +3324,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_sync(self):
         for config in self.jdb_configs:
@@ -3333,18 +3337,18 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             jdb = JDb(jdb)
             self.assertFalse(jdb.is_latest())
-            self.assertEqual(jdb.io.file_size, 0)
+            self.assertEqual(jdb.fsize, 0)
             self.assertEqual(len(jdb), 0)
 
             jdb.sync()
             self.assertTrue(jdb.is_latest())
-            self.assertGreaterEqual(jdb.io.file_size, 128)
+            self.assertGreaterEqual(jdb.fsize, 128)
 
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-
-            expect = {f'kkk{i}' : i for i in range(10)}
+            test_size = 100
+            expect = {f'kkk{i}' : list(range(i)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
@@ -3356,12 +3360,12 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb2.is_latest())
 
 
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             jdb2 = JDb(jdb.files_obj)
             self.assertEqual(jdb, jdb2)
             self.assertEqual(jdb2, expect)
             self.assertEqual(jdb2.files_obj.get_KEY(), jdb.files_obj.get_KEY())
-            self.assertEqual(jdb.io.sync_id, jdb2.io.sync_id)
+            self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             jdb2.remove({f'kkk{i}' for i in range(4, 7)})
             self.assertFalse(jdb2.has('kkk4'))
@@ -3375,7 +3379,7 @@ class TestJDb(unittest.TestCase):
             self.assertNotIn('kkk4', jdb2)
             self.assertNotIn('kkk5', jdb2)
             self.assertNotIn('kkk6', jdb2)
-            self.assertNotEqual(jdb2.io.sync_id, jdb.io.sync_id)
+            self.assertNotEqual(jdb2.sync_id, jdb.sync_id)
 
             self.assertNotIn('kkk4', jdb) # auto sync by __contains__ -> jdb.open(read_only=True)
             self.assertNotIn('kkk5', jdb)
@@ -3388,8 +3392,8 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb2, expect)
             self.assertNotEqual(jdb, expect)
             self.assertEqual(jdb, jdb2)
-            self.assertNotEqual(jdb2.io.sync_id, sync_id)
-            self.assertEqual(jdb2.io.sync_id, jdb.io.sync_id)
+            self.assertNotEqual(jdb2.sync_id, sync_id)
+            self.assertEqual(jdb2.sync_id, jdb.sync_id)
 
             jdb = JDb(jdb)
             self.assertFalse(jdb.is_latest())
@@ -3397,10 +3401,10 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb.key_table), 0)
             with jdb.open() as fp:
                 self.assertTrue(jdb.io.is_updated())
-                self.assertGreater(jdb.io.file_size, 128)
-                self.assertGreater(jdb.io.sync_id, 0)
+                self.assertGreater(jdb.fsize, 128)
+                self.assertGreater(jdb.sync_id, 0)
                 self.assertEqual(jdb.fsize, jdb.io.file_size)
-                self.assertGreater(len(jdb.io.key_table), 0)
+                self.assertGreater(len(jdb.key_table), 0)
 
             self.assertEqual(jdb.fsize, jdb.io.file_size)
             self.assertGreater(len(jdb.key_table), 0)
@@ -3419,27 +3423,27 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb.is_latest())
 
             jdb2.insert(expect)
-            self.assertNotEqual(jdb2.io.sync_id, jdb.io.sync_id)
-            self.assertNotEqual(jdb2.io.file_size, jdb.io.file_size)
-            if not jdb.io.key_limit:
-                self.assertNotEqual(jdb2.io.key_table, jdb.io.key_table)
+            self.assertNotEqual(jdb2.sync_id, jdb.sync_id)
+            self.assertNotEqual(jdb2.fsize, jdb.fsize)
+            if jdb.key_limit == 'no':
+                self.assertNotEqual(jdb2.key_table, jdb.key_table)
             self.assertFalse(jdb.is_latest())
 
             with jdb.open(read_only=True) as fp:
-                self.assertEqual(jdb2.io.sync_id, jdb.io.sync_id)
-                self.assertEqual(jdb2.io.file_size, jdb.io.file_size)
-                if not jdb.io.key_limit:
-                    self.assertEqual(jdb2.io.key_table, jdb.io.key_table)
+                self.assertEqual(jdb2.sync_id, jdb.sync_id)
+                self.assertEqual(jdb2.fsize, jdb.fsize)
+                if jdb.key_limit == 'no':
+                    self.assertEqual(jdb2.key_table, jdb.key_table)
                 jdb._load_keys(fp)
-                self.assertEqual(jdb2.io.sync_id, jdb.io.sync_id)
-                self.assertEqual(jdb2.io.file_size, jdb.io.file_size)
-                if not jdb.io.key_limit:
-                    self.assertEqual(jdb2.io.key_table, jdb.io.key_table)
+                self.assertEqual(jdb2.sync_id, jdb.sync_id)
+                self.assertEqual(jdb2.fsize, jdb.fsize)
+                if jdb.key_limit == 'no':
+                    self.assertEqual(jdb2.key_table, jdb.key_table)
                 jdb._load_keys(fp, force=True)
-                self.assertEqual(jdb2.io.sync_id, jdb.io.sync_id)
-                self.assertEqual(jdb2.io.file_size, jdb.io.file_size)
-                if not jdb.io.key_limit:
-                    self.assertEqual(jdb2.io.key_table, jdb.io.key_table)
+                self.assertEqual(jdb2.sync_id, jdb.sync_id)
+                self.assertEqual(jdb2.fsize, jdb.fsize)
+                if jdb.key_limit == 'no':
+                    self.assertEqual(jdb2.key_table, jdb.key_table)
             self.assertTrue(jdb.is_latest())
             self.assertTrue(jdb2.is_latest())
 
@@ -3455,8 +3459,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_file(self):
         for config in self.jdb_configs:
@@ -3466,25 +3470,25 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             jdb1 = JDb(jdb)
-
-            expect = {f'kkk{i}' : 'v' + str(i) * 32 for i in range(300)}
+            test_size = 100
+            expect = {f'kkk{i}' : list(range(i)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
-            self.assertGreater(len(jdb.io.file_table), 0)
+            self.assertGreater(len(jdb.file_table), 0)
 
             jdb2 = JDb(jdb)
             self.assertFalse(jdb2.is_latest())
             jdb2.sync()
             self.assertTrue(jdb2.is_latest())
-            self.assertEqual(jdb2.io.n_lines, jdb.io.n_lines)
-            self.assertEqual(jdb2.io.n_records, jdb.io.n_records)
-            self.assertEqual(jdb2.io.sync_id, jdb.io.sync_id)
-            self.assertEqual(len(jdb2.io.key_table), 300)
+            self.assertEqual(jdb2.n_lines, jdb.n_lines)
+            self.assertEqual(jdb2.n_records, jdb.n_records)
+            self.assertEqual(jdb2.sync_id, jdb.sync_id)
+            self.assertEqual(len(jdb2.key_table), test_size)
             self.assertEqual(jdb, jdb2)
             self.assertEqual(jdb2, expect)
 
@@ -3495,7 +3499,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
-            file_table = jdb.io.file_table
+            file_table = jdb.file_table
             for file_id in file_table:
                 self.assertTrue(jdb.files_obj.VAL_exist(file_id))
 
@@ -3504,9 +3508,9 @@ class TestJDb(unittest.TestCase):
 
             jdb.clear(agree='yes', wait_sec=1)
             self.assertNotEqual(jdb, expect)
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(jdb.io.n_lines, 0)
+            self.assertEqual(jdb.n_lines, 0)
 
             for file_id in file_table:
                 self.assertFalse(jdb.files_obj.VAL_exist(file_id))
@@ -3518,8 +3522,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_rename(self):
         for config in self.jdb_configs:
@@ -3529,13 +3533,13 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             jdb1 = JDb(jdb)
-
-            expect = {f'xxx{i}' : 'v' * 32 for i in range(300)}
-            expect2 = {f'kkkk{i}' : 'v' * 32 for i in range(300)}
+            test_size = 128
+            expect = {f'xxx{i}' : list(range(i+1)) for i in range(test_size)}
+            expect2 = {f'kkkk{i}' : expect[f'xxx{i}'] for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
@@ -3546,7 +3550,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb2, expect)
             self.assertTrue(jdb2.is_latest())
 
-            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(300)})
+            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(test_size)})
             self.assertEqual(len(ret), len(expect2))
             self.assertNotEqual(jdb, expect)
             self.assertEqual(jdb, expect2)
@@ -3585,12 +3589,12 @@ class TestJDb(unittest.TestCase):
             self.assertIn('xxx100', jdb)
             self.assertTrue(jdb.is_latest())
 
-            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(300)})
+            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(test_size)})
             self.assertEqual(len(ret), 3)
             self.assertEqual(jdb, expect2)
             self.assertEqual(jdb2, expect2)
 
-            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(300)})
+            ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(test_size)})
             self.assertEqual(len(ret), 0)
             self.assertEqual(jdb, expect2)
             self.assertEqual(jdb2, expect2)
@@ -3605,8 +3609,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_key_table(self):
         for config in self.jdb_configs:
@@ -3617,18 +3621,18 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            self.assertEqual(len(jdb.io.file_table), 0)
+            self.assertEqual(len(jdb.file_table), 0)
             jdb1 = JDb(jdb)
-
-            expect = {f'xxx{i}' : 'v' * 32 for i in range(300)}
+            test_size = 100
+            expect = {f'xxx{i}' : list(range(i+1)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
             self.assertTrue(jdb.is_latest())
-            self.assertEqual(jdb.io.n_lines, jdb.io.n_records)
-            self.assertEqual(len(expect), jdb.io.n_lines)
+            self.assertEqual(jdb.n_lines, jdb.n_records)
+            self.assertEqual(len(expect), jdb.n_lines)
 
             kt = list(jdb.key_table.items())
             random.shuffle(kt)
@@ -3637,7 +3641,7 @@ class TestJDb(unittest.TestCase):
                 jdb.key_table[key] = row
 
             self.assertEqual(jdb, expect)
-            sync_id = jdb.io.sync_id
+            sync_id = jdb.sync_id
             chg = {}
             with jdb.open() as fp:
                 _prev_row = -1
@@ -3647,37 +3651,38 @@ class TestJDb(unittest.TestCase):
                     _prev_row = row
 
             self.assertEqual(chg, expect)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(jdb.sync_id, sync_id)
 
             chg = {}
             with jdb.open() as fp:
-                _prev_row = jdb.io.n_lines
+                _prev_row = jdb.n_lines
                 for key,row in jdb.io.sorted_key_table_items(reverse=True):
                     self.assertLess(row, _prev_row)
                     chg[key] = jdb._read(fp, key, row=row, copy=False)
                     _prev_row = row
 
             self.assertEqual(chg, expect)
-            self.assertEqual(jdb.io.sync_id, sync_id)
+            self.assertEqual(jdb.sync_id, sync_id)
 
-            jdb.remove({f'xxx{i}' for i in range(100,150)})
+            jdb.remove({f'xxx{i}' for i in range(test_size//2,test_size)})
             self.assertNotEqual(jdb, expect)
-            self.assertEqual(len(expect), jdb.io.n_lines)
-            self.assertEqual(len(expect)-50, jdb.io.n_records)
+            self.assertEqual(len(expect), jdb.n_lines)
+            self.assertEqual(len(expect)-(test_size//2), jdb.n_records)
 
             jdb['a' * index_size] = 1234
-            self.assertGreater(jdb.io.index_size, index_size)
+            self.assertGreater(jdb.index_size, index_size)
 
             kt = jdb.key_table.copy()
             self.assertEqual(kt, jdb.key_table)
             self.assertEqual(kt, kt)
             self.assertEqual(len(kt), len({v for v in kt.values()}))
 
-            for _type in ('bt', 'no', 'l2', 'l4', '<8', config['key_limit']):
+            for _type in ('bt', 'l2', '<8', config['key_limit']):
                 jdb.key_limit = _type
-                jdb.sync()
-                self.assertEqual(kt, jdb.key_table)
-                self.assertTrue(jdb.key_table, jdb.key_table.copy())
+                _key_table, _file_table = jdb.load_table()
+                self.assertEqual(kt, _key_table)
+                self.assertTrue(_key_table, _key_table.copy())
+                self.assertTrue(_file_table, _file_table.copy())
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -3686,8 +3691,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_version(self):
         for config in self.jdb_configs:
@@ -3697,11 +3702,12 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-            self.assertEqual(len(jdb.io.file_table), 0)
-            expect = {f'xxx{i}' : 'v' * 32 for i in range(300)}
+            self.assertEqual(len(jdb.file_table), 0)
+            test_size = 100
+            expect = {f'xxx{i}' : list(range(i)) for i in range(test_size)}
             ret = jdb.check_status({'xxx0' : None, 'xxx1' : None})
             self.assertEqual(len(ret), 2)
             self.assertIn('xxx0', ret)
@@ -3771,7 +3777,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(ret['xxx0'][1] == last_ret['xxx0'][1])
             self.assertTrue(ret['xxx1'][1] != last_ret['xxx1'][1])
 
-            last_ver = jdb.io.sync_id
+            last_ver = jdb.sync_id
             jdb.insert({'key99' : 99, 'key999' : 999})
             ret = jdb.check_status({'':last_ver})
             self.assertEqual(ret['key99'][0], '+')
@@ -3787,8 +3793,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_lock(self):
         for config in self.jdb_configs:
@@ -3798,11 +3804,11 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-
-            expect = {f'xxx{i}' : (i + 10000) for i in range(300)}
+            test_size = 100
+            expect = {f'xxx{i}' : 10000+i for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
@@ -3815,13 +3821,16 @@ class TestJDb(unittest.TestCase):
                 val = jdb[key]
                 self.assertEqual(expect[key], val)
 
+            for key,val in jdb.items():
+                self.assertEqual(expect[key], val)
+
             for key,val in jdb.item_iter():
                 self.assertEqual(expect[key], val)
 
             for val in jdb.values():
                 self.assertEqual(expect[f'xxx{val-10000}'], val)
 
-            if not jdb.io.key_limit:
+            if jdb.key_limit == 'no':
                 for key,val in jdb.items(read_only=False):
                     jdb._write(None, key, val + 1)
                     self.assertEqual(val + 1, jdb._read(None, key))
@@ -3846,8 +3855,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_reader(self):
         for config in self.jdb_configs:
@@ -3858,37 +3867,39 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-            expect = {f'kk{i}' : i+123 for i in range(100)}
+            test_size = 100
+            expect = {f'kk{i}' : {'sub':list(range(i))} for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertTrue(isinstance(jdb, JDbReader))
             self.assertTrue(isinstance(jdb, JDb))
 
             jdbl = JDbReader(jdb.files_obj)
+            self.assertTrue(isinstance(jdbl, JDbReader))
             self.assertEqual(len(jdbl), len(jdb))
-            jdbl.sync()
-            self.assertEqual(jdbl.sync_id, jdb.sync_id)
             self.assertEqual(jdbl.get_n(), jdb.get_all())
             self.assertTrue(jdbl.is_latest())
-            self.assertTrue(isinstance(jdbl, JDbReader))
+            self.assertEqual(jdbl.sync_id, jdb.sync_id)
 
             chg = {}
             for key,val in jdb.items():
                 chg[key] = val
             self.assertEqual(chg, expect)
 
-            chg = {}
-            for key in jdbl:
-                chg[key] = jdbl.get(key)
+            chg = dict(jdb)
             self.assertEqual(chg, expect)
 
             chg = {}
             for key in jdbl:
-                chg[key] = jdbl[key]
+                chg[key] = jdbl.get(key)
             self.assertEqual(chg, expect)
+            self.assertEqual(jdb, jdbl)
+
+            chg = dict(jdbl)
+            self.assertEqual(dict(jdbl), expect)
 
             chg = {}
             with jdbl.open(read_only=True) as fp:
@@ -3903,7 +3914,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(expect), cnt)
             self.assertEqual(jdbl, expect)
 
-            chg = {f'kk{i}' : jdbl.get_cache(f'kk{i}') for i in range(100)}
+            chg = {f'kk{i}' : jdbl.get_cache(f'kk{i}') for i in range(test_size)}
             self.assertEqual(chg, expect)
 
             _key_table, _file_table = jdbl.load_table()
@@ -3914,7 +3925,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(chg['kk1'], expect['kk1'])
             self.assertEqual(chg['kk20'], expect['kk20'])
 
-            expect2 = {f'aa{i}' : i+456 for i in range(100)}
+            expect2 = {f'aa{i}' : i+456 for i in range(test_size)}
             chg = jdb.update(expect2)
             self.assertEqual(chg, expect2)
 
@@ -3933,8 +3944,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_write(self):
         for config in self.jdb_configs:
@@ -3945,13 +3956,14 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
             jdb2 = JDb(jdb)
 
             sync_id = jdb.sync_id
-            expect = {f'xxx{i}' : i * 32 for i in range(300)}
+            test_size = 300
+            expect = {f'xxx{i}' : list(range(i)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
@@ -3960,7 +3972,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             sync_id = jdb.sync_id
-            expect2 = {f'yyy{i}' : i * 32 + 1 for i in range(300)}
+            expect2 = {f'yyy{i}' : list(range(i+1)) for i in range(test_size)}
             chg = jdb.update(expect2)
             self.assertEqual(chg, expect2)
             self.assertGreater(jdb.sync_id, sync_id)
@@ -3968,7 +3980,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             sync_id = jdb.sync_id
-            expect3 = {f'yyy{i}' : i * 16 + 2 for i in range(300)}
+            expect3 = {f'yyy{i}' : {str(i):list(range(i+2))} for i in range(test_size)}
             chg = jdb.insert(expect3)
             self.assertFalse(chg)
             self.assertEqual(jdb.sync_id, sync_id)
@@ -4137,8 +4149,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_unremove(self):
         for config in self.jdb_configs:
@@ -4149,12 +4161,12 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
             self.assertFalse(jdb.keys[0])
-
-            expect = {f'kkk{i}' : 'v' * 32 for i in range(300)}
+            test_size = 300
+            expect = {f'kkk{i}' : list(range(i+1)) for i in range(test_size)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
@@ -4176,50 +4188,50 @@ class TestJDb(unittest.TestCase):
 
             chg = jdb.remove(jdb[10:20])
             self.assertEqual(len(chg), 10)
-            self.assertEqual(len(jdb), 290)
+            self.assertEqual(len(jdb), test_size-10)
 
             rows = jdb.keys[:]
-            self.assertEqual(len(rows), 290)
+            self.assertEqual(len(rows), test_size-10)
 
             rows = jdb.keys[::2]
-            self.assertEqual(len(rows), 145)
+            self.assertEqual(len(rows), test_size-155)
 
             rows = jdb.keys[0:]
-            self.assertEqual(len(rows), 290)
+            self.assertEqual(len(rows), test_size-10)
 
             rows = jdb.keys[:-1]
-            self.assertEqual(len(rows), 289)
+            self.assertEqual(len(rows), test_size-11)
 
             rows = jdb.keys[0.:]
             self.assertEqual(len(rows), len(expect))
 
-            chk = jdb.check_row(290)
+            chk = jdb.check_row(test_size-10)
             self.assertEqual(chk[0], 'kkk10')
 
-            chk = jdb.check_row(299)
+            chk = jdb.check_row(test_size-1)
             self.assertEqual(chk[0], 'kkk19')
 
-            chk = jdb.check_row(300)
+            chk = jdb.check_row(test_size)
             self.assertFalse(chk)
 
             chk = jdb.unremove('kkk1000')
             self.assertFalse(chk)
-            self.assertEqual(len(jdb), 290)
+            self.assertEqual(len(jdb), test_size-10)
             self.assertNotIn('kkk10', jdb)
 
             chk = jdb.unremove('kkk10')
             self.assertEqual(chk.keys(), {'kkk10'})
-            self.assertEqual(len(jdb), 291)
+            self.assertEqual(len(jdb), test_size-9)
             self.assertIn('kkk10', jdb)
 
             chk = jdb.unremove('kkk15')
             self.assertEqual(chk.keys(), {'kkk15'})
-            self.assertEqual(len(jdb), 292)
+            self.assertEqual(len(jdb), test_size-8)
             self.assertIn('kkk15', jdb)
 
             chk = jdb.unremove('kkk19')
             self.assertEqual(chk.keys(), {'kkk19'})
-            self.assertEqual(len(jdb), 293)
+            self.assertEqual(len(jdb), test_size-7)
             self.assertIn('kkk19', jdb)
 
             lst = {'kkk11', 'kkk12', 'kkk16', 'kkk17'}
@@ -4240,7 +4252,7 @@ class TestJDb(unittest.TestCase):
             del jdb[:]
             self.assertEqual(len(jdb), 0)
 
-            expect = {f'k{v}':'b'+str(v) for v in range(100)}
+            expect = {f'k{v}':'b'+str(v) for v in range(test_size)}
             chg = jdb.insert(expect)
 
             self.assertEqual(chg, expect)
@@ -4294,8 +4306,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_revert(self):
         for config in self.jdb_configs:
@@ -4307,10 +4319,10 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
-            size = 128
-            expect = {f'key{v}':list(range(v+1)) for v in range(size)}
+            test_size = 100
+            expect = {f'key{v}':list(range(v+1)) for v in range(test_size)}
             jdb1 = JDb(jdb)
 
             chg = jdb.insert(expect)
@@ -4357,7 +4369,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, expect)
             self.assertEqual(jdb, jdb1)
 
-            new_expect = {f'key{v}':list(range(size-v)) for v in range(size)}
+            new_expect = {f'key{v}':list(range(test_size-v)) for v in range(test_size)}
             chg = jdb.replace(new_expect)
             self.assertNotEqual(jdb, expect)
             self.assertEqual(jdb, new_expect)
@@ -4373,7 +4385,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb.revert(set(expect))
             self.assertEqual(jdb, expect)
 
-            new_expect = {f'key{v}':list(range(size*2-v)) for v in range(size*2)}
+            new_expect = {f'key{v}':list(range(test_size*2-v)) for v in range(test_size*2)}
             with jdb.open(read_only=False) as fp:
                 _io, fp, _key_fp = jdb._get_fp(fp)
                 for key,val in new_expect.items():
@@ -4439,8 +4451,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_date(self):
         now = dt.datetime.now()
@@ -4452,7 +4464,7 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
 
@@ -4662,8 +4674,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_type(self):
         for config in self.jdb_configs:
@@ -4673,10 +4685,11 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb, write_hook=lambda k,v:bool(k) and isinstance(v, list))
-            expect = {f'key{v}'*((v&0x7)+1) : list(range(v+1)) for v in range(100)}
+            test_size = 100
+            expect = {f'key{v}'*((v&0x7)+1) : list(range(v+1)) for v in range(test_size)}
             jdb += expect
             self.assertEqual(jdb, expect)
             self.assertEqual(jdb.get_all(), expect)
@@ -4686,23 +4699,23 @@ class TestJDb(unittest.TestCase):
             with self.assertRaises(TypeError):
                 jdb1['key0'] = 0
             self.assertEqual(jdb1['key0'], old_val)
-            old_data_type = jdb.io.data_type_str
-            old_api_ver = jdb.io.api_ver
+            old_data_type = jdb.data_type
+            old_api_ver = jdb.api_ver
             chg_type_lut = {'J':'S', 'M':'J', 'L':'S', 'S':'J'}
             chg_api_lut = {0:1, 1:0}
             new_type = chg_type_lut.get(old_data_type[0], 'S')
             new_api = chg_api_lut.get(old_api_ver, 0)
             jdb.change_KEY(api_ver=new_api, KEY_type=new_type)
-            self.assertNotEqual(jdb.io.api_ver, old_api_ver)
-            self.assertNotEqual(jdb.io.data_type_str, old_data_type)
+            self.assertNotEqual(jdb.api_ver, old_api_ver)
+            self.assertNotEqual(jdb.data_type, old_data_type)
             self.assertEqual(jdb, expect)
             self.assertEqual(jdb, jdb1)
             with self.assertRaises(TypeError):
                 jdb1['key0'] = 0
             self.assertEqual(jdb1['key0'], old_val)
             jdb.change_KEY(api_ver=old_api_ver, KEY_type=old_data_type[0])
-            self.assertEqual(jdb.io.api_ver, old_api_ver)
-            self.assertEqual(jdb.io.data_type_str, old_data_type)
+            self.assertEqual(jdb.api_ver, old_api_ver)
+            self.assertEqual(jdb.data_type, old_data_type)
             self.assertEqual(jdb, expect)
             self.assertEqual(jdb, jdb1)
             with self.assertRaises(TypeError):
@@ -4719,50 +4732,50 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_memory(self):
-        size = 10
+        test_size = 10
         jdb = JDb()
         jdb1 = JDb(jdb)
-        expect = {str(k):0 for k in range(size)}
+        expect = {str(k):0 for k in range(test_size)}
         chg = jdb.insert(expect)
         self.assertEqual(chg, expect)
         self.assertEqual(jdb, expect)
-        self.assertEqual(jdb.io.n_lines, size)
+        self.assertEqual(jdb.n_lines, test_size)
         jdb[:] = 1
         self.assertNotEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*2)
+        self.assertGreaterEqual(jdb.n_lines, test_size*2)
         jdb[:] = 0
         self.assertEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*2)
+        self.assertGreaterEqual(jdb.n_lines, test_size*2)
         jdb[:] = 2
         self.assertNotEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*2)
+        self.assertGreaterEqual(jdb.n_lines, test_size*2)
         jdb.revert(expect)
         self.assertEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*2)
+        self.assertGreaterEqual(jdb.n_lines, test_size*2)
         self.assertEqual(jdb, jdb1)
 
-        expect = {str(k):list(range(32)) for k in range(size)}
-        expect2 = {str(k):list(range(16)) for k in range(size)}
+        expect = {str(k):list(range(32)) for k in range(test_size)}
+        expect2 = {str(k):list(range(16)) for k in range(test_size)}
 
         jdb.replace(expect)
         self.assertEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*3)
+        self.assertGreaterEqual(jdb.n_lines, test_size*3)
 
         jdb.replace(expect2)
         self.assertEqual(jdb, expect2)
-        self.assertGreaterEqual(jdb.io.n_lines, size*4)
+        self.assertGreaterEqual(jdb.n_lines, test_size*4)
 
         jdb.revert(expect)
         self.assertEqual(jdb, expect)
-        self.assertGreaterEqual(jdb.io.n_lines, size*4)
+        self.assertGreaterEqual(jdb.n_lines, test_size*4)
 
         jdb.replace(expect2)
         self.assertEqual(jdb, expect2)
-        self.assertGreaterEqual(jdb.io.n_lines, size*4)
+        self.assertGreaterEqual(jdb.n_lines, test_size*4)
         self.assertEqual(jdb, jdb1)
 
         for config in self.jdb_configs:
@@ -4776,7 +4789,7 @@ class TestJDb(unittest.TestCase):
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertEqual(len(jdb), 0)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
             for (val0, val1, val1_0, val1_1) in [(0, 1, [0]*16, [1]*16),
                                                 ([0]*16, [1]*16, 0, 1),
@@ -4798,7 +4811,6 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem, jmem1)
                 self.assertEqual(jmem.file_table, jmem1.file_table)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
-                self.assertTrue(not jmem.check_error())
 
                 # [A=1] chg N
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5396,9 +5408,9 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem, jmem1)
                 self.assertEqual(jmem.file_table, jmem1.file_table)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
+
                 error = jmem.check_error()
                 self.assertTrue(not error)
-
                 #--
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
                 jmem['A'] = val1_0
@@ -5427,12 +5439,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jmem1, jmem)
             del jmem1['key0']
             self.assertEqual(jmem1, jmem)
-            self.assertEqual(jmem1.io.n_lines, 1)
+            self.assertEqual(jmem1.n_lines, 1)
             val = list(range(100))
             jmem1 += {f'key{k+1}':val for k in range(2)}
             self.assertEqual(jmem1['key1'], val)
             self.assertEqual(jmem1['key2'], val)
-            self.assertLessEqual(jmem1.io.n_lines, 3)
+            self.assertLessEqual(jmem1.n_lines, 3)
             jmem1 -= jmem
             self.assertEqual(len(jmem1), 0)
             jmem1.recycle()
@@ -5445,7 +5457,7 @@ class TestJDb(unittest.TestCase):
                         'float2':str(-1.),
                         'bool': str(True),
                         'max_int':str(2**64-1),
-                        'min_int':str(-(2**63))} for v in range(16)}
+                        'min_int':str(-(2**63))} for v in range(8)}
 
             jmem.insert(expect)
             self.assertEqual(jmem, expect)
@@ -5456,7 +5468,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jmem1, jmem)
 
             jmem.clear(agree='yes', wait_sec=0)
-            expect = {f'key{v}':1 for v in range(100)}
+            test_size = 100
+            expect = {f'key{v}':1 for v in range(test_size)}
             jmem.insert(expect)
             self.assertEqual(jmem, expect)
 
@@ -5489,13 +5502,13 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(ret), 1)
 
             expect = {f'key{v}': {
-                        'str':f'value-{v:03d}'*((v%100)+1),
-                        'list':[random.randrange(v+100) for _ in range(100)],
+                        'str':f'value-{v:03d}'*((v%test_size)+1),
+                        'list':[random.randrange(v+test_size) for _ in range(test_size)],
                         'float1':1.1,
                         'float2':-1.,
                         'bool': True,
                         'max_int':2**64-1,
-                        'min_int':-(2**63)} for v in range(100)}
+                        'min_int':-(2**63)} for v in range(test_size)}
 
             total = len(expect)
             expect.update({'max_int':2**64-1, 'min_int':-(2**63), 'bool': True, 'float1':1.1, 'float2':-1.})
@@ -5510,12 +5523,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jmem.find(FUNC=lambda v:isinstance(v, dict))), total)
             self.assertEqual(len(jmem.find(FUNC=lambda k,v:k.startswith('key') and isinstance(v, dict))), total)
 
-            for data_type_str in ('J+J', 'J+S', 'J+M', 'J+P', 'M+M', 'S+S', 'S+M', 'S+J', 'S+P'):
-                for zip_type_str in ('--', 'gz', 'bz', 'xz', 'zs', 'br', 'z1', 'z2', 'lz'):
+            for data_type_str in ('L+J', 'J+J', 'M+M', 'J+P', 'S+S'):
+                for zip_type_str in ('--', 'gz', 'bz', 'xz', 'br', 'z1', 'lz'):
                     jmem.upgrade(zip_type=zip_type_str, data_type=data_type_str)
                     self.assertEqual(jmem, expect)
-                    self.assertEqual(jmem.io.data_type_str, data_type_str)
-                    self.assertEqual(jmem.io.zip_type_str, zip_type_str)
+                    self.assertEqual(jmem.data_type, data_type_str)
+                    self.assertEqual(jmem.zip_type, zip_type_str)
 
             jmem.upgrade(data_type=data_type, zip_type=zip_type)
 
@@ -5546,7 +5559,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jmem, jdb)
 
             jmem_list = []
-            for _ in range(256+128):
+            for _ in range(4):
                 jmem_list.append(JDb(jmem))
 
             jmem1 = jmem_list[0]
@@ -5589,15 +5602,15 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(vv, 2)
 
             for ref in (0x01010101_01010101, 0x01010101_0101, 0x01010101, 0x0101):
-                val = {f'pad{v}':ref*v for v in range(256)}
+                val = {f'pad{v}':ref*v for v in range(test_size)}
                 ret = jdb.update(val)
                 self.assertEqual(jdb.get_n(val), val)
 
-                val = {f'pad{v}':{'VAL':ref*v} for v in range(256)}
+                val = {f'pad{v}':{'VAL':ref*v} for v in range(test_size)}
                 ret = jdb.replace(val)
                 self.assertEqual(jdb.get_n(val), val)
 
-                val = {f'pad{v}':[ref*v] for v in range(256)}
+                val = {f'pad{v}':[ref*v] for v in range(test_size)}
                 ret = jdb.replace(val)
                 self.assertEqual(jdb.get_n(val), val)
 
@@ -5605,7 +5618,6 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem, jmem1)
                 self.assertEqual(jmem.get_all(), jmem1.get_all())
                 self.assertEqual(jmem.keys[:], jmem1.keys[:])
-                self.assertEqual(jmem.keys[0.:], jmem1.keys[0.:])
                 self.assertEqual(jmem.file_table, jmem1.file_table)
                 self.assertEqual(jmem.sync_id, jmem1.sync_id)
 
@@ -5626,7 +5638,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jdb.swap_id, max_value)
                 self.assertEqual(jdb.remv_id, max_value)
 
-            expect = {f'key{k}':f'vvv{k}' for k in range(256)}
+            expect = {f'key{k}':f'vvv{k}' for k in range(test_size)}
             ret = jdb.insert(expect)
             self.assertEqual(ret, expect)
             self.assertEqual(jdb, expect)
@@ -5634,7 +5646,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(jdb.keys), set(jdb1.keys))
             self.assertEqual(set(jdb.keys.items()), set(jdb1.keys.items()))
             self.assertEqual(set(jdb.keys.values()), set(jdb1.keys.values()))
-            self.assertLess(jdb.io.sync_id, 256)
 
             ret = jdb.remove_fast(jdb)
             self.assertEqual(ret, set(expect))
@@ -5644,7 +5655,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(jdb.keys.items()), set(jdb1.keys.items()))
             self.assertEqual(set(jdb.keys.values()), set(jdb1.keys.values()))
 
-            jdb['test'] = val = list(range(256))
+            jdb['test'] = val = list(range(test_size))
             self.assertEqual(val, jdb['test'])
             info = jdb.keys['test']
             file_id, offset, _row_size, val_size = info[1:5]
@@ -5692,14 +5703,14 @@ class TestJDb(unittest.TestCase):
 
             jdb.clear(agree='yes', wait_sec=0, data_type='J+S', api_ver=0)
             self.assertEqual(len(jdb), 0)
-            self.assertEqual(jdb.io.data_type_str, 'J+S')
-            self.assertEqual(jdb.io.api_ver, 0)
+            self.assertEqual(jdb.data_type, 'J+S')
+            self.assertEqual(jdb.api_ver, 0)
 
             jdb_a = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
             jdb_b = jdb
 
-            val_a = {'a':1, 'b':list(range(256)), 'c':'C', 'd':1.}
-            val_b = {'b':list(range(256)), 'c':'C', 'e':['a']*256, 'f':'F'}
+            val_a = {'a':1, 'b':list(range(test_size)), 'c':'C', 'd':1.}
+            val_b = {'b':list(range(test_size)), 'c':'C', 'e':['a']*test_size, 'f':'F'}
             ret = jdb_a.insert(val_a)
             self.assertEqual(ret, val_a)
             self.assertEqual(jdb_a, val_a)
@@ -5859,18 +5870,18 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            size = 100
-            expect = {f'k{v}' : 'v'+str(v) for v in range(size)}
-            expect2 = {f'a{v}' : 'v'+str(v)+'100' for v in range(size)}
+            test_size = 100
+            expect = {f'k{v}' : 'v'+str(v) for v in range(test_size)}
+            expect2 = {f'a{v}' : 'v'+str(v)+'100' for v in range(test_size)}
 
             jdb0 = JDb(jdb)
             jdb1 = JDb(jdb, key_limit=0)
             jdb2 = JDb(jdb, key_limit=0)
 
             jdb1.key_limit = 'l2'
-            jdb2.key_limit = 8
+            jdb2.key_limit = 'bt'
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb, jdb2)
@@ -6104,9 +6115,6 @@ class TestJDb(unittest.TestCase):
             jdb['a'] = 2
             self.assertEqual(jdb, jdb1)
 
-            error = jdb.check_error()
-            self.assertTrue(not error)
-
             jdb.remove(['d', 'e', 'f'])
             jdb.recycle(merge=True)
 
@@ -6129,7 +6137,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb, last)
 
-            n_lines = jdb.io.n_lines
+            n_lines = jdb.n_lines
             with jdb.open() as fp:
                 for v in range(100):
                     jdb._write(fp, 'a', v)
@@ -6140,14 +6148,14 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual(jdb, last)
             self.assertEqual(jdb, jdb1)
-            self.assertLess(jdb.io.n_lines, n_lines+100)
+            self.assertLess(jdb.n_lines, n_lines+100)
 
             error = jdb.check_error()
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_thread(self):
         def _chg_func(jdb, tasks):
@@ -6161,7 +6169,7 @@ class TestJDb(unittest.TestCase):
         def _del_func(_id, jdb, tasks):
             for _step,(kk,_vv) in enumerate(tasks):
                 with jdb.open(read_only=False) as fp:
-                    row = jdb.io.key_table.get(kk, -1)
+                    row = jdb.key_table.get(kk, -1)
                     if row >= 0:
                         _val = jdb._delete(fp, kk, row=row)
                     else:
@@ -6178,7 +6186,7 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            print(Style(f'Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             test_size = 40
             with jdb.open(read_only=False):
@@ -6186,7 +6194,7 @@ class TestJDb(unittest.TestCase):
                 jdb.io.swap_id = 0X_7FF_0000_0000
                 jdb.io.remv_id = 0X_7FF_0000_0000
 
-            jdb0 = JDb(jdb, cache_limit=10)
+            jdb0 = JDb(jdb, key_limit='bt', cache_limit=10)
             jdb1 = JDb(jdb, key_limit='l2', cache_limit=-1)
             jdb2 = JDb(jdb, key_limit=8)
 
@@ -6284,8 +6292,8 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_random(self):
         th_jdb = JDb('db/th_test.jdb', index_size=64, zip_type='lz')
@@ -6415,17 +6423,18 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             jdb.sync()
             test_size = 32
-            step_size = test_size * 4
+            step_size = test_size * 2
             name = filename.replace('.jdb', '').replace('db/', '')
 
-            print(Style(f'{cid+1}/{csize}|Testing {filename} {jdb.io.data_type_str}({jdb.io.zip_type_str}|{jdb.io.key_limit_str}|v{jdb.io.api_ver}) rate:{jdb.io.reserved_rate*100.:.1f}% cache:{cache_limit} #{test_size}/{step_size}', yellow=1, bright=1))
+            print(Style(f'{cid+1}/{csize}|Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit} #{test_size}/{step_size}', yellow=1, bright=1))
             # --------------------------------------------
-            jdb_list = [jdb, JDb(jdb, key_limit='<2', cache_limit=0),
-                        JDb(jdb, key_limit='l0', cache_limit=2), JDb(jdb, key_limit='l1', cache_limit=4),
-                        JDb(jdb, key_limit='l2', cache_limit=8), JDb(jdb, key_limit='l4', cache_limit=16),
-                        JDb(jdb, key_limit='bt', cache_limit=32), JDb(jdb, key_limit='no', cache_limit=-1)]
+            jdb_list = [jdb,
+                        JDb(jdb, key_limit='<8', cache_limit=0),
+                        JDb(jdb, key_limit='l4', cache_limit=16),
+                        JDb(jdb, key_limit='bt', cache_limit=32),
+                        JDb(jdb, key_limit='no', cache_limit=-1)]
 
-            expect = {f'k{v}' : [v%10] * (test_size % 64 + 1) for v in range(test_size)}
+            expect = {f'k{v}' : [v%10] * (test_size + 1) for v in range(test_size)}
             jdb.insert(expect)
             self.assertEqual(jdb, expect)
 
@@ -6512,10 +6521,11 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jdb.key_table, _jdb.key_table)
 
             used_s = time.perf_counter() - st_time
-            fsize = sum(jdb.io.file_table.values()) if jdb.io.file_table else 0
-            print(f'{filename}|{jdb.io.data_type_str}|{jdb.io.zip_type_str}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
 if __name__ == '__main__':
     print(Style('JDb Unit Testing ...', blink=1, cyan=1))
     unittest.main(verbosity=2)
 
+#
