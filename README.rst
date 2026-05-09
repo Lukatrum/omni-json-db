@@ -743,3 +743,8 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
    :target: https://github.com/Lukatrum/omni-json-db/actions/workflows/codecov.yml
 
 
+
+
+.. image:: https://api.codacy.com/project/badge/Grade/4dd774b5d9804647889bee3b57b3761d
+   :alt: Codacy Badge
+   :target: https://app.codacy.com/gh/Lukatrum/omni-json-db?utm_source=github.com&utm_medium=referral&utm_content=Lukatrum/omni-json-db&utm_campaign=Badge_Grade
