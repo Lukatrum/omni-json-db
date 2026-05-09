@@ -107,7 +107,8 @@ from .jdb_file import JFilesBase, JDiskFiles
 
 BZ_Error = OSError
 LZ_Error = RuntimeError
-from .utils import Style, debug_break # pylint: disable=unused-import
+from .utils import Style
+#from .utils import debug_break
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------

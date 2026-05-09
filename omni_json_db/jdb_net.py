@@ -10,7 +10,8 @@ from typing import Optional, Tuple, IO
 from msgpack import packb as msg_dumps, unpackb as msg_loads
 #-----------------------------------------------------------------------------
 from .jdb_file import JFilesBase, JMemFiles
-from .utils import debug_break, Style # pylint: disable=unused-import
+from .utils import Style
+#from .utils import debug_break
 #-----------------------------------------------------------------------------
 
 class JErrCode(IntFlag):

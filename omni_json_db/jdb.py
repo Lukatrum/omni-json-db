@@ -13,7 +13,8 @@ from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK, NEW_DAY_SHIFT,\
             g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
-from .utils import Style, debug_break # pylint: disable=unused-import
+from .utils import Style
+#from .utils import debug_break
 from .jdb_file import JFilesBase
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------

@@ -5,8 +5,8 @@ on:
     branches:
       - 'main'
     paths:
-      - 'omni_json_db/**'
       - 'tests/**'
+      - 'pyproject.toml'
       - '.github/workflows/codecov.yml'
 jobs:
   test:
