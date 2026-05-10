@@ -4533,15 +4533,15 @@ class JDb(JDbReader):
         return jdb
 
     @staticmethod
-    def z_dumps(data:Any, ret_type:str='J') -> bytes:
+    def z_dumps(data:Union(Any,JDbReader), ret_type:Optional[str]=None) -> bytes:
         """
         convert any data into Json/Msgpack/Marshal/Pickle format
         
         Args:
             data (Any): target Python data
-                - support str/bytes/int/float/bool/None/dict/list/set/tuple only
-            ret_type (str, optional): return format
-                "J" : Json format
+                - support str/bytes/int/float/bool/None/dict/list/set/tuple/JDb
+            ret_type (str, optional): return format                
+                "J" : Json format (default)
                 "M" : Marshal format
                 "P" : Pickle format
                 "S" : Msgpack format
@@ -4551,6 +4551,14 @@ class JDb(JDbReader):
         Raises:
             ValueError: invalid ret_type
         """
+        if isinstance(data, JDbReader):
+            if ret_type is None:
+                ret_type = data.data_type[-1]
+            data = dict(data)
+
+        if ret_type is None:
+            ret_type = 'J'
+
         ret_type_u = ret_type.upper()
         if ret_type_u not in 'JMPS':
             raise ValueError('date_type must be (J)son/(M)arshal/(P)ickle/M(S)gpack')

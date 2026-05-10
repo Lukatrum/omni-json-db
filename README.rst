@@ -178,6 +178,80 @@ Query
    matches = jdb.find(RE='John|Bob')
    print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}   
 
+CSV
+---
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+      
+   jdb1 = JDb()
+
+   # insert value without key
+   jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
+            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
+   
+   # export to CSV file
+   jdb1.to_csv('example.csv')
+
+   # create another JDb in memory
+   jdb2 = JDb()
+   
+   # import from CSV file
+   jdb2.from_csv('example.csv')
+   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
+
+Network
+-------
+
+**Server side:**
+
+.. code-block:: python
+
+   >> from omni_json_db import run_files_server
+   >> run_files_server(host='127.0.0.1', port=59898, files='net_storage.jdb')
+
+**Client side:**
+
+.. code-block:: python
+
+   >> from omni_json_db import JDb
+   >> jdb = JDb('127.0.0.1:59898')
+   
+Group
+-----
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   # Initialize the database from file
+   # Key-Value is Json+Json with no compression
+   jdb = JDb('fruit_group.jdb')
+
+   # add red group
+   r_jdb = jdb.add_group('red')
+   assert r_jdb is jdb['red']
+
+   # add yellow group
+   y_jdb = jdb.add_group('yellow')
+   assert y_jdb is jdb['yellow']
+
+   # add fruits to red group
+   r_jdb += {'apple': {'qty':1}, 'tomato': {'qty':2}}
+
+   # add fruits to yellow group
+   y_jdb += {'banana': {'qty':4}, 'lemon': {'qty':6}, 'mango': {'qty':8}}
+
+   # read group records
+   print(jdb['red']['apple']['qty'])   # Output: 1
+   print(jdb['red:::apple'])           # Output: {'red:::apple': {'qty': 1}}
+   print(jdb['yellow:::banana'])       # Output: {'yellow:::banana': {'qty': 4}}
+
+   # find fruits which contains 'a' from all groups
+   matches = jdb.find(r':::a')
+   print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+
 Operator
 --------
 
@@ -401,62 +475,6 @@ Date Lookups
    jdb.keys[:] = today
    assert jdb[today] == fruits
 
-Group
------
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-
-   # Initialize the database from file
-   # Key-Value is Json+Json with no compression
-   jdb = JDb('fruit_group.jdb')
-
-   # add red group
-   r_jdb = jdb.add_group('red')
-   assert r_jdb is jdb['red']
-
-   # add yellow group
-   y_jdb = jdb.add_group('yellow')
-   assert y_jdb is jdb['yellow']
-
-   # add fruits to red group
-   r_jdb += {'apple': {'qty':1}, 'tomato': {'qty':2}}
-
-   # add fruits to yellow group
-   y_jdb += {'banana': {'qty':4}, 'lemon': {'qty':6}, 'mango': {'qty':8}}
-
-   # read group records
-   print(jdb['red']['apple']['qty'])   # Output: 1
-   print(jdb['red:::apple'])           # Output: {'red:::apple': {'qty': 1}}
-   print(jdb['yellow:::banana'])       # Output: {'yellow:::banana': {'qty': 4}}
-
-   # find fruits which contains 'a' from all groups
-   matches = jdb.find(r':::a')
-   print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
-
-CSV
----
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-      
-   jdb1 = JDb()
-
-   # insert value without key
-   jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
-            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
-   
-   # export to CSV file
-   jdb1.to_csv('example.csv')
-
-   # create another JDb in memory
-   jdb2 = JDb()
-   
-   # import from CSV file
-   jdb2.from_csv('example.csv')
-   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
 
 Advanced
 --------
@@ -544,22 +562,6 @@ Advanced
 
    assert jdb == fruits
 
-Network
--------
-
-**Server side:**
-
-.. code-block:: python
-
-   >> from omni_json_db import run_files_server
-   >> run_files_server(host='127.0.0.1', port=59898, files='net_storage.jdb')
-
-**Client side:**
-
-.. code-block:: python
-
-   >> from omni_json_db import JDb
-   >> jdb = JDb('127.0.0.1:59898')
 
 📝 Specifications
 *****************

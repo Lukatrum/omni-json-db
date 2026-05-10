@@ -1309,7 +1309,7 @@ class JIo:
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
-        if zip_type == NO_ZIP: return '--'
+        if zip_type == NO_ZIP: return 'no'
         if zip_type == GZ_ZIP: return 'gz'
         if zip_type == BZ_ZIP: return 'bz'
         if zip_type == XZ_ZIP: return 'xz'
@@ -1339,7 +1339,7 @@ class JIo:
 
     @staticmethod
     def z_key_limit_str(key_limit:int) -> str:
-        if key_limit == 0:      return '--'
+        if key_limit == 0:      return 'no'
         if key_limit == -0x100: return 'bt'
         if key_limit > 0:       return f'<{key_limit+1}'
         return f'l{-key_limit-1}'

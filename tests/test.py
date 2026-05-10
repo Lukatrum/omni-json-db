@@ -1,6 +1,7 @@
-import unittest, time, random, threading, inspect, re, os 
+# pylint: disable=too-many-lines, multiple-imports
+import unittest, time, random, threading, inspect, re, os
 import datetime as dt
-from omni_json_db import JDb, JDbReader, SEP_SYM, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server
+from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server
 
 server_thd1 = run_files_server('127.0.0.1', 59898, files='db/test_3n.jdb', verbose=0, daemon=True)
 server_thd2 = run_files_server('127.0.0.1', 59899, files=None, verbose=0, daemon=True)
@@ -341,7 +342,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(gp, gp_b)
             self.assertEqual(len(gp_b), 0)
 
-            jdb_bak = jdb.backup('bak', zip_type=0 if jdb.zip_type != '--' else 'lz')
+            jdb_bak = jdb.backup('bak', zip_type=0 if jdb.zip_type != 'no' else 'lz')
             self.assertEqual(jdb_bak, jdb)
             self.assertNotEqual(jdb_bak.zip_type, jdb.zip_type)
             self.assertEqual(jdb_bak['group_a'], jdb['group_a'])
@@ -1199,6 +1200,11 @@ class TestJDb(unittest.TestCase):
                 jdb[_key] = jdb.z_dumps(data, ret_type=_key[0])
                 _data = jdb.z_loads(jdb[_key], ret_type=_key[0])
                 self.assertEqual(_data, data)
+
+            jmem = JDb()
+            data_b = JDb.z_dumps(jdb, jdb.data_type[-1])
+            jmem += JDb.z_loads(data_b, jdb.data_type[-1])
+            self.assertEqual(jmem, jdb)
 
             val = jdb.set('value1', lambda key,old_val: -1 if old_val is None  else old_val+1)
             self.assertEqual(val, -1)
@@ -5530,7 +5536,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jmem.find(FUNC=lambda k,v:k.startswith('key') and isinstance(v, dict))), total)
 
             for data_type_str in ('L+J', 'J+J', 'M+M', 'J+P', 'S+S'):
-                for zip_type_str in ('--', 'gz', 'bz', 'xz', 'br', 'z1', 'lz'):
+                for zip_type_str in ('no', 'gz', 'bz', 'xz', 'br', 'z1', 'lz'):
                     jmem.upgrade(zip_type=zip_type_str, data_type=data_type_str)
                     self.assertEqual(jmem, expect)
                     self.assertEqual(jmem.data_type, data_type_str)
