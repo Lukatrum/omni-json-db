@@ -1463,8 +1463,8 @@ class JDbReader:
 
                             key_fp.close()
 
-                    except Exception as e:
-                        print(e)
+                    except Exception as e1:
+                        print(e, e1)
 
                 if no_raise or sync_id != io.sync_id or fsize != io.file_size:
                     io.key_table.clear()
@@ -3541,4 +3541,4 @@ class JDbReader:
 
         return (-1, _bytes if io._zip_type == 0 else io.zip(_bytes, zip_type=io._zip_type), n_bytes)
 
-
+#
