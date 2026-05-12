@@ -967,7 +967,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb), 0)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
             # --------------------------------------------
-
+            jdb.recycle()
             sync_id = jdb.sync_id
             jdb1 = JDbReader(jdb)
 
@@ -1929,7 +1929,10 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            jdb1 = JDb(jdb)
+            jmem = JDb()
+            jmem['group'] = jdb1 = JDb(jdb)
+            jmem.clear(agree='yes', wait_sec=0)
+
             sync_id = jdb.sync_id
             test_size = 100
             expect = {f'kk{i}' : 'vv'+f'{i}'*(i+min_value_size) for i in range(test_size)}
@@ -2143,6 +2146,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
+            self.assertTrue(not error)
+
+            error = jmem.check_error(level=2)
             self.assertTrue(not error)
 
             # --------------------------------------------
@@ -4814,6 +4820,10 @@ class TestJDb(unittest.TestCase):
                 info = jdb.keys[key]
                 self.assertEqual(info[-1], str(prev_week.date()))
 
+            jdb.keys[-1] = yesterday
+            for key,info in jdb.keys[-1].items():
+                self.assertEqual(info[-1], str(yesterday))
+
             matches = jmem.keys[[':::kk13', ':::kk14', ':::kk13']]
             self.assertEqual(len(matches), 2)
             jmem.keys[[':::kk13', ':::kk14', ':::kk13']] = prev_prev_week
@@ -4828,6 +4838,11 @@ class TestJDb(unittest.TestCase):
             del jmem[matches]
             self.assertEqual(len(jmem[matches]), 0)
             self.assertEqual(len(jmem.keys[matches]), 0)
+
+            if 'kk15' in jdb.keys:
+                del jmem[':::kk15']
+                info = jmem.keys[':::kk15']
+                self.assertEqual(info, {})
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])

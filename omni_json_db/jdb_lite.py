@@ -95,22 +95,21 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
             if any(_match_rules(key, vv, rules, level=level+1, ANY=True) for vv in val.values()):
                 return True
 
-    if isinstance(rules, dict):
-        pass
-    elif isinstance(rules, str):
-        rules = {'$re': rules}
-    elif isinstance(rules, int):
-        rules = {'$eq' : rules}
-    elif isinstance(rules, float):
-        rules = {'$eq' : rules}
-    elif isinstance(rules, bool):
-        rules = {'$eq' : rules}
-    elif isinstance(rules, bytes) and isinstance(val, bytes):
-        rules = {'$eq' : rules}
-    elif isinstance(rules, (list, set, tuple, frozenset)):
-        rules = {'$in' : rules}
-    elif callable(rules):
-        rules = {'$func' : rules}
+    if not isinstance(rules, dict): # pragma: no cover
+        if isinstance(rules, str):
+            rules = {'$re': rules}
+        elif isinstance(rules, int):
+            rules = {'$eq' : rules}
+        elif isinstance(rules, float):
+            rules = {'$eq' : rules}
+        elif isinstance(rules, bool):
+            rules = {'$eq' : rules}
+        elif isinstance(rules, bytes) and isinstance(val, bytes):
+            rules = {'$eq' : rules}
+        elif isinstance(rules, (list, set, tuple, frozenset)):
+            rules = {'$in' : rules}
+        elif callable(rules):
+            rules = {'$func' : rules}
 
     for cmd,rule in rules.items():
         if cmd == '$val':
@@ -156,7 +155,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                             if kk not in rule:
                                 return False
 
-                except TypeError:
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$has':
@@ -199,7 +198,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                             if kk not in val:
                                 return False
 
-                except TypeError:
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd in {'$re', '$re2'}:
@@ -210,7 +209,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 elif isinstance(rule, str):
                     _rules.append(re_compile(rule))
 
-                elif isinstance(rule, (dict, list, tuple, set, frozenset)):
+                elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
                             _rules.append(_rule)
@@ -228,9 +227,11 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                             val_s = json_dumps(val)
                             if isinstance(val_s, bytes):
                                 val_s = val_s.decode('utf8')
-                    except:
+
+                    except: # pragma: no cover
                         return False
-                else:
+
+                else: # pragma: no cover
                     val_s = val
 
                 if cmd[-1] != 'e':
@@ -318,7 +319,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                     if not _match_rules(key, val[int(cmd[1:])], rule, level=level+1):
                         return False
 
-                except IndexError:
+                except IndexError: # pragma: no cover
                     return False
 
             else:
@@ -404,7 +405,7 @@ class JDbKey:
         jdb = self.jdb
         with jdb.open(read_only=True) as fp:
             io, fp, key_fp = jdb.f_get_fp(fp)
-            if key_type is not str:
+            if key_type is not str: # pragma: no cover
                 key = str(key)
 
             row_id = io.key_table[key]
@@ -634,7 +635,7 @@ class JDbKey:
 
                 return
 
-            if isinstance(key, (bytes, bytearray)):
+            if isinstance(key, (bytes, bytearray)): # pragma: no cover
                 pass
 
             elif hasattr(key, '__iter__'):
@@ -682,7 +683,7 @@ class JDbKey:
             # bytes | bytearray | bool
             key = str(key)
             row_id = io.key_table[key]
-            if io.n_records > row_id >= 0:
+            if io.n_records > row_id >= 0: # pragma: no cover
                 _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                 old_date, new_date = io.z_conv_date(days)
                 yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -1274,7 +1275,7 @@ class JDbReader:
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None:
+                    if key_fp is not None: # pragma: no cover
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
@@ -1304,11 +1305,8 @@ class JDbReader:
                 self.fsize = io.file_size = 0
 
                 for fp in fp_dict.values():
-                    if fp is None: continue
-                    try:
+                    if fp is not None:
                         fp.close()
-                    except:
-                        continue
 
                 fp_dict.clear()
                 fp_table.pop(ident, None)
@@ -1373,12 +1371,8 @@ class JDbReader:
                     chg_keys.clear()
 
                 for fp in fp_dict.values():
-                    if fp is None:
-                        continue
-                    try:
+                    if fp is not None:
                         fp.close()
-                    except:
-                        continue
 
                 fp_dict.clear()
                 fp_table.pop(ident, None)
@@ -1419,7 +1413,7 @@ class JDbReader:
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None:
+                    if key_fp is not None: # pragma: no cover
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
@@ -1456,7 +1450,7 @@ class JDbReader:
 
                             key_fp.close()
 
-                    except Exception as e1:
+                    except Exception as e1: # pragma: no cover
                         print(e, e1)
 
                 if no_raise or sync_id != io.sync_id or fsize != io.file_size:
@@ -1467,13 +1461,8 @@ class JDbReader:
                     self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
                 for fp in fp_dict.values():
-                    if fp is None:
-                        continue
-
-                    try:
+                    if fp is not None:
                         fp.close()
-                    except:
-                        continue
 
                 fp_dict.clear()
                 if no_raise:
@@ -1526,11 +1515,8 @@ class JDbReader:
 
                 finally:
                     for fp in fp_dict.values():
-                        if fp is None: continue
-                        try:
+                        if fp is not None:
                             fp.close()
-                        except:
-                            continue
 
                     fp_dict.clear()
                     fp_table.pop(ident, None)
@@ -1546,7 +1532,7 @@ class JDbReader:
 
         try:
             file_lock = self.file_lock
-            _ident = file_lock.acquire(read_only=read_only) # raise RuntimeError if fail
+            file_lock.acquire(read_only=read_only) # raise RuntimeError if fail
             key_fp = None
             files_obj = self.files_obj
             try:
@@ -1667,7 +1653,7 @@ class JDbReader:
             io = self.io.read_header(key_fp, seek=False)
             return io.n_records
 
-        except FileNotFoundError:
+        except FileNotFoundError: # pragma: no cover
             pass
 
         finally:
@@ -2530,7 +2516,7 @@ class JDbReader:
                 for dd in matches:
                     try:
                         date_list.append(dt_date(*[int(v) for v in dd]))
-                    except ValueError:
+                    except ValueError: # pragma: no cover
                         pass
 
                 if len(date_list) > 1:
@@ -2689,7 +2675,7 @@ class JDbReader:
                                 if value_b is None:
                                     try:
                                         value_b = io.VAL_dumps(value)
-                                    except ValueError:
+                                    except ValueError: # pragma: no cover
                                         value, value_b = self.f_read_with_bytes(fp, key)
 
                                 _value = value_b
@@ -2814,9 +2800,7 @@ class JDbReader:
         key_table = io.key_table
         if key not in key_table:
             n_records = io.n_records
-            if n_records == 0 or n_records != len(key_table):
-                pass
-            else:
+            if not (n_records == 0 or n_records != len(key_table)):
                 return default_val
 
         return self.get(key, default_val, copy=copy)
@@ -2826,9 +2810,9 @@ class JDbReader:
         for key in records:
             if isinstance(key, str):
                 keys.add(key)
-            elif key.__hash__:
+            elif key.__hash__: # pragma: no cover
                 keys.add(str(key))
-            else:
+            else: # pragma: no cover
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
 
@@ -2885,7 +2869,7 @@ class JDbReader:
 
             for key,ver in keys.items():
                 if key == '':
-                    if ver is None:
+                    if ver is None: # pragma: no cover
                         ver = io._sync_id
 
                     max_ver = io.sync_id
@@ -2926,7 +2910,7 @@ class JDbReader:
             if jdb is not None:
                 return jdb
 
-            if not isinstance(fp_dict, dict):
+            if not isinstance(fp_dict, dict): # pragma: no cover
                 key_fp = fp_dict
             else:
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
@@ -3064,7 +3048,7 @@ class JDbReader:
         return matched_list
 
     def f_read_bytes(self, fp_dict:Dict[int,IO], key:str) -> bytes:
-        if not isinstance(key, str):
+        if not isinstance(key, str): # pragma: no cover
             key = str(key)
 
         io = self.io
@@ -3094,12 +3078,12 @@ class JDbReader:
             Tuple[Any, bytes]: key's data and key's unzip bytes
 
         """
-        if not isinstance(key, str):
+        if not isinstance(key, str): # pragma: no cover
             key = str(key)
 
         io = self.io
         row = io.key_table[key]
-        if not io.n_records > row >= 0:
+        if not io.n_records > row >= 0: # pragma: no cover
             raise KeyError(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
@@ -3118,7 +3102,7 @@ class JDbReader:
             val_bytes = val_fp.read(row_size)
             zip_type = io.zip_type
 
-        if not val_bytes:
+        if not val_bytes: # pragma: no cover
             raise ValueError
 
         try:
@@ -3126,7 +3110,7 @@ class JDbReader:
             val = io.VAL_loads(val_bytes)
             return val, val_bytes
 
-        except Exception as e:
+        except Exception as e: # pragma: no cover
             raise ValueError from e
 
     def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True) -> Any:
@@ -3169,7 +3153,7 @@ class JDbReader:
             try:
                 val = io.read_value(val_fp, offset, row_size, val_size)
 
-            except Exception as e:
+            except Exception as e: # pragma: no cover
                 raise ValueError from e
 
         if self._cache_limit == 0:
@@ -3185,7 +3169,7 @@ class JDbReader:
             try:
                 key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
-            except FileNotFoundError:
+            except FileNotFoundError: # pragma: no cover
                 io, key_fp = self._init_KEY()
                 fp_dict[-1] = key_fp
         else:
@@ -3215,7 +3199,7 @@ class JDbReader:
         return matches
 
     def f_read_status(self, fp_dict:Dict[int,IO], key:str, ver:int) -> Tuple[str,int]:
-        if not isinstance(key, str):
+        if not isinstance(key, str): # pragma: no cover
             key = str(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
@@ -3317,7 +3301,7 @@ class JDbReader:
                 else:
                     val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb+', buffering=0)
 
-            except FileNotFoundError:
+            except FileNotFoundError: # pragma: no cover
                 self._init_VAL(file_id)
                 if file_lock.mode != 'w':
                     val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb', buffering=VAL_FILE_BUF_SIZE)

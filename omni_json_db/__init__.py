@@ -6,7 +6,7 @@ for many-read single-write multithreading/multiprocessing environments.
 """
 from threading import Thread
 from socketserver import TCPServer
-from typing import Union, Optional, Any
+from typing import Union
 from re import match as re_match
 from .jdb import JDb
 from .jdb_lite import JDbReader, SEP_SYM, JFlag
@@ -19,7 +19,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful JSON database with compression. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.09.03'
+__version__         = '2.09.04'
 
 __all__ = [
     'JDb',
