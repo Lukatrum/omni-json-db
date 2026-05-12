@@ -164,7 +164,7 @@ class JDbKey2(JDbKey):
                         io, fp, key_fp = jdb.f_get_fp(fp) # key_fp is changed after switch to write mode
 
                 elif k_arg_cnt == 1:
-                    io_read_key = io.read_key                    
+                    io_read_key = io.read_key
                     for _key,row_id in io.key_table.items():
                         if has_SIGINT():
                             break
