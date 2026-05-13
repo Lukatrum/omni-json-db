@@ -8,6 +8,10 @@ on:
       - 'tests/**'
       - 'pyproject.toml'
       - '.github/workflows/codecov.yml'
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
