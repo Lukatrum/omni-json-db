@@ -14,6 +14,10 @@
 - `📊 Benchmarking`_
 - `👥 Contributing`_
 
+.. highlights::
+   ⭐️ If you find ``omni-json-db`` useful, please consider giving it a star! It helps the project grow and reach more developers.
+
+
 ✨ Introduction
 ***************
 ``omni-json-db`` is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
