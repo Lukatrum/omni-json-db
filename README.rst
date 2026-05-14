@@ -18,7 +18,7 @@
 ***************
 ``omni-json-db`` is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a Document database. 
 
-Built for extreme throughput and thread-safety, ``omni-json-db`` leverages modern serialization (``json``, ``msgpack``, ``marshal``, ``pickle``) and compression to provide a storage layer that is often significantly faster than SQLite for JSON-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, ``omni-json-db`` provides the tools to handle data at scale with "Zero-Config" simplicity.
+Built for extreme throughput and thread-safety, ``omni-json-db`` leverages modern serialization (``JSON``, ``MsgPack``, ``marshal``, ``pickle``, ``YAML``) and compression to provide a storage layer that is often significantly faster than SQLite for JSON-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, ``omni-json-db`` provides the tools to handle data at scale with "Zero-Config" simplicity.
 
 Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo), and extreme compression capabilities.
 
@@ -112,6 +112,30 @@ In-memory
    # Retrieve the new inserted data (by 2nd JDb)
    print(jdb1["user2"]["name"]) # Output: Kathy
 
+Query
+-----
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+   # Initialize the database in memory
+   # Key-Value is Json+Marshal with no compression
+   jdb = JDb(data_type="J+M")
+   
+   # insert value without key
+   jdb += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
+            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
+   
+   print(jdb[:]) # print all records from jdb
+
+   matches = jdb.find(FUNC=lambda k,v: v.get('name', '') == 'John') 
+   print(matches) # Output : {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
+   
+   matches = jdb.find(RE='John|Bob')
+   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}   
+
+Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT`` and ``ANY``.
+
 Rollback
 --------
 
@@ -170,30 +194,6 @@ Backup & Restore
    jdb.restore('bak')
    assert jdb == fruits
    assert jdb == jdb_bak
-
-Query
------
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+Marshal with no compression
-   jdb = JDb(data_type="J+M")
-   
-   # insert value without key
-   jdb += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
-            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
-   
-   print(jdb[:]) # print all records from jdb
-
-   matches = jdb.find(FUNC=lambda k,v: v.get('name', '') == 'John') 
-   print(matches) # Output : {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
-   
-   matches = jdb.find(RE='John|Bob')
-   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}   
-
-Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT`` and ``ANY``.
 
 CSV
 ---

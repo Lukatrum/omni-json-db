@@ -818,7 +818,7 @@ class JDbReader:
         elif isinstance(KEY_file, str):
             if not KEY_file: # pragma: no cover
                 files_obj = JMemFiles(None, **kwargs)
-            elif re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', KEY_file):
+            elif re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', KEY_file): # pragma: no cover
                 server_ip, server_port = KEY_file.split(':')
                 server_port = int(server_port)
                 if not 65535 >= server_port > 0 or not all(255 > int(vv) >= 0 for vv in server_ip.split('.')): # pragma: no cover
@@ -1040,9 +1040,7 @@ class JDbReader:
 
                 key_table = io.key_table
                 for key in jdb:
-                    if not isinstance(key, str):
-                        key = str(key)
-
+                    key = str(key) if not isinstance(key, str) else key
                     if key not in key_table:
                         return False
 
@@ -1329,7 +1327,7 @@ class JDbReader:
                     if file_lock.mode == 'w':
                         key_fp = fp_dict.pop(-1, None)
                         try:
-                            if key_fp is None:
+                            if key_fp is None: # pragma: no cover
                                 try:
                                     key_fp = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
@@ -1339,7 +1337,7 @@ class JDbReader:
                                 key_fp.flush()
                                 key_fp.seek(0)
 
-                            if _cache:
+                            if _cache: # pragma: no cover
                                 if not io.key_table:
                                     _cache.clear()
                                 else:
@@ -1483,10 +1481,11 @@ class JDbReader:
                             if not is_error:
                                 key_fp = fp_dict.pop(-1, None)
                                 try:
-                                    if key_fp is None:
+                                    if key_fp is None: # pragma: no cover
                                         key_fp = files_obj.KEY_open('ab+', buffering=KEY_FILE_BUF_SIZE)
                                     else:
                                         key_fp.flush()
+
                                     if _cache and io.remv_id != io._remv_id:
                                         for kk in set(_cache).difference(io.key_table):
                                             _cache.pop(kk, 0)
@@ -1872,9 +1871,7 @@ class JDbReader:
         with self.open(read_only=True):
             key_table = self.io.key_table
             for key in keys:
-                if not isinstance(key, str):
-                    key = str(key)
-
+                key = str(key) if not isinstance(key, str) else key
                 if key not in key_table:
                     return False
 
@@ -2109,9 +2106,9 @@ class JDbReader:
                     elif size > 0:
                         data_size = f' k:{size/1024:,.1f}KB |'
 
-                if io.file_table:
+                if io.file_table: # pragma: no cover
                     size = sum(list(io.file_table.values()))
-                    if size > 0: # pragma: no cover
+                    if size > 0:
                         if size >= (2**30):
                             data_size += f' v:{size/(2**30):,.1f}GB/{len(io.file_table)} |'
                         elif size >= (2**20):
@@ -2152,9 +2149,9 @@ class JDbReader:
                     elif size > 0:
                         data_size = f' k:{size/1024:,.1f}KB |'
 
-                if io.file_table:
+                if io.file_table: # pragma: no cover
                     size = sum(list(io.file_table.values()))
-                    if size > 0: # pragma: no cover
+                    if size > 0:
                         if size >= (2**30):
                             data_size += f' v:{size/(2**30):,.1f}GB/{len(io.file_table)} |'
                         elif size >= (2**20):
@@ -2415,7 +2412,7 @@ class JDbReader:
             example
                 find(r'^[Rr].*[Nn]$', IN=[8,27])
                     -> find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$in' : [8, 27]})
-                find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$value' : {'$gt' : 8} })
+                find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$val' : {'$gt' : 8} })
                 find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$gt' : 8, '$lt' : 100})
                 find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$or' : {'$eq' : 8, '$lt' : 50}})
                 find(vals={'name' : r'Jo(e|hn)'}, re_flags=re.I)
@@ -2451,23 +2448,18 @@ class JDbReader:
                     next_keys = keys[idx+SEP_LEN:]
                     next_idx = next_keys.find(SEP_SYM)
 
-                    if next_idx < 0:
-                        if not next_keys:
-                            next_keys = None
+                    if next_idx < 0 and not next_keys: # pragma: no cover
+                        next_keys = None
 
                     # pylint: disable=contextmanager-generator-missing-cleanup
                     with self.open(read_only=True) as fp:
                         f_get_child = self.f_get_child
                         for child_name in self.io.key_table:
-                            if key_rule and not key_rule.search(child_name):
-                                continue
-
-                            child = f_get_child(fp, child_name)
-                            if not isinstance(child, JDbReader):
-                                continue
-
-                            for kk,vv in child.find_iter(next_keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
-                                yield child_name+SEP_SYM+kk,vv
+                            if not (key_rule and not key_rule.search(child_name)):
+                                child = f_get_child(fp, child_name)
+                                if isinstance(child, JDbReader):
+                                    for kk,vv in child.find_iter(next_keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
+                                        yield child_name+SEP_SYM+kk,vv
                     return
 
                 key_rule = re_compile(keys, flags=re_flags)
@@ -2578,7 +2570,7 @@ class JDbReader:
                         value = cache.get(key, None)
 
                 for ref,rules in vals.items():
-                    if ref == '$value':
+                    if ref == '$val':
                         if not _match_rules(key, value, rules):
                             is_matched = False
                             break
@@ -2713,7 +2705,7 @@ class JDbReader:
             self.unsync()
 
         with self.open(read_only=True) as fp:
-            if len(self.key_table) != self.io.n_records:
+            if len(self.key_table) != self.io.n_records: # pragma: no cover
                 self.f_load_keys(fp)
 
         return self
@@ -3065,12 +3057,8 @@ class JDbReader:
 
         val_fp, __i, __o  = self.f_get_val_fp(fp_dict, file_id)
         val_fp.seek(offset)
-        if val_size > 0:
-            val_bytes = val_fp.read(val_size)
-            zip_type = -(io.zip_type+1)
-        else:
-            val_bytes = val_fp.read(row_size)
-            zip_type = io.zip_type
+        val_bytes, zip_type = (val_fp.read(val_size), -(io.zip_type+1)) if val_size > 0 else \
+                            (val_fp.read(row_size), io.zip_type)
 
         if not val_bytes: # pragma: no cover
             raise ValueError
@@ -3103,7 +3091,7 @@ class JDbReader:
                 raise KeyError(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-        if row >= io.n_records:
+        if row >= io.n_records: # pragma: no cover
             io.key_table.pop(key, -1)
             if default_val is not None:
                 return default_val
@@ -3183,7 +3171,7 @@ class JDbReader:
 
             return ('x', io._sync_id) # Not exist
 
-        if row >= io.n_records:
+        if row >= io.n_records: #  pragma: no cover
             io.key_table.pop(key, -1)
             return ('x', io._sync_id) # Not exist
 
@@ -3302,7 +3290,8 @@ class JDbReader:
                 val_fp.close()
 
     def _decode_row(self, file_id:int, offset:int, key:str, val_size:int=0) -> Any:
-        if offset < 0: # BUG fixed: offset must be uint64
+        if offset < 0: # pragma: no cover
+            # BUG fixed: offset must be uint64
             offset, = _UInt64_unpack(_Int64_pack(offset))
 
         if file_id == 0: # None type

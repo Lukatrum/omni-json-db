@@ -8,6 +8,7 @@ from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, Gener
 from random import randint, randrange
 from contextlib import contextmanager
 from csv import DictReader, DictWriter
+from collections import OrderedDict
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK,\
@@ -2285,10 +2286,12 @@ class JDb(JDbReader):
                         break
 
                     if key is None:
-                        key = list(row)[0]
+                        # Python 3.7: row is OrderedDict
+                        fields = [field for field in row.keys()] # pylint: disable=unnecessary-comprehension
+                        key = fields[0]
 
                     key_id = row.pop(key)
-                    if fix_it:
+                    if fix_it or isinstance(row, OrderedDict):
                         row = dict(row)
 
                     if self.f_write(fp, key_id, row, flags=flags, max_wsize=max_wsize):

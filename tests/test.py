@@ -260,6 +260,8 @@ class TestJDb(unittest.TestCase):
             csv_file = 'db/test.csv'
             jdb += {'key1':1, 'key2':'a', 'key3':3., 'key4':True, 'key5':None}
             jdb.to_csv(csv_file)
+            with open(csv_file, 'rt', encoding='utf8') as fp:
+                print(fp.read())
 
             jmem2 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem2.from_csv(csv_file)
@@ -1008,6 +1010,8 @@ class TestJDb(unittest.TestCase):
             jdb1.sync(True)
             for key,val in jdb.items():
                 self.assertEqual(jdb1.get_cache(key, None), val)
+
+            self.assertEqual(jdb1.get_cache('xxx', default_val='not exist'), 'not exist')
 
             error = jdb.check_error()
             self.assertTrue(not error)
@@ -4689,6 +4693,8 @@ class TestJDb(unittest.TestCase):
 
             _today = dt.date.today()
             _next_day = _today + dt.timedelta(days=1)
+            now = _today2 = dt.datetime.now()
+            _prev_day = _today2 - dt.timedelta(days=1)
             expect = {f'kk{i}' : 'vvvvvvvv'+str(i+123) for i in range(100)}
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
@@ -4696,14 +4702,18 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.get_all(), expect)
             self.assertEqual(jdb.get_n(expect), expect)
             self.assertEqual(jdb[:], expect)
-            self.assertEqual(jdb[dt.date.today()], expect)
-            self.assertEqual(jdb[dt.datetime.now()], expect)
-            self.assertEqual(set(jdb.keys[dt.date.today()]), set(expect))
-            self.assertEqual(set(jdb.keys[dt.datetime.now()]), set(expect))
+            self.assertEqual(jdb[_today], expect)
+            self.assertEqual(jdb[_today2], expect)
+            self.assertEqual(jdb[_today:_next_day], expect)
+            self.assertEqual(jdb[_prev_day:_next_day], expect)
+            self.assertEqual(set(jdb.keys[_today]), set(expect))
+            self.assertEqual(set(jdb.keys[_today2]), set(expect))
+            self.assertEqual(set(jdb.keys[_today:_next_day]), set(expect))
+            self.assertEqual(set(jdb.keys[_prev_day:_next_day]), set(expect))
 
             self.assertEqual(jdb.find('', date=0, with_value=True), expect)
-            self.assertEqual(jdb.find('', date=dt.date.today(), with_value=True), expect)
-            self.assertEqual(jdb.find('', date=dt.datetime.now(), with_value=True), expect)
+            self.assertEqual(jdb.find('', date=_today, with_value=True), expect)
+            self.assertEqual(jdb.find('', date=_today2, with_value=True), expect)
             self.assertEqual(jdb.find('', date=str(_today), with_value=True), expect)
 
             matches = jdb[_today:]
@@ -6764,6 +6774,10 @@ class TestJDb(unittest.TestCase):
                         JDb(jdb, key_limit='no', cache_limit=-1)]
 
             expect = {f'k{v}' : [v%10] * (test_size + 1) for v in range(test_size)}
+            jmem = JDb()
+            jmem['main'] = jdb
+            self.assertTrue(jmem.get_child('main') is jdb)
+
             jdb.insert(expect)
             self.assertEqual(jdb, expect)
 
@@ -6817,6 +6831,7 @@ class TestJDb(unittest.TestCase):
                     continue
                 th.join()
 
+            jmem.sync(force=True)
             jdb.sync()
             for _jdb in jdb_list:
                 if id(_jdb) == id(jdb):
@@ -6829,6 +6844,10 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jdb.get_all(), _jdb.get_all())
                 self.assertEqual(jdb.file_table, _jdb.file_table)
                 self.assertEqual(jdb.key_table, _jdb.key_table)
+
+            jmem.unsync(with_child=True)
+            error = jmem.check_error(level=2)
+            self.assertTrue(not error)
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
