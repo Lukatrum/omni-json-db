@@ -2343,7 +2343,7 @@ class JDbReader:
                         row_id = key_table[_key]
                         if row_id < 0:
                             if has_childs and _key.find(SEP_SYM) >= 0:
-                                for kk,vv in self.item_iter(_key):
+                                for kk,vv in self.item_iter(_key): # pragma: no cover
                                     yield kk,vv
 
                             continue
@@ -2888,7 +2888,7 @@ class JDbReader:
         self.io.groups.pop(key, None)
         return None
 
-    def f_get_child(self, fp_dict:Dict[int,IO], name:str) -> Optional[JDbReader]:
+    def f_get_child(self, fp_dict:Dict[int,IO], name:str) -> Optional[JDbReader]: # pragma: no cover
         io = self.io
         childs = self.childs
         groups = io.groups

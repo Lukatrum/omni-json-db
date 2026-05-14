@@ -1,7 +1,7 @@
 |Logo|
 
 .. highlights::
-   A nimble squirrel swiftly gathering a golden forest’s worth of acorns!
+   A nimble squirrel swiftly gathers a golden forest’s worth of acorns!
 
 |Version| |Build Status| |Pylint| |Codacy| |Coverage| |License|
 
@@ -16,11 +16,11 @@
 
 ✨ Introduction
 ***************
-``omni-json-db`` is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a Document database. 
+``omni-json-db`` is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
 
 Built for extreme throughput and thread-safety, ``omni-json-db`` leverages modern serialization (``JSON``, ``MsgPack``, ``marshal``, ``pickle``, ``YAML``) and compression to provide a storage layer that is often significantly faster than SQLite for JSON-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, ``omni-json-db`` provides the tools to handle data at scale with "Zero-Config" simplicity.
 
-Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo), and extreme compression capabilities.
+Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use native Python syntax (slicing, Lambdas, Regex, ``Set`` operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo), and extreme compression capabilities.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 
@@ -44,11 +44,13 @@ Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use
 
 * **"Time-Travel" & Rollbacks**: The database tracks internal states, allowing you to undo modifications (``unmodify()``) or recover deleted data (``unremove()``). Accidentally deleted a record? One line of code brings it back. [refer to `Rollback`_ + `Backup & Restore`_]
 
-* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from CSV files or export your ``omni-json-db`` collections for analysis in Excel or Pandas. [refer to `CSV`_]
+* **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Group`_]
+
+* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from ``CSV`` files or export your ``omni-json-db`` collections for analysis in ``Excel`` or ``Pandas``. [refer to `CSV Import / Export`_]
+
+* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (``SQLite``) into ``NoSQL`` grouped structures. It also natively supports parsing structured configuration files (``INI``, ``TOML``) and handling complex ``CSV`` datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
 
 * **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Date Lookups`_]
-
-* **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Group`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
@@ -195,59 +197,6 @@ Backup & Restore
    assert jdb == fruits
    assert jdb == jdb_bak
 
-CSV
----
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+Json with no compression      
-   jdb1 = JDb(data_type="J+J")
-
-   # insert value without key
-   jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
-            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
-   
-   # export the data to CSV
-   jdb1.to_csv('example.csv')
-
-   # create another JDb in memory
-   jdb2 = JDb()
-   
-   # import the data from CSV
-   jdb2.from_csv('example.csv')
-   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
-
-Network
--------
-
-**Server side:**
-
-.. code-block:: python
-   
-   from omni_json_db import JDb, run_files_server   
-   
-   jdb = JDb('storage.jdb')
-
-   # equivalent to: files='storage.jdb'
-   run_files_server(host='127.0.0.1', port=59898, files=jdb)
-
-   # write key to JDb
-   jdb['remote-key'] = 'secret'
-
-**Client side:**
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-
-   # connect to files server
-   jdb = JDb('127.0.0.1:59898')
-
-   # read remote key from JDb
-   print(jdb['remote-key']) # Output: secret
-
 Group
 -----
 
@@ -280,6 +229,160 @@ Group
    # find fruits which contains 'a' from all groups
    matches = jdb.find(r':::a')
    print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+
+CSV Import / Export
+-------------------
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+   # Initialize the database in memory
+   # Key-Value is Json+Json with no compression      
+   jdb1 = JDb(data_type="J+J")
+
+   # insert value without key
+   jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
+            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
+   
+   # export the data to CSV
+   jdb1.to_csv('example.csv')
+
+   # create another JDb in memory
+   jdb2 = JDb()
+   
+   # import the data from CSV
+   jdb2.from_csv('example.csv')
+   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
+
+INI / TOML Import
+-----------------
+.. code-block:: python
+   
+   from omni_json_db import JDb
+   import io
+
+   jdb = JDb()
+
+   # --- Load INI Format ---
+   ini_data = """
+   [server]
+   host = 127.0.0.1
+   port = 8080
+   """
+
+   jdb.from_ini(io.StringIO(ini_data)) # Also supports direct file paths like 'config.ini'
+   print(jdb['server/host']) # Output: 127.0.0.1
+
+   # --- Load TOML Format ---
+   toml_data = """
+   app_name = "Omni Test"
+   [network]
+   ip = "192.168.1.1"
+   port = 8181
+   """
+   
+   jdb.from_toml(io.StringIO(toml_data))
+
+   print(config_db['/app_name'])    # Output: Omni Test
+   print(config_db['network/ip'])   # Output: 192.168.1.1
+
+SQLite Import
+-------------
+Step 1: Prepare ``sample.sqlite``
+
+.. code-block:: python
+
+   import sqlite3
+   conn = sqlite3.connect('sample.sqlite')
+   cursor = conn.cursor()
+
+   cursor.execute('''
+   CREATE TABLE IF NOT EXISTS projects (
+     id INTEGER PRIMARY KEY, 
+     name text NOT NULL, 
+     begin_date DATE, 
+     end_date DATE
+   )
+   ''')
+
+   cursor.execute('''
+   CREATE TABLE IF NOT EXISTS project_logs (
+     project_id INTEGER,
+     action TEXT NOT NULL,
+     log_date DATE
+   )
+   ''')
+
+   cursor.execute('DELETE FROM projects')
+   cursor.execute('DELETE FROM project_logs')
+
+   projects_data = [
+     (1, 'cooking', '2000-01-02', '2003-01-13'),
+     (2, 'reading', '2023-05-01', '2023-12-31'),
+     (3, 'coding', '2024-01-01', '2024-06-30')
+   ]
+   cursor.executemany('INSERT INTO projects (id, name, begin_date, end_date) VALUES (?, ?, ?, ?)', projects_data)
+
+   logs_data = [
+     (1, 'bought ingredients', '2000-01-01'),
+     (1, 'started cooking', '2000-01-02'),
+     (2, 'bought books', '2023-04-20'),
+     (3, 'setup environment', '2024-01-01')
+   ]
+   cursor.executemany('INSERT INTO project_logs (project_id, action, log_date) VALUES (?, ?, ?)', logs_data)
+
+   conn.commit()
+   conn.close()
+
+Step 2: Import to ``JDb``
+
+.. code-block:: python
+
+   from omni_json_db import JDb   
+   jdb = JDb("migrated_data.jdb")
+
+   # Load an entire SQLite database with one line of code
+   jdb.from_sqlite('sample.sqlite')
+
+   # SQLite tables (e.g., 'projects' and 'project_logs') automatically become groups
+   projects = jdb['projects']
+   logs = jdb['project_logs']
+
+   # Query relational data using the NoSQL interface
+   print(projects[3]['name'])  # Get the name of the project with ID 3
+   print(len(logs))            # Get the total number of logs
+
+   # Combine with powerful Lambda queries to find logs for a specific project
+   project_3_logs = logs.find(FUNC=lambda v: v.get('project_id') == 3)
+
+Network
+-------
+
+**Server side:**
+
+.. code-block:: python
+   
+   from omni_json_db import JDb, run_files_server   
+   
+   jdb = JDb('storage.jdb')
+
+   # equivalent to: files='storage.jdb'
+   run_files_server(host='127.0.0.1', port=59898, files=jdb)
+
+   # write key to JDb
+   jdb['remote-key'] = 'secret'
+
+**Client side:**
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   # connect to files server
+   jdb = JDb('127.0.0.1:59898')
+
+   # read remote key from JDb
+   print(jdb['remote-key']) # Output: secret
 
 Change Type
 -----------

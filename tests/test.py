@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines, multiple-imports
-import unittest, time, random, threading, inspect, re, os
+import unittest, time, random, threading, inspect, re, os, io
 import datetime as dt
+import sqlite3
 from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server, loads, dumps
 
 _g_basetime = time.perf_counter()
@@ -58,6 +59,48 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
         return msg
 
     return f'{code}{msg}\033[0m'
+
+def create_sample_db(db_path:str):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY, 
+        name text NOT NULL, 
+        begin_date DATE, 
+        end_date DATE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS project_logs (
+        project_id INTEGER,
+        action TEXT NOT NULL,
+        log_date DATE
+    )
+    ''')
+
+    cursor.execute('DELETE FROM projects')
+    cursor.execute('DELETE FROM project_logs')
+
+    projects_data = [
+        (1, 'cooking', '2000-01-02', '2003-01-13'),
+        (2, 'reading', '2023-05-01', '2023-12-31'),
+        (3, 'coding', '2024-01-01', '2024-06-30')
+    ]
+    cursor.executemany('INSERT INTO projects (id, name, begin_date, end_date) VALUES (?, ?, ?, ?)', projects_data)
+
+    logs_data = [
+        (1, 'bought ingredients', '2000-01-01'),
+        (1, 'started cooking', '2000-01-02'),
+        (2, 'bought books', '2023-04-20'),
+        (3, 'setup environment', '2024-01-01')
+    ]
+    cursor.executemany('INSERT INTO project_logs (project_id, action, log_date) VALUES (?, ?, ?)', logs_data)
+
+    conn.commit()
+    conn.close()
 
 class TestJDb(unittest.TestCase):
     def setUp(self):
@@ -242,6 +285,70 @@ class TestJDb(unittest.TestCase):
             if not server: continue
             server.shutdown()
             server.server_close()
+
+    def test_import(self):
+        ini_data = """
+            [server]
+            host = 127.0.0.1
+            port = 8080
+        """
+
+        toml_data = """
+            app_name = "Omni Test"
+            [network]
+            ip = "192.168.1.1"
+            port = 8181
+        """
+
+        db_path = 'db/sample.sqlite'
+        create_sample_db(db_path)
+
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            # --------------------------------------------
+            jmem = JDb()
+            jmem['group'] = jdb1 = JDb(jdb)
+            jmem.clear(agree='yes', wait_sec=0)
+
+            jdb.from_ini(io.StringIO(ini_data))
+            self.assertEqual(set(jdb), {'server/host', 'server/port'})
+            self.assertEqual(jdb['server/port'], '8080')
+
+            jdb.from_toml(io.StringIO(toml_data))
+            total = len(jdb)
+            self.assertEqual(total, 5)
+            self.assertEqual(jdb - {'server/host', 'server/port'}, {'/app_name', 'network/ip', 'network/port'})
+            self.assertEqual(jdb['network/port'], 8181)
+
+            if not isinstance(jdb.files_obj, JNetFiles):
+                # JNetFiles does not support group
+                jdb.from_sqlite(db_path)
+                project_jdb = jdb.get_group('projects')
+                log_jdb = jdb.get_group('project_logs')
+                self.assertEqual(project_jdb, jdb['projects'])
+                self.assertEqual(log_jdb, jdb['project_logs'])
+                self.assertEqual(len(log_jdb), 4)
+                self.assertEqual(len(project_jdb), 3)
+                self.assertEqual(project_jdb[3]['name'], 'coding')
+                self.assertEqual(project_jdb[3]['name'], 'coding')
+                logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
+                self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
+
+            self.assertEqual(jdb, jdb1)
+            self.assertEqual(jdb.keys[:], jdb1.keys[:])
+            self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
+            self.assertEqual(jdb.file_table, jdb1.file_table)
+            self.assertEqual(jdb.sync_id, jdb1.sync_id)
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_csv(self):
         for config in self.jdb_configs:
@@ -6657,8 +6764,8 @@ class TestJDb(unittest.TestCase):
 
             elif op == 3:
                 with worker.open() as fp:
-                    io, fp, _key_fp = worker.f_get_fp(fp)
-                    key_table = io.key_table
+                    jio, fp, _key_fp = worker.f_get_fp(fp)
+                    key_table = jio.key_table
                     for key in keys:
                         try:
                             if key not in key_table:
@@ -6678,8 +6785,8 @@ class TestJDb(unittest.TestCase):
 
             elif op == 4:
                 with worker.open() as fp:
-                    io, fp, _key_fp = worker.f_get_fp(fp)
-                    key_table = io.key_table
+                    jio, fp, _key_fp = worker.f_get_fp(fp)
+                    key_table = jio.key_table
                     for key in keys:
                         try:
                             if key not in key_table:
@@ -6705,8 +6812,8 @@ class TestJDb(unittest.TestCase):
 
             elif op == 5:
                 with worker.open() as fp:
-                    io, fp, _key_fp = worker.f_get_fp(fp)
-                    key_table = io.key_table
+                    jio, fp, _key_fp = worker.f_get_fp(fp)
+                    key_table = jio.key_table
                     for old_key in keys:
                         try:
                             new_key = f'n{old_key[1:]}'
@@ -6730,8 +6837,8 @@ class TestJDb(unittest.TestCase):
 
             else:
                 with worker.open() as fp:
-                    io, fp, _key_fp = worker.f_get_fp(fp)
-                    key_table = io.key_table
+                    jio, fp, _key_fp = worker.f_get_fp(fp)
+                    key_table = jio.key_table
                     for old_key in keys:
                         try:
                             new_key = f'n{old_key[1:]}'

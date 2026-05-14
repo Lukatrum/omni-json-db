@@ -9,13 +9,23 @@ from random import randint, randrange
 from contextlib import contextmanager
 from csv import DictReader, DictWriter
 from collections import OrderedDict
+from configparser import ConfigParser
+from sqlite3 import connect as sql_connect, Row as sql_Row, Connection
+#-----------------------------------------------------------------------------
+try:
+    from tomllib import loads as toml_loads
+except ImportError:
+    try:
+        from tomli import loads as toml_loads
+    except ImportError:
+        from toml import loads as toml_loads
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK,\
             g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style
-#from .utils import debug_break
+# from .utils import debug_break
 from .jdb_file import JFilesBase
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -2271,8 +2281,7 @@ class JDb(JDbReader):
 
         return True
 
-    def from_csv(self, csv_file:str, key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> int:
-        cnt = 0
+    def from_csv(self, csv_file:str, key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> JDb:
         with open(csv_file, newline='', encoding='utf-8') as csv_fp:
             with self.open(read_only=False) as fp:
                 has_SIGINT = self.file_lock.has_SIGINT
@@ -2294,13 +2303,91 @@ class JDb(JDbReader):
                     if fix_it or isinstance(row, OrderedDict):
                         row = dict(row)
 
-                    if self.f_write(fp, key_id, row, flags=flags, max_wsize=max_wsize):
-                        cnt += 1
-
+                    self.f_write(fp, key_id, row, flags=flags, max_wsize=max_wsize)
                     if (ii % 1000) == 0:
                         print('.', end='', flush=True)
 
-        return cnt
+        return self
+
+    def from_sqlite(self, src:Union[str,Connection], batch_size:int=-1) -> JDb:
+        owns_conn = False
+        if isinstance(src, str):
+            conn = sql_connect(src)
+            owns_conn = True
+        else: # pragma: no cover
+            conn = src
+
+        if not isinstance(conn, Connection): # pragma: no cover
+            raise TypeError
+
+        org_row_factory = conn.row_factory
+        conn.row_factory = sql_Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = [row['name'] for row in cursor.fetchall() if row['name'] != 'sqlite_sequence']
+            for tb_name in tables:
+                child_jdb = self.add_group(tb_name)
+
+                cursor.execute(f"PRAGMA table_info({tb_name})")
+                columns_info = cursor.fetchall()
+
+                pk_cols = [col['name'] for col in columns_info if col['pk'] > 0]
+                all_cols = [col['name'] for col in columns_info]
+                val_cols = [col for col in all_cols if col not in pk_cols]
+
+                cursor.execute(f"SELECT * FROM {tb_name}")
+                with child_jdb.open(read_only=False) as fp:
+                    jio = child_jdb.io
+                    while True:
+                        rows = cursor.fetchmany(batch_size) if batch_size > 0 else cursor.fetchall()
+                        if not rows:
+                            break
+
+                        for row in rows:
+                            val = {col: row[col] for col in val_cols}
+                            key = '|'.join(str(row[col]) for col in pk_cols) if pk_cols else str(jio.sync_id)
+                            child_jdb.f_write(fp, key, val)
+
+            return self
+
+        finally:
+            conn.row_factory = org_row_factory
+            if owns_conn:
+                conn.close()
+
+    def from_ini(self, src:Union[str,IO]) -> JDb:
+        parser = ConfigParser()
+        if isinstance(src, str): # pragma: no cover
+            parser.read(src)
+        else:
+            parser.read_file(src)
+
+        with self.open(read_only=False) as fp:
+            for section in parser.sections():
+                for key,val in parser.items(section):
+                    self.f_write(fp, f'{section}/{key}', val)
+
+            return self
+
+    def from_toml(self, src:Union[str,IO]) -> JDb:
+        if isinstance(src, str): # pragma: no cover
+            with open(src, 'rt', encoding='utf-8') as fp:
+                content = fp.read()
+        else:
+            _content = src.read()
+            content = _content.decode('utf-8') if isinstance(_content, bytes) else _content
+
+        data = toml_loads(content)
+        with self.open(read_only=False) as fp:
+            for section,attributes in data.items():
+                if isinstance(attributes, dict):
+                    for key,val in attributes.items():
+                        self.f_write(fp, f'{section}/{key}', val)
+                else:
+                    self.f_write(fp, f'/{section}', attributes)
+
+            return self
 
     def reinit(self, records:Dict[str,Any], default_val:Optional[Any]=None, is_list:bool=False, agree:str='no', wait_sec:int=10, **kwargs) -> bool:
         jdb = None
