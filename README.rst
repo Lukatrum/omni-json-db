@@ -58,7 +58,7 @@ Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use
 📌 Supported Python Versions
 ****************************
 
-``omni-json-db`` has been tested with Python 3.7 - 3.14 and PyPy3.
+``omni-json-db`` has been tested with Python 3.7+ and PyPy3.
 
 🛠️ Quick Start
 **************
