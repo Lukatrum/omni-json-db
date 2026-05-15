@@ -1558,8 +1558,10 @@ class JIo:
                     else:
                         api_ver = API_V0
 
-        except Exception as e:
-            print(e)
+        # may throw FileNotFoundError
+        except Exception: # pragma: no cover
+            if api_ver is None:
+                api_ver = API_LATEST
 
         finally:
             if fp is not None:

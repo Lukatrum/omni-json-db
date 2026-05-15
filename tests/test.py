@@ -1566,18 +1566,28 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb.is_superset(jmem2))
             self.assertFalse(jdb.is_disjoint(jmem2))
             self.assertTrue(jdb.has_all(jmem2))
+            self.assertTrue(jdb.keys.is_superset(jmem2))
+            self.assertFalse(jdb.keys.is_disjoint(jmem2))
+            self.assertTrue(jdb.keys.has_all(jmem2))
             jmem2['kkey2'] = 2
             self.assertFalse(jdb.is_superset(jmem2))
             self.assertTrue(jdb.has_any(jmem2))
             self.assertFalse(jdb.has_all(jmem2))
+            self.assertFalse(jdb.keys.is_superset(jmem2))
+            self.assertTrue(jdb.keys.has_any(jmem2))
+            self.assertFalse(jdb.keys.has_all(jmem2))
             jmem2[jdb] = 3
             self.assertTrue(jdb.is_subset(jmem2))
+            self.assertTrue(jdb.keys.is_subset(jmem2))
             jmem2 -= {'key2'}
             self.assertFalse(jdb.is_subset(jmem2))
+            self.assertFalse(jdb.keys.is_subset(jmem2))
             jmem2 -= jdb
             self.assertTrue(jdb.is_disjoint(jmem2))
+            self.assertTrue(jdb.keys.is_disjoint(jmem2))
             jmem2 += jdb
             self.assertTrue(jdb.is_subset(jmem2))
+            self.assertTrue(jdb.keys.is_subset(jmem2))
             self.assertEqual(jmem2[jdb], jdb)
             del jmem2[jdb]
             self.assertEqual(jmem2[jdb], {})
@@ -5256,7 +5266,6 @@ class TestJDb(unittest.TestCase):
                                                 (0, [0]*16, [1]*32, [1]*64),
                                                 ([0]*64, 0, [1]*32, [1]*16),
                                                 ([0]*64, [0]*32, [1]*16, [1]*1)]:
-
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
                 jmem.insert(['A', 'B', 'C', 'D'], val0)
                 jmem['E'] = val1_0
@@ -6234,81 +6243,176 @@ class TestJDb(unittest.TestCase):
             self.assertFalse(jdb_a.is_superset({'c', 'd', 'xx'}))
             self.assertTrue(jdb_a.is_disjoint({'xx', 'yy'}))
 
-            ret = jdb_a.union(jdb_a)
-            self.assertEqual(ret, set(jdb_a))
-            self.assertEqual(jdb_a & jdb_a, ret)
+            self.assertEqual(jdb_a.keys + jdb_b.keys, ret)
+            self.assertEqual(jdb_a.keys | jdb_b.keys, ret)
+            self.assertEqual(jdb_a.keys - jdb_b.keys, {'a', 'd'})
+            self.assertEqual(jdb_a.keys ^ jdb_b.keys, {'a', 'd', 'e', 'f'})
+            self.assertEqual(jdb_a.keys & jdb_b.keys, {'b', 'c'})
+            self.assertEqual(jdb_a.keys + set_b, ret)
+            self.assertEqual(jdb_a.keys | set_b, ret)
+            self.assertEqual(jdb_a.keys - set_b, {'a', 'd'})
+            self.assertEqual(jdb_a.keys ^ set_b, {'a', 'd', 'e', 'f'})
+            self.assertEqual(jdb_a.keys & set_b, {'b', 'c'})
+            self.assertEqual(set_a + jdb_b.keys, ret)
+            self.assertEqual(set_a | jdb_b.keys, ret)
+            self.assertEqual(set_a - jdb_b.keys, {'a', 'd'})
+            self.assertEqual(set_a ^ jdb_b.keys, {'a', 'd', 'e', 'f'})
+            self.assertEqual(set_a & jdb_b.keys, {'b', 'c'})
+            self.assertEqual(jdb_a.keys + jdb_b.keys, jdb_a.keys | jdb_b.keys)
+            self.assertEqual(jdb_a.keys.non_joint(set_a), set())
+            self.assertEqual(jdb_a.keys.non_joint(jdb_b.keys), {'e', 'f'})
+            self.assertEqual(jdb_a.keys.non_joint(set_b), {'e', 'f'})
+            self.assertEqual(jdb_a.keys.non_joint('e'), {'e'})
+            self.assertEqual(jdb_a.keys.non_joint('a'), set())
+            self.assertEqual(jdb_a.keys.joint(set_a), set_a)
+            self.assertEqual(jdb_a.keys.joint(jdb_b.keys), {'b', 'c'})
+            self.assertEqual(jdb_a.keys.joint('e'), set())
+            self.assertEqual(jdb_a.keys.joint('a'), {'a'})
+            self.assertEqual(jdb_a.keys + {'a', 'f'}, {'a', 'b', 'c', 'd', 'f'})
+            self.assertEqual({'a', 'f'} + jdb_a.keys, {'a', 'b', 'c', 'd', 'f'})
+            self.assertEqual(jdb_a.keys ^ {'a', 'b', 'xx', 'yy'}, {'c', 'd', 'xx', 'yy'})
+            self.assertEqual({'a', 'b', 'xx', 'yy'} - jdb_a.keys, {'xx', 'yy'})
+            self.assertEqual(jdb_b.keys - jdb_a.keys, {'e', 'f'})
+            self.assertEqual('a' - jdb_a.keys, set())
+            self.assertEqual('z' - jdb_a.keys, {'z'})
+            self.assertEqual('a' + jdb_a.keys, {'a', 'b', 'c', 'd'})
+            self.assertEqual('z' + jdb_a.keys, {'a', 'b', 'c', 'd', 'z'})
+            self.assertEqual('z' | jdb_a.keys, {'a', 'b', 'c', 'd', 'z'})
+            self.assertEqual('a' & jdb_a.keys, {'a'})
+            self.assertEqual('z' & jdb_a.keys, set())
+            self.assertEqual('a' ^ jdb_a.keys, {'b', 'c', 'd'})
+            self.assertEqual('z' ^ jdb_a.keys, {'a', 'b', 'c', 'd', 'z'})
+            self.assertEqual(jdb_a.keys - 'a', {'b', 'c', 'd'})
+            self.assertEqual({'a', 'b', 'xx', 'yy'} + jdb_a.keys, {'a', 'b', 'c', 'd', 'xx', 'yy'})
+            self.assertEqual({'a', 'b', 'xx', 'yy'} | jdb_a.keys, {'a', 'b', 'c', 'd', 'xx', 'yy'})
+            self.assertEqual({'a', 'b', 'xx', 'yy'} & jdb_a.keys, {'a', 'b'})
+            self.assertEqual({'a', 'b', 'xx', 'yy'} ^ jdb_a.keys, {'c', 'd', 'xx', 'yy'})
+            self.assertTrue({'a', 'b', 'c', 'd'} == jdb_a.keys)
+            self.assertTrue({'a', 'b', 'c', 'd', 'xx', 'yy'} != jdb_a.keys)
+            self.assertTrue({'a', 'b', 'c', } != jdb_a.keys)
+            self.assertTrue(jdb_a.keys == {'a', 'b', 'c', 'd'})
+            self.assertTrue(jdb_a.keys != {'a', 'b', 'xx', 'yy'})
+            self.assertTrue(jdb_a.keys.is_subset(jdb_a))
+            self.assertTrue(jdb_a.keys.is_superset(jdb_a.keys))
+            self.assertFalse(jdb_a.keys.is_disjoint(jdb_a.keys))
+            self.assertTrue(jdb_a.keys.is_subset({'a', 'b', 'c', 'd', 'xx'}))
+            self.assertFalse(jdb_a.keys.is_subset({'b', 'c', 'd', 'xx'}))
+            self.assertFalse(jdb_a.keys.is_subset({'b', 'c', 'd'}))
+            self.assertTrue(jdb_a.keys.is_superset({'b', 'c', 'd'}))
+            self.assertTrue(jdb_a.keys.is_superset({'c', 'd'}))
+            self.assertFalse(jdb_a.keys.is_superset({'c', 'd', 'xx'}))
+            self.assertTrue(jdb_a.keys.is_disjoint({'xx', 'yy'}))
+            ret = jdb_a.keys.union(jdb_a)
+            self.assertEqual(ret, set(jdb_a.keys))
+            self.assertEqual(jdb_a.keys & jdb_a.keys, ret)
 
             ret = jdb_a.non_joint(jdb_b)
             self.assertEqual(ret, {'e', 'f'})
+            self.assertEqual(jdb_a.keys.non_joint(jdb_b.keys), ret)
 
             ret = jdb_a.non_joint(jdb_a)
             self.assertEqual(ret, set())
+            self.assertEqual(jdb_a.keys.non_joint(jdb_a), ret)
             self.assertEqual(jdb_a - jdb_a, ret)
+            self.assertEqual(jdb_a.keys - jdb_a.keys, ret)
 
             ret = jdb_b.non_joint(jdb_a)
             self.assertEqual(ret, {'a', 'd'})
+            self.assertEqual(jdb_b.keys.non_joint(jdb_a.keys), ret)
 
             ret = jdb_a.difference(jdb_b)
             self.assertEqual(ret, {'a', 'd'})
             self.assertEqual(jdb_a - jdb_b, ret)
             self.assertEqual(jdb_a - set(jdb_b), ret)
 
+            self.assertEqual(jdb_a.keys.difference(jdb_b.keys), ret)
+            self.assertEqual(jdb_a.keys - jdb_b, ret)
+            self.assertEqual(jdb_a.keys - set(jdb_b), ret)
+
             ret = jdb_a.difference(jdb_a)
             self.assertEqual(ret, set())
             self.assertEqual(jdb_a - jdb_a, ret)
 
+            self.assertEqual(jdb_a.keys.difference(jdb_a.keys), ret)
+            self.assertEqual(jdb_a - jdb_a.keys, ret)
+
             ret = jdb_a - jdb_a
             self.assertEqual(ret, set())
+            self.assertEqual(jdb_a.keys - jdb_a.keys, ret)
 
             ret = set() - jdb_a
             self.assertEqual(ret, set())
+            self.assertEqual(set() - jdb_a.keys, ret)
 
             ret = {'xx', 'yy'} - jdb_a
             self.assertEqual(ret, {'xx', 'yy'})
+            self.assertEqual({'xx', 'yy'} - jdb_a.keys, ret)
 
             ret = jdb_a - set()
             self.assertEqual(ret, set(jdb_a))
+            self.assertEqual(jdb_a.keys - set(), ret)
 
             ret = jdb_a.joint(jdb_b)
             self.assertEqual(ret, {'b', 'c'})
             self.assertEqual(jdb_a & jdb_b, ret)
+            self.assertEqual(jdb_a.keys.joint(jdb_b), ret)
+            self.assertEqual(jdb_a.keys & jdb_b.keys, ret)
 
             ret = jdb_a.joint(jdb_a)
             self.assertEqual(ret, set(jdb_a))
             self.assertEqual(jdb_a & jdb_a, ret)
+            self.assertEqual(jdb_a.keys.joint(jdb_a), ret)
+            self.assertEqual(jdb_a.keys & jdb_a.keys, ret)
 
             ret = jdb_a.joint({'b', 'g'})
             self.assertEqual(ret, {'b'})
-            self.assertEqual(jdb_a & {'b', 'g'}, {'b'})
+            self.assertEqual(jdb_a & {'b', 'g'}, ret)
+            self.assertEqual(jdb_a.keys.joint({'b', 'g'}), ret)
+            self.assertEqual(jdb_a.keys & {'b', 'g'}, ret)
 
             ret = jdb_b.intersection(jdb_a)
             self.assertEqual(ret, {'b', 'c'})
+            self.assertEqual(jdb_b.keys.intersection(jdb_a.keys), ret)
 
             ret = {'b', 'c', 'xx'} & jdb_a
             self.assertEqual(ret, {'b', 'c'})
+            self.assertEqual({'b', 'c', 'xx'} & jdb_a.keys, ret)
+
             ret = jdb_a & {'b', 'c', 'xx'}
             self.assertEqual(ret, {'b', 'c'})
+            self.assertEqual(jdb_a.keys & {'b', 'c', 'xx'}, ret)
 
             ret = jdb_a.intersection({'c', 'g'})
             self.assertEqual(ret, {'c'})
             self.assertEqual(jdb_a & {'c', 'g'}, ret)
+            self.assertEqual(jdb_a.keys.intersection({'c', 'g'}), ret)
+            self.assertEqual(jdb_a.keys & {'c', 'g'}, ret)
 
             ret = jdb_a.intersection(jdb_a)
             self.assertEqual(ret, set(jdb_a))
             self.assertEqual(jdb_a & jdb_a, ret)
+            self.assertEqual(jdb_a.keys & jdb_a.keys, ret)
 
             ret = jdb_b.non_intersection(jdb_a)
             self.assertEqual(ret, {'a', 'd', 'e', 'f'})
             self.assertEqual(jdb_b ^ jdb_a, ret)
             self.assertEqual(jdb_a ^ jdb_b, ret)
+            self.assertEqual(jdb_b.keys.non_intersection(jdb_a.keys), ret)
+            self.assertEqual(jdb_b.keys ^ jdb_a.keys, ret)
+            self.assertEqual(jdb_a.keys ^ jdb_b.keys, ret)
 
             ret = jdb_a.non_intersection({'c', 'g'})
             self.assertEqual(ret, {'a', 'b', 'd', 'g'})
             self.assertEqual(jdb_a ^ {'c', 'g'}, ret)
+            self.assertEqual(jdb_a.keys.non_intersection({'c', 'g'}), ret)
+            self.assertEqual(jdb_a.keys ^ {'c', 'g'}, ret)
 
             ret = jdb_a.non_intersection(jdb_a)
             self.assertEqual(ret, set())
             self.assertEqual(jdb_a ^ jdb_a, ret)
+            self.assertEqual(jdb_a.keys.non_intersection(jdb_a), ret)
+            self.assertEqual(jdb_a.keys ^ jdb_a, ret)
+            self.assertEqual(jdb_a.keys ^ jdb_a.keys, ret)
 
     def test_process(self):
         for config in self.jdb_configs:

@@ -442,6 +442,81 @@ class JDbKey:
         with jdb.open(read_only=True):
             yield from jdb.io.key_table
 
+    def __contains__(self, keys:Set[str]) -> bool:
+        return self.is_superset(keys)
+
+    def __eq__(self, keys:Union[set,dict,JDbReader,JDbKey]) -> bool:
+        return self.jdb == keys
+
+    def __sub__(self, keys:Set[str]) -> Set[str]:
+        return self.difference(keys)
+
+    def __add__(self, keys:Set[str]) -> Set[str]:
+        return self.union(keys)
+
+    def __or__(self, keys:Set[str]) -> Set[str]:
+        return self.union(keys)
+
+    def __and__(self, keys:Set[str]) -> Set[str]:
+        return self.intersection(keys)
+
+    def __xor__(self, keys:Set[str]) -> Set[str]:
+        return self.non_intersection(keys)
+
+    def __rsub__(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.__rsub__(keys)
+
+    def __radd__(self, keys:Set[str]) -> Set[str]:
+        return self.union(keys)
+
+    def __ror__(self, keys:Set[str]) -> Set[str]:
+        return self.union(keys)
+
+    def __rand__(self, keys:Set[str]) -> Set[str]:
+        return self.intersection(keys)
+
+    def __rxor__(self, keys:Set[str]) -> Set[str]:
+        return self.symmetric_difference(keys)
+
+    def non_joint(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.non_joint(keys)
+
+    def joint(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.joint(keys)
+
+    def union(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.union(keys)
+
+    def intersection(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.intersection(keys)
+
+    def non_intersection(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.non_intersection(keys)
+
+    def symmetric_difference(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.symmetric_difference(keys)
+
+    def difference(self, keys:Set[str]) -> Set[str]:
+        return self.jdb.difference(keys)
+
+    def is_superset(self, keys:Set[str]) -> bool:
+        return self.jdb.is_superset(keys)
+
+    def is_subset(self, keys:Set[str]) -> bool:
+        return self.jdb.is_subset(keys)
+
+    def is_disjoint(self, keys:Set[str]) -> bool:
+        return self.jdb.is_disjoint(keys)
+
+    def has(self, key:str) -> bool:
+        return self.jdb.has(key)
+
+    def has_any(self, keys:Set[str]) -> bool:
+        return self.jdb.has_any(keys)
+
+    def has_all(self, keys:Set[str]) -> bool:
+        return self.jdb.has_all(keys)
+
     def item_iter(self, key:Optional[Any]=None) -> Generator[str,tuple]:
         '''
             [1] key
@@ -987,7 +1062,7 @@ class JDbReader:
     def __contains__(self, keys:Set[str]) -> bool:
         return self.is_superset(keys)
 
-    def __eq__(self, jdb:Union[set,dict,JDbReader]) -> bool:
+    def __eq__(self, jdb:Union[set,dict,JDbReader,JDbKey]) -> bool:
         '''
             [1] jdb
                 type = JDb | dict()
@@ -1019,6 +1094,13 @@ class JDbReader:
                         if f_read(fp, key, row=row, copy=False) != jdb_read(ref_fp, key, row=ref_row, copy=False):
                             return False
 
+        elif isinstance(jdb, JDbKey):
+            jdb = jdb.jdb
+            if jdb is not self:
+                with self.open(read_only=True):
+                    with jdb.open(read_only=True):
+                        return jdb.io.key_table  == self.io.key_table
+
         elif isinstance(jdb, dict):
             with self.open(read_only=True) as fp:
                 if self.io.n_records != len(jdb):
@@ -1031,6 +1113,7 @@ class JDbReader:
 
                     if f_read(fp, key, row=row, copy=False) != jdb[key]:
                         return False
+
 
         elif isinstance(jdb, set):
             with self.open(read_only=True):
@@ -1672,11 +1755,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return set()
 
@@ -1717,11 +1800,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             with self.open(read_only=True):
                 key_table = set(self.io.key_table)
                 if jdb is self or jdb.files_obj == self.files_obj:
@@ -1747,11 +1830,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             with self.open(read_only=True):
                 key_table = set(self.io.key_table)
                 if jdb is self or not key_table or jdb.files_obj == self.files_obj:
@@ -1780,11 +1863,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             with self.open(read_only=True):
                 if jdb is self or jdb.files_obj == self.files_obj:
                     return set()
@@ -1813,11 +1896,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             with self.open(read_only=True):
                 if jdb is self or jdb.files_obj == self.files_obj:
                     return set()
@@ -1842,11 +1925,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return True
 
@@ -1882,11 +1965,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return True
 
@@ -1931,11 +2014,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return False
 
@@ -2011,11 +2094,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return True
 
@@ -2048,11 +2131,11 @@ class JDbReader:
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
 
-        elif isinstance(keys, bytes): # pragma: no cover
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = {str(keys)}
 
-        elif isinstance(keys, JDbReader):
-            jdb = keys
+        elif isinstance(keys, (JDbReader, JDbKey)):
+            jdb = keys.jdb if isinstance(keys, JDbKey) else keys
             if jdb is self:
                 return True
 
@@ -3415,7 +3498,9 @@ class JDbReader:
             if _type is str:        return (0, 0x10, 0)
             if _type is bytes:      return (0, 0x20, 0)
             if _type is bytearray:  return (0, 0x40, 0)
-
+            # if _type is bool:     return (0, 0x100, 0)
+            # if _type is int:      return (0, 0x200, 0)
+            # if _type is float:    return (0, 0x400, 0)
         else:
             # 0x10 ~ 0x1f
             if is_jdb:
