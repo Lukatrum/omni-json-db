@@ -350,6 +350,137 @@ class TestJDb(unittest.TestCase):
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
+    def test_nosql(self):
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            # --------------------------------------------
+            users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
+                        {'name': 'Bob', 'age': 25, 'role': 'helper'},
+                        {'name': 'Charlie', 'age': 35, 'tags' :['python', 'programming']}]
+
+            jdb += users
+            self.assertEqual(len(jdb), 3)
+
+            matches = jdb.find(ANY={'name': 'Alice'})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+            matches_2 = jdb.find(ANY='Alice')
+            self.assertEqual(matches, matches_2)
+
+            # name contains 'li[a-e]' regex
+            matches = jdb.find(vals={'name': r'li[a-z]'})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
+
+            matches_2 = jdb.find(ANY=r'li')
+            self.assertEqual(matches, matches_2)
+
+            # any contains r'ob'
+            matches = jdb.find(ANY=r'ob')
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob'})
+
+            # with email
+            matches = jdb.find(vals={'email': r'[a-z]@[a-z]'})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+
+            # age >= 30
+            matches = jdb.find(vals={'age': {'$le':30}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob'})
+            matches_2 = jdb.find(ANY={'$le':30})
+            self.assertEqual(matches, matches_2)
+
+            # age == 30
+            matches = jdb.find(vals={'age': {'$eq':30}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+            matches_2 = jdb.find(vals={'age': 30})
+            self.assertEqual(matches, matches_2)
+            matches_2 = jdb.find(ANY={'age': 30})
+            self.assertEqual(matches, matches_2)
+            matches_2 = jdb.find(RE=r'\D30\D')
+            self.assertEqual(matches, matches_2)
+            matches_2 = jdb.find(ANY=30)
+            self.assertEqual(matches, matches_2)
+
+            # age != 30
+            matches = jdb.find(vals={'age': {'$ne':30}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob', 'Charlie'})
+            matches_2 = jdb.find(RE=r'\D\d\d(?<!30)')
+            self.assertEqual(matches, matches_2)
+
+            # age in [25, 35]
+            matches = jdb.find(ANY={'age': {'$in': [25, 35]}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob', 'Charlie'})
+            matches_2 = jdb.find(vals={'age': {'$in': [25, 35]}})
+            self.assertEqual(matches, matches_2)
+            matches_2 = jdb.find(ANY={'$in': [25, 35]})
+            self.assertEqual(matches, matches_2)
+
+            # age not in [25, 35]
+            matches = jdb.find(vals={'$not': {'age':{'$in':[25, 35]}}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+
+            matches_2 = jdb.find(NOT={'age':{'$in':[25, 35]}})
+            self.assertEqual(matches, matches_2)
+
+            # age != 30
+            matches = jdb.find(NOT={'age':30})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob', 'Charlie'})
+
+            # 35 >= age >= 25
+            matches = jdb.find(vals={'$and': [
+                {'age':{'$ge': 25}},
+                {'age':{'$le': 35}}
+            ]})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob', 'Charlie'})
+
+            matches_2 = jdb.find(AND=[
+                {'age':{'$ge': 25}},
+                {'age':{'$le': 35}}
+            ])
+            self.assertEqual(matches, matches_2)
+
+            matches_2 = jdb.find(vals={'age': {'$ge': 25 , '$le': 35}})
+            self.assertEqual(matches, matches_2)
+
+            # age < 25 or age > 35
+            matches = jdb.find(vals={'$or': [
+                {'age':{'$lt': 25}},
+                {'age':{'$gt': 35}}
+            ]})
+            self.assertEqual(len(matches), 0)
+
+            matches_2 = jdb.find(OR=[
+                {'age':{'$lt': 25}},
+                {'age':{'$gt': 35}}
+            ])
+            self.assertEqual(matches, matches_2)
+
+            # age == 25 or role != '' or name[:2] == 'Bo'
+            matches = jdb.find(OR=[{'age': 25}, {'role':'.'}, {'name':r'^Bo'}])
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob'})
+
+            # not age >= 19
+            matches = jdb.find(NOT={'age': {'$ge': 18}})
+            self.assertEqual(len(matches), 0)
+
+            # len(tags) == 2
+            matches = jdb.find(vals={'tags': {'$size': 2}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
+            matches_2 = jdb.find(ANY={'$size': 2})
+            self.assertEqual(matches, matches_2)
+
+            # len(tags) in [1,2]
+            matches = jdb.find(vals={'tags': {'$size': [1,2,3]}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
     def test_csv(self):
         for config in self.jdb_configs:
             st_time = time.perf_counter()
@@ -404,6 +535,36 @@ class TestJDb(unittest.TestCase):
             jmem2.from_csv(csv_file)
             self.assertEqual(jmem2, expect)
             self.assertEqual(jmem2, jdb)
+
+            del jdb[:]
+            csv_example = 'ID0,name,age\n0,Alice,30\n1,Bob,25\n2,Charlie,35\n'
+            with io.StringIO(csv_example) as fp:
+                jdb.from_csv(fp)
+
+            self.assertEqual(len(jdb), 3)
+
+            matches = jdb.find(ANY={'name': 'Alice'})
+            self.assertEqual(len(matches), 1)
+
+            # name contains 'li[a-e]' regex
+            matches = jdb.find(vals={'name': r'li[a-z]'})
+            self.assertEqual(len(matches), 2)
+
+            matches_2 = jdb.find(ANY=r'li')
+            self.assertEqual(matches, matches_2)
+
+            matches_3 = jdb.find(ANY=r'o')
+            self.assertEqual(set(jdb), set(matches_2).union(matches_3))
+
+            # age start with 3x
+            matches = jdb.find(ANY={'age': {'$re':r'^3\d$'}})
+            self.assertEqual(len(matches), 2)
+
+            del jmem2[:]
+            with io.StringIO() as fp:
+                jdb.to_csv(fp)
+                jmem2.from_csv(fp)
+            self.assertEqual(jdb, jmem2)
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -3370,10 +3531,10 @@ class TestJDb(unittest.TestCase):
             matches = jdb.find(NOT={'$ge':10})
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10)})
 
-            matches = jdb.find(AND={'$ge':10, '$lt':20})
+            matches = jdb.find(AND=[{'$ge':10}, {'$lt':20}])
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10, 20)})
 
-            matches = jdb.find(NOT={'$or':{'$lt':10, '$ge':20}})
+            matches = jdb.find(NOT={'$or':[{'$lt':10}, {'$ge':20}]})
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10, 20)})
 
             matches = jdb.find('kkk', sort=1)
@@ -6291,6 +6452,10 @@ class TestJDb(unittest.TestCase):
             self.assertTrue({'a', 'b', 'c', 'd', 'xx', 'yy'} != jdb_a.keys)
             self.assertTrue({'a', 'b', 'c', } != jdb_a.keys)
             self.assertTrue(jdb_a.keys == {'a', 'b', 'c', 'd'})
+            self.assertTrue(jdb_a == jdb_a.keys)
+            self.assertTrue(jdb_a != jdb_b.keys)
+            self.assertTrue(jdb_a.keys == jdb_a)
+            self.assertTrue(jdb_a.keys != jdb_b)
             self.assertTrue(jdb_a.keys != {'a', 'b', 'xx', 'yy'})
             self.assertTrue(jdb_a.keys.is_subset(jdb_a))
             self.assertTrue(jdb_a.keys.is_superset(jdb_a.keys))

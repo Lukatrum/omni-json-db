@@ -2150,11 +2150,14 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=None, replace=True, insert=False, is_list=True, **kwargs)
 
-    def to_csv(self, csv_file:str, key:Optional[str]=None, **kwargs) -> bool:
+    def to_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, **kwargs) -> bool:
         """Export data to CSV file
         
         Args:
-            csv_file (str): output file
+            csv_file
+                - str: output file path
+                - IO : IO object
+
             key (Optional[str], optional): 1st key fields            
         
         Returns:
@@ -2162,6 +2165,10 @@ class JDb(JDbReader):
         """
         fields = []
         with self.open(read_only=True) as fp:
+            csv_fp,owns_it = (open(csv_file, 'w', newline='', encoding='utf-8'), True) \
+                    if isinstance(csv_file, str) else (csv_file, False) # pylint: disable=consider-using-with
+
+            csv_fp.seek(0)
             io, fp, key_fp = self.f_get_fp(fp)
             f_read = self.f_read
             patterns = set()
@@ -2230,7 +2237,7 @@ class JDb(JDbReader):
             if not fields or  kk != fields[0]:
                 fields.insert(0, kk)
 
-            with open(csv_file, 'w', newline='', encoding='utf-8') as csv_fp:
+            try:
                 io, fp, key_fp = self.f_get_fp(fp)
                 _cache = self._cache
                 _decode_row = self._decode_row
@@ -2279,10 +2286,19 @@ class JDb(JDbReader):
                     if (row_id % 1000) == 0:
                         print('.', end='', flush=True)
 
+            finally:
+                if owns_it and csv_fp is not None:
+                    csv_fp.close()
+
         return True
 
-    def from_csv(self, csv_file:str, key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> JDb:
-        with open(csv_file, newline='', encoding='utf-8') as csv_fp:
+    def from_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> JDb:
+        csv_fp,owns_it = (open(csv_file, 'r', newline='', encoding='utf-8'), True) \
+                if isinstance(csv_file, str) else (csv_file, False) # pylint: disable=consider-using-with
+
+        csv_fp.seek(0)
+        #pass;0;assert hasattr(csv_fp, 'close')
+        try:
             with self.open(read_only=False) as fp:
                 has_SIGINT = self.file_lock.has_SIGINT
                 io = self.io
@@ -2291,8 +2307,7 @@ class JDb(JDbReader):
                 # key_table = io.key_table
                 reader = DictReader(csv_fp, **kwargs)
                 for ii,row in enumerate(reader):
-                    if has_SIGINT():
-                        break
+                    if has_SIGINT(): break
 
                     if key is None:
                         # Python 3.7: row is OrderedDict
@@ -2306,6 +2321,10 @@ class JDb(JDbReader):
                     self.f_write(fp, key_id, row, flags=flags, max_wsize=max_wsize)
                     if (ii % 1000) == 0:
                         print('.', end='', flush=True)
+
+        finally:
+            if owns_it and csv_fp is not None:
+                csv_fp.close()
 
         return self
 

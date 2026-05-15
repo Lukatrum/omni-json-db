@@ -42,7 +42,7 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 * **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query`_]
 
-* **Memory Caching**: Adjustable cache_limit to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
+* **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
 
 * **Network Mode** (``JNetFiles``): Transform a local **omni-json-db** instance into a networked service with a single command using ``run_files_server()``. [refer to `Network`_]
 

@@ -53,9 +53,9 @@ SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
 
 FIND_OPS = {'AND', 'NOT', 'OR', 'ANY',
-            'FUNC', 'RE', 'RE2',
+            'FUNC', 'RE', 'RE2', 
             'HAS', 'IN', 'NE', 'EQ',
-            'GE', 'GT', 'LE', 'LT'}
+            'GE', 'GT', 'LE', 'LT', 'SIZE'}
 
 class JFlag(IntFlag):
     REVERT  = 0x01  # [r]allow to revert after write/delete operation
@@ -118,27 +118,45 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
 
         elif cmd[0] == '$':
             if cmd == '$gt':
-                if not val.__gt__ or not rule.__gt__ or not val > rule:
+                try:
+                    if not val.__gt__ or not rule.__gt__ or not val > rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$ge':
-                if not val.__ge__ or not rule.__ge__ or not val >= rule:
+                try:
+                    if not val.__ge__ or not rule.__ge__ or not val >= rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$lt':
-                if not val.__lt__ or not rule.__lt__ or not val < rule:
+                try:
+                    if not val.__lt__ or not rule.__lt__ or not val < rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$le':
-                if not val.__le__ or not rule.__le__ or not val <= rule:
+                try:
+                    if not val.__le__ or not rule.__le__ or not val <= rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$eq':
-                if not val.__eq__ or not rule.__eq__ or not val == rule:
+                try:
+                    if not val.__eq__ or not rule.__eq__ or not val == rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$ne':
-                if not val.__ne__ or not rule.__ne__ or not val != rule:
+                try:
+                    if not val.__ne__ or not rule.__ne__ or not val != rule:
+                        return False
+                except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$in':
@@ -255,42 +273,33 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 else:
                     return False
 
-            # elif cmd == '$len':
-            #     if not hasattr(rule, '__iter__'):
-            #         return False
+            elif cmd == '$size':
+                if not hasattr(val, '__iter__'):
+                    return False
 
-            #     _len = len(val)
-            #     if isinstance(rule, range):
-            #         if _len not in rule:
-            #             return False
+                _len = len(val)
+                if isinstance(rule, (float, int)):
+                    if _len != int(rule):
+                        return False
 
-            #     elif isinstance(rule, int):
-            #         if _len != rule:
-            #             return False
+                elif isinstance(rule, (list, set, frozenset, tuple, range)):
+                    if _len not in rule:
+                        return False
 
-            #     elif isinstance(rule, float):
-            #         if _len != int(rule):
-            #             return False
-
-            #     elif isinstance(rule, (list, set, frozenset, tuple)):
-            #         if _len not in rule:
-            #             return False
-
-            #     else:
-            #         return False
+                else: # pragma: no cover
+                    return False
 
             elif cmd == '$not':
                 if _match_rules(key, val, rule, level=level+1):
                     return False
 
             elif cmd == '$or':
-                if not isinstance(rule, dict): # pragma: no cover
+                if not isinstance(rule, (list,tuple)): # pragma: no cover
                     return False
 
                 is_matched = False
-                for _cmd,_rule in rule.items():
-                    _cmd = _cmd.rstrip('_')
-                    if _match_rules(key, val, {_cmd : _rule}, level=level+1):
+                for _rule in rule:
+                    if _match_rules(key, val, _rule, level=level+1):
                         is_matched = True
                         break
 
@@ -298,13 +307,12 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                     return False
 
             elif cmd == '$and':
-                if not isinstance(rule, dict): # pragma: no cover
+                if not isinstance(rule, (list,tuple)): # pragma: no cover
                     return False
 
                 is_matched = True
-                for _cmd,_rule in rule.items():
-                    _cmd = _cmd.rstrip('_')
-                    if not _match_rules(key, val, {_cmd : _rule}, level=level+1):
+                for _rule in rule:
+                    if not _match_rules(key, val, _rule, level=level+1):
                         is_matched = False
                         break
 
@@ -1876,7 +1884,7 @@ class JDbReader:
                 with jdb.open(read_only=True):
                     return key_table.symmetric_difference(jdb.io.key_table)
 
-        elif hasattr(keys, '__iter__'):
+        elif hasattr(keys, '__iter__'): # pragma: no cover
             if not keys:
                 with self.open(read_only=True):
                     return set(self.io.key_table)
@@ -2445,7 +2453,7 @@ class JDbReader:
 
     def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Union[str,datetime,dt_date,int,None]=None, limit:int=0, with_value:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
         '''
-            $gt, $ge, $lt, $le, $eq, $ne, $in ,$re, $re2, $has, $func : value
+            [OP] $gt, $ge, $lt, $le, $eq, $ne, $in ,$re, $re2, $has, $func : value
                 find_iter(vals={'$eq': "value"})
                     == find_iter(EQ="value")
                 find_iter(vals={'$in': ["value1", "value2"]})
@@ -2454,17 +2462,19 @@ class JDbReader:
                     == find_iter(FUNC=lambda value:value == "any")
                     == find_iter(FUNC=lambda key,val:val == "any")
                 
-            $and, $or, $not : {...}
-                find_iter(vals={'$or': {'$eq':'value1', '$eq_':'value2'}})
-                    == find_iter(OR={'$eq':'value1', '$eq_':'value2'})
-                find_iter(vals={'$and': {'$gt':0, '$le':100}})
-                    == find_iter(AND={'$gt':0, '$le':100}) # 100 >= value >= 0
+            [OP] $and, $or : [{name:{OP:VAL}}, ..] or [{name:VAL}, ..]
+                find_iter(vals={'$or': [{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
+                    == find_iter(OR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
+                find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$le':100}}])
+                    == find_iter(AND=[{'age':{'$gt':0}, {'age':{'$le':100}}]) # 100 >= age >= 0
+
+            [OP] $not : {name:{OP:VAL}} or {name:VAL}
                 find_iter(vals={'$not: {'$eq':'value1'})
                     == find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
 
             $all
 
-            $val : {...}
+            $val : {..}
                 $gt, $ge, $lt, $le, $eq, $ne : value
                 $in : {a, b, c}
                 $func : func(a)
@@ -2487,10 +2497,10 @@ class JDbReader:
                 $val : {...},
                 field_name : {...}}
 
-            field_name : 1  -> {field_name : {'$eq' : 1}}
-            field_name : 'a'  -> {field_name : {'$re' : 'a'}}
-            field_name : lambda v : v  -> {field_name : {'$func' : lambda v : v}}
-            field_name : [1,2,3] -> {field_name : {'$in' : [1,2,3]}}
+            field_name : 1              -> {field_name : {'$eq' : 1}}
+            field_name : 'a'            -> {field_name : {'$re' : 'a'}}
+            field_name : lambda v : v   -> {field_name : {'$func' : lambda v : v}}
+            field_name : [1,2,3]        -> {field_name : {'$in' : [1,2,3]}}
 
             example
                 find(r'^[Rr].*[Nn]$', IN=[8,27])

@@ -2004,7 +2004,7 @@ class JIo:
 
                 raise ValueError from e
 
-        except Exception as e:
+        except Exception as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!unzip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type_i})\nexception:{e}', red=1))
             raise ValueError from e
 
@@ -2510,7 +2510,7 @@ class JIo:
                 try:
                     key, file_id, offset, row_size, _val_size, _ver, _days = KEY_loads(line)
 
-                except Exception as e:
+                except Exception as e: # pragma: no cover
                     if lines < n_lines or records < n_records:
                         print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
                     break
