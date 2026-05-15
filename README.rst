@@ -1,6 +1,7 @@
 |Logo|
 
-.. highlights::
+..
+
    A nimble squirrel swiftly gathers a golden forest’s worth of acorns!
 
 |Version| |Build Status| |Pylint| |Codacy| |Coverage| |License|
@@ -14,17 +15,18 @@
 - `📊 Benchmarking`_
 - `👥 Contributing`_
 
-.. highlights::
-   ⭐️ If you find ``omni-json-db`` useful, please consider giving it a star! It helps the project grow and reach more developers.
+..
+
+   ⭐️ If you find **omni-json-db** useful, please consider giving it a **star**! It helps the project grow and reach more developers.
 
 
 ✨ Introduction
 ***************
-``omni-json-db`` is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
+**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
 
-Built for ultra-high throughput and thread-safety, ``omni-json-db`` leverages modern serialization (``JSON``, ``MsgPack``, ``marshal``, ``pickle``, ``YAML``) and compression to provide a storage layer that is often significantly faster than SQLite for JSON-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, ``omni-json-db`` provides the tools to handle data at scale with "Zero-Config" simplicity.
+Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
 
-Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
+Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 
@@ -36,13 +38,13 @@ Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use
 ***********
 * **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. [refer to `Basic`_ + `Operator`_]
 
-* **Dynamic Serialization & Advanced Compression**: Mix and match JSON(``orjson``), MsgPack(``ormsgpack``), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
+* **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
 
 * **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query`_]
 
 * **Memory Caching**: Adjustable cache_limit to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
 
-* **Network Mode** (``JNetFiles``): Transform a local ``omni-json-db`` instance into a networked service with a single command using ``run_files_server()``. [refer to `Network`_]
+* **Network Mode** (``JNetFiles``): Transform a local **omni-json-db** instance into a networked service with a single command using ``run_files_server()``. [refer to `Network`_]
 
 * **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for high performance (ideal for real-time caches or volatile session storage). [refer to `In-memory`_]
 
@@ -50,9 +52,9 @@ Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Group`_]
 
-* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from ``CSV`` files or export your ``omni-json-db`` collections for analysis in ``Excel`` or ``Pandas``. [refer to `CSV Import / Export`_]
+* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from *CSV* files or export your **omni-json-db** collections for analysis in *Excel* or *Pandas*. [refer to `CSV Import / Export`_]
 
-* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (``SQLite``) into ``NoSQL`` grouped structures. It also natively supports parsing structured configuration files (``INI``, ``TOML``) and handling complex ``CSV`` datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
+* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (*SQLite*) into *NoSQL* grouped structures. It also natively supports parsing structured configuration files (*INI*, *TOML*) and handling complex *CSV* datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
 
 * **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Date Lookups`_]
 
@@ -62,7 +64,7 @@ Unlike traditional SQLite or NoSQL databases, ``omni-json-db`` allows you to use
 📌 Supported Python Versions
 ****************************
 
-``omni-json-db`` has been tested with Python 3.7+ and PyPy3.
+**omni-json-db** has been tested with Python 3.7+ and PyPy3.
 
 🛠️ Quick Start
 **************
@@ -93,7 +95,7 @@ Basic
    
 All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
 
-In-memory
+In-Memory
 ---------
 
 .. code-block:: python
@@ -263,6 +265,7 @@ CSV Import / Export
 
 INI / TOML Import
 -----------------
+
 .. code-block:: python
    
    from omni_json_db import JDb
@@ -295,12 +298,13 @@ INI / TOML Import
 
 SQLite Import
 -------------
-Step 1: Prepare ``sample.sqlite``
+
+Step 1: Prepare *sample.sql*
 
 .. code-block:: python
 
    import sqlite3
-   conn = sqlite3.connect('sample.sqlite')
+   conn = sqlite3.connect('sample.sql')
    cursor = conn.cursor()
 
    cursor.execute('''
@@ -349,7 +353,7 @@ Step 2: Import to ``JDb``
    jdb = JDb("migrated_data.jdb")
 
    # Load an entire SQLite database with one line of code
-   jdb.from_sqlite('sample.sqlite')
+   jdb.from_sqlite('sample.sql')
 
    # SQLite tables (e.g., 'projects' and 'project_logs') automatically become groups
    projects = jdb['projects']
@@ -360,12 +364,12 @@ Step 2: Import to ``JDb``
    print(len(logs))            # Get the total number of logs
 
    # Combine with powerful Lambda queries to find logs for a specific project
-   project_3_logs = logs.find(FUNC=lambda val: v[project_id'] == 3)
+   project_3_logs = logs.find(FUNC=lambda val: val['project_id'] == 3)
 
 Network
--------
+--------
 
-**Server side:**
+**Server side**
 
 .. code-block:: python
    
@@ -379,7 +383,7 @@ Network
    # write key to JDb
    jdb['remote-key'] = 'secret'
 
-**Client side:**
+**Client side**
 
 .. code-block:: python
 
@@ -418,152 +422,6 @@ Change Type
    jdb.change_KEY('J')
    assert jdb == fruits
    print(jdb.data_type, jdb.zip_type) # Output: J+S lz
-
-Operator
---------
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key+Value is mSgpack+mSgpack with lz4 compression
-   jdb = JDb(data_type="S+S(lz)")
-
-   # [1] KEY+VAL operators
-   # <jdb += data> == jdb.update(data)
-   data = {f'key{v}':v for v in range(100)}   
-   jdb += data
-   assert len(jdb) == 100
-
-   # <jdb == data>
-   assert jdb == data
-
-   # <jdb |= ..> == jdb.insert(..)
-   jdb |= {f'key{v}':v+1 for v in range(102)}
-   assert len(jdb) == 102
-   assert jdb['key100'] == 101
-   assert jdb[-2.:] == {'key100':101, 'key101':102} # get last two modified records
-   assert jdb[(f'key{v}' for v in range(100))] == data # equivalent to jdb[data] == data
-
-   # <jdb -= ..> == jdb.remove(..)
-   jdb -= ['key100', 'key101', 'key102', 'key103']
-   assert len(jdb) == 100
-   assert jdb == data
-
-   # <jdb &= ..> == jdb.replace(..)
-   jdb &= {f'key{v}':v+1 for v in range(200)}
-   assert len(jdb) == 100
-   assert jdb == {f'key{v}':v+1 for v in range(100)}
-
-   # <jdb ^= ..> == jdb.unmodify(..)
-   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
-   assert len(jdb) == 100
-   assert jdb == data
-
-   # <jdb[:] = ..> == jdb.update(..)
-   jdb[:] = 0 # set all records to zero
-   assert len(jdb) == 100
-   assert jdb == {f'key{v}':0 for v in range(100)}
-   assert jdb.find(NE=0) == {}
-
-   # remove all records
-   jdb -= jdb # equivalent to del jdb[:]
-   assert len(jdb) == 0
-
-   # <jdb ^= ..> == jdb.unremove(..)
-   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
-   assert len(jdb) == 100
-   assert all(val == 0 for key,val in jdb.items())
-
-   # lambda VALUE operation
-   jdb[:] = lambda key,val: int(key.replace('key', '')) + val
-   assert jdb == data
-
-   # <del jdb[..]> == jdb.remove_fast(..)
-   del jdb[data] # equivalent to del jdb[:]
-   assert len(jdb) == 0
-
-   # unremove all data
-   jdb ^= data
-   assert jdb == data
-
-   # <jdb[..]> == jdb.get_n(..) or jdb.get_all()
-   matches = jdb[('key2', 'key22', 'key44', 'key111')]
-   assert matches == {'key2':2, 'key22':22, 'key44':44}
-
-   # lambda KEY operation
-   matches = jdb[lambda key:key.endswith('1')]
-   assert set(matches) == {'key1', 'key11', 'key21', 'key31', 'key41', 'key51', 'key61', 'key71', 'key81', 'key91'}
-
-   # set all matched records to -1
-   jdb[matches] = -1
-   matches_2 = jdb[lambda key,val: val == -1]
-   assert set(matches) == set(matches_2)
-   assert matches_2 == jdb.find(EQ=-1)
-   assert matches_2 == jdb.find(FUNC=lambda val: val == -1)
-
-   # RE search
-   matches_3 = jdb[::r'1$']
-   assert matches_2 == matches_3
-
-   # unmodify
-   jdb ^= matches
-   assert jdb == data
-
-   # [2] KEY operators
-   # <jdb & {..}> == jdb.intersection(..)
-   matches = jdb & {f'key{v}' for v in range(98, 120)}
-   assert matches == {'key98', 'key99'}
-
-   # <{..} & jdb> == {..}.intersection(jdb)
-   matches_2 = {f'key{v}' for v in range(98, 120)} & jdb
-   assert matches == matches_2
-   
-   # <jdb | {..}> == jdb.union(..)
-   matches = jdb | {f'key{v}' for v in range(10, 120)}
-   assert len(matches) == 120
-   assert matches == {f'key{v}' for v in range(0, 120)}
-
-   # <{..} | jdb> == {..}.union(jdb)
-   matches_2 = {f'key{v}' for v in range(10, 120)} | jdb
-   assert matches == matches_2
-   
-   # <jdb + {..}> == jdb.union(..)
-   matches = jdb + {f'key{v}' for v in range(10, 120)}
-   assert matches == matches_2
-
-   # <{..} + jdb> == {..}.union(jdb)   
-   matches_2 = {f'key{v}' for v in range(10, 120)} + jdb
-   assert matches == matches_2
-   
-   # <jdb - {..}> == jdb.difference(..)
-   matches = jdb - {f'key{v}' for v in range(0, 98)}
-   assert matches == {'key98', 'key99'}
-
-   # <{..} - jdb> == {..}.difference(jdb)
-   matches = {f'key{v}' for v in range(2, 102)} - jdb
-   assert matches == {'key100', 'key101'}
-
-   # <jdb ^ {..}> == jdb.non_intersection(..)
-   matches = jdb ^ {f'key{v}' for v in range(1, 101)}
-   assert matches == {'key0', 'key100'}
-
-   # <{..} ^ jdb> == {..}.non_intersection(jdb)
-   matches_2 = {f'key{v}' for v in range(1, 101)} ^ jdb
-   assert matches == matches_2
-
-   # <.. in jdb> == jdb.has_all(..)
-   assert 'key10' in jdb
-   assert {'key10', 'key90'} in jdb
-   assert {'key10', 'key90', 'key110', 'key190'} not in jdb
-   assert jdb.has('key10')
-   assert jdb.has_all('key10')
-   assert jdb.has_any('key10')
-   assert jdb.has_all({'key10', 'key90'})
-   assert jdb.has_any({'key10', 'key90', 'key110', 'key190'})
-   assert jdb.is_disjoint({'key110', 'key190'})
-
-All standard ``set`` methods work: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
 
 Date Lookups
 ------------
@@ -641,6 +499,144 @@ Date Lookups
    # change all keys create date
    jdb.keys[:] = today
    assert jdb[today] == fruits
+
+Operator
+--------
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+   # Initialize the database in memory
+   # Key+Value is mSgpack+mSgpack with lz4 compression
+   jdb = JDb(data_type="S+S(lz)")
+
+   # [1] KEY+VAL operators
+   # <jdb += data> == jdb.update(data)
+   data = {f'key{v}':v for v in range(100)}   
+   jdb += data
+   assert len(jdb) == 100
+
+   # <jdb == data>
+   assert jdb == data
+
+   # <jdb |= ..> == jdb.insert(..)
+   jdb |= {f'key{v}':v+1 for v in range(102)}
+   assert jdb['key100'] == 101
+   assert jdb[-2.:] == {'key100':101, 'key101':102} # get last two modified records
+   assert jdb[(f'key{v}' for v in range(100))] == data # equivalent to jdb[data] == data
+
+   # <jdb -= ..> == jdb.remove(..)
+   jdb -= ['key100', 'key101', 'key102', 'key103']
+   assert jdb == data
+
+   # <jdb &= ..> == jdb.replace(..)
+   jdb &= {f'key{v}':v+1 for v in range(200)}
+   assert jdb == {f'key{v}':v+1 for v in range(100)}
+
+   # <jdb ^= ..> == jdb.unmodify(..)
+   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
+   assert jdb == data
+
+   # <jdb[:] = ..> == jdb.update(..)
+   jdb[:] = 0 # set all records to zero
+   assert jdb == {f'key{v}':0 for v in range(100)}
+   assert jdb.find(NE=0) == {}
+
+   # remove all records
+   jdb -= jdb # equivalent to del jdb[:]
+   assert len(jdb) == 0
+
+   # <jdb ^= ..> == jdb.unremove(..)
+   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
+   assert all(val == 0 for key,val in jdb.items())
+
+   # lambda VALUE operation
+   jdb[:] = lambda key,val: int(key.replace('key', '')) + val
+   assert jdb == data
+
+   # <del jdb[..]> == jdb.remove_fast(..)
+   del jdb[data] # equivalent to del jdb[:]
+
+   # unremove all data
+   jdb ^= data
+   assert jdb == data
+
+   # <jdb[..]> == jdb.get_n(..) or jdb.get_all()
+   matches = jdb[('key2', 'key22', 'key44', 'key111')]
+   assert matches == {'key2':2, 'key22':22, 'key44':44}
+
+   # lambda KEY operation
+   matches = jdb[lambda key:key.endswith('1')]
+   assert set(matches) == {'key1', 'key11', 'key21', 'key31', 'key41', 'key51', 'key61', 'key71', 'key81', 'key91'}
+
+   # set all matched records to -1
+   jdb[matches] = -1
+   matches_2 = jdb[lambda key,val: val == -1]
+   assert set(matches) == set(matches_2)
+   assert matches_2 == jdb.find(EQ=-1)
+   assert matches_2 == jdb.find(FUNC=lambda val: val == -1)
+
+   # RE search
+   matches_3 = jdb[::r'1$']
+   assert matches_2 == matches_3
+
+   # unmodify
+   jdb ^= matches
+   assert jdb == data
+
+   # [2] KEY operators
+   # <jdb & {..}> == jdb.intersection(..)
+   matches = jdb & {f'key{v}' for v in range(98, 120)}
+   assert matches == {'key98', 'key99'}
+
+   # <{..} & jdb> == {..}.intersection(jdb)
+   matches_2 = {f'key{v}' for v in range(98, 120)} & jdb
+   assert matches == matches_2
+   
+   # <jdb | {..}> == jdb.union(..)
+   matches = jdb | {f'key{v}' for v in range(10, 120)}
+   assert matches == {f'key{v}' for v in range(0, 120)}
+
+   # <{..} | jdb> == {..}.union(jdb)
+   matches_2 = {f'key{v}' for v in range(10, 120)} | jdb
+   assert matches == matches_2
+   
+   # <jdb + {..}> == jdb.union(..)
+   matches = jdb + {f'key{v}' for v in range(10, 120)}
+   assert matches == matches_2
+
+   # <{..} + jdb> == {..}.union(jdb)   
+   matches_2 = {f'key{v}' for v in range(10, 120)} + jdb
+   assert matches == matches_2
+   
+   # <jdb - {..}> == jdb.difference(..)
+   matches = jdb - {f'key{v}' for v in range(0, 98)}
+   assert matches == {'key98', 'key99'}
+
+   # <{..} - jdb> == {..}.difference(jdb)
+   matches = {f'key{v}' for v in range(2, 102)} - jdb
+   assert matches == {'key100', 'key101'}
+
+   # <jdb ^ {..}> == jdb.non_intersection(..)
+   matches = jdb ^ {f'key{v}' for v in range(1, 101)}
+   assert matches == {'key0', 'key100'}
+
+   # <{..} ^ jdb> == {..}.non_intersection(jdb)
+   matches_2 = {f'key{v}' for v in range(1, 101)} ^ jdb
+   assert matches == matches_2
+
+   # <.. in jdb> == jdb.has_all(..)
+   assert 'key10' in jdb
+   assert {'key10', 'key90'} in jdb
+   assert {'key10', 'key90', 'key110', 'key190'} not in jdb
+   assert jdb.has('key10')
+   assert jdb.has_all('key10')
+   assert jdb.has_any('key10')
+   assert jdb.has_all({'key10', 'key90'})
+   assert jdb.has_any({'key10', 'key90', 'key110', 'key190'})
+   assert jdb.is_disjoint({'key110', 'key190'})
+
+All standard ``set`` methods work: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
 
 Advanced
 --------
@@ -749,7 +745,7 @@ Configure ``data_type`` during initialization:
 * ``S+P``: MsgPack Key + Pickle Value
 * ``S+Y``: MsgPack Key + YAML Value
 
-**Data size = 70,840,580 (MB = 1,000,000B, no zip)**
+*Data size = 70,840,580 (MB = 1,000,000B, no zip)*
 
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
 | ``data_type``     | size       | ratio | read     | write     | GOODs          | BADs             |
@@ -893,10 +889,10 @@ Results
 👥 Contributing
 ***************
 
-Whether reporting bugs, discussing improvements and new ideas or writing extensions: Contributions to ``omni-json-db`` are welcome! Here's how to get started:
+Whether reporting bugs, discussing improvements and new ideas or writing extensions: Contributions to **omni-json-db** are welcome! Here's how to get started:
 
 1. Check for open issues or open a fresh issue to start a discussion around a feature idea or a bug.
-2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on Github, create a new branch off the ``master`` branch and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
+2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on Github, create a new branch off the **master** branch and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
 3. Write a test which shows that the bug was fixed or that the feature works as expected.
 4. Send a pull request and bug the maintainer until it gets merged and published ☺
 
