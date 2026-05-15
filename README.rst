@@ -66,6 +66,8 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 **omni-json-db** has been tested with Python 3.7+ and PyPy3.
 
+|Python Version|
+
 🛠️ Quick Start
 **************
 
@@ -907,6 +909,9 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
 .. |Version| image:: https://img.shields.io/pypi/v/omni-json-db?pypiBaseUrl=https%3A%2F%2Fpypi.org&logo=pypi&logoColor=white
    :alt: PyPI - Version
    :target: https://pypi.python.org/pypi/omni-json-db/
+
+.. |Python Version| image:: https://img.shields.io/pypi/pyversions/omni-json-db?logo=python&logoColor=white
+   :alt: PyPI - Python Version
 
 .. |License| image:: https://img.shields.io/pypi/l/omni-json-db?color=800080&logo=ticktick&logoColor=white
    :alt: PyPI - License
