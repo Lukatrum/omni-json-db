@@ -376,8 +376,11 @@ class TestJDb(unittest.TestCase):
             matches = jdb.find(vals={'name': r'li[a-z]'})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
 
-            matches_2 = jdb.find(ANY=r'li')
+            matches_2 = jdb.find(ANY=r'li[a-z]')
             self.assertEqual(matches, matches_2)
+
+            matches = jdb.find(ANY=r'li[a-z]', limit=1)
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
 
             # any contains r'ob'
             matches = jdb.find(ANY=r'ob')
@@ -476,6 +479,35 @@ class TestJDb(unittest.TestCase):
             # len(tags) in [1,2]
             matches = jdb.find(vals={'tags': {'$size': [1,2,3]}})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
+
+            # tags[0] == 'Java'
+            matches = jdb.find(vals={'tags': {'$0': 'Java'}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+            matches_2 = jdb.find(ANY={'$0': 'Java'})
+            self.assertEqual(matches, matches_2)
+
+            matches = jdb.find(vals={'tags': {'$1': 'programming'}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
+            matches_2 = jdb.find(ANY={'$1': 'programming'})
+            self.assertEqual(matches, matches_2)
+
+            matches = jdb.find(vals={'tags': {'$2': 'database'}})
+            self.assertEqual({vv['name'] for vv in matches.values()}, set())
+
+            def add_tag(_key, val, new_tag):
+                tags = val['tags']
+                if new_tag not in tags:
+                    val = val.copy()
+                    tags = tags.copy()
+                    tags.append(new_tag)
+                    val['tags'] = tags
+
+                return val
+
+            # add 'database' to tags for matched records
+            jdb[matches_2] = lambda key,val: add_tag(key, val, 'database') #pylint: disable=cell-var-from-loop
+            matches = jdb.find(ANY={'$2': 'database'})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0

@@ -6,153 +6,152 @@ English_ | 中文_
 |Logo|
 
 ..
-
-   A nimble squirrel swiftly gathers a golden forest’s worth of acorns!
+	一隻敏捷的小松鼠迅速地收集森林裡的金色橡子！
 
 |Version| |Build Status| |Pylint| |Codacy| |Coverage| |License|
 
 ..
 
-   If you find **omni-json-db** useful, please consider giving it a **⭐️**! It helps the project grow and reach more developers.
+   如果您覺得 **omni-json-db** 對您有所幫助，請考慮給它一個⭐️！ 這能幫助專案成長並接觸到更多開發者。
 
-👉 Quick Links
-**************
-
-- `📌 Supported Python Versions`_
-- `🛠️ Quick Start`_
-- `📝 Specifications`_
-- `📊 Benchmarking`_
-- `👥 Contributing`_
-
-
-✨ Introduction
-***************
-**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
-
-Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
-
-Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
-
-* **Schema-LESS**: Store complex, nested data without pre-defining tables.
-
-* **Server-LESS**: Direct disk access without the overhead of a database server.
-
-* **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
-
-🚀 Features
+👉 快速連結
 ***********
-* **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. [refer to `Basic`_ + `Operator`_]
 
-* **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
+- `📌 支援的 Python 版本`_
+- `🛠️ 快速入門`_
+- `📝 規格說明`_
+- `📊 基準測試`_
+- `👥 貢獻指南`_
 
-* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_]
+✨ 簡介
+*******
+**omni-json-db** 是一款專為 Python 開發者設計的高效能嵌入式資料庫引擎。 它填補了極速鍵值（Key-Value）儲存與強大文件資料庫查詢功能之間的空白。   
 
-* **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
+**omni-json-db** 專為超高吞吐量和執行緒安全而構建，利用現代序列化技術（如 *JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）和壓縮算法，提供了一個在處理大量 *JSON* 工作負載時通常比 *SQLite* 快顯著許多的儲存層。 無論您是在構建本地快取、日誌聚合器還是分散式微服務，它都能以「零配置」的簡易性處理大規模資料。
 
-* **Network Mode** (``JNetFiles``): Transform a local **omni-json-db** instance into a networked service with a single command using ``run_files_server()``. [refer to `Network Mode`_]
+與傳統的 *SQLite* 或 *NoSQL* 資料庫不同，**omni-json-db** 允許您使用原生的 Python 語法（切片、Lambdas、正則表達式、集合運算）來查詢和操作資料。 它還內建了「時光旅行」功能，支援狀態回滾（復原/重做）。   
 
-* **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for high performance (ideal for real-time caches or volatile session storage). [refer to `In-memory Mode`_]
+* **無模式 (Schema-LESS)**：無需預先定義表格即可儲存複雜、嵌套的資料。   
 
-* **"Time-Travel" & Rollbacks**: The database tracks internal states, allowing you to undo modifications (``unmodify()``) or recover deleted data (``unremove()``). Accidentally deleted a record? One line of code brings it back. [refer to `Undo`_ + `Backup & Restore`_]
+* **無伺服器 (Server-LESS)**：直接存取磁碟，沒有資料庫伺服器的額外開銷。   
 
-* **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Groups Mode`_]
+* **無SQL (SQL-LESS)**：使用原生 Python 語法、正則表達式和 Lambdas 進行資料操作。   
 
-* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from *CSV* files or export your **omni-json-db** collections for analysis in *Excel* or *Pandas*. [refer to `CSV Import / Export`_]
+🚀 核心特性
+***********
 
-* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (*SQLite*) into *NoSQL* grouped structures. It also natively supports parsing structured configuration files (*INI*, *TOML*) and handling complex *CSV* datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
+* **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]  
 
-* **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Time-Series`_]
+* **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
 
-* **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
+* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_]
 
+* **記憶體快取**：可調整的 ``cache_limit`` 用以平衡記憶體使用率與 I/O 速度。 [參考 `快取種類`_]
 
-📌 Supported Python Versions
-****************************
+* **網路模式 (``JNetFiles``)**：只需一個指令``run_files_server()``，即可將本地實例轉換為網路服務。 [參考 `網路模式`_]
 
-**omni-json-db** has been tested with Python 3.7+ and PyPy3.
+* **記憶體模式 (``JMemFiles``)**：在記憶體內運行整個資料庫，實現極致效能（適用於即時快取或暫時性會話儲存）。 [參考 `記憶體模式`_]
+
+* **時光旅行」與回滾**：資料庫會追蹤內部狀態，允許您復原修改 (``unmodify()``) 或救回刪除的資料 (``unremove()``)。 [參考 `Undo`_ + `備份 / 復原`_]
+
+* **分組與命名空間**：使用群組（Groups）輕鬆隔離並管理不同的資料模組。 [參考 `群組模式`_]
+
+* **原生 CSV 支援**：內建 ``DictReader`` 和 ``DictWriter`` 接口，可從 *CSV* 匯入海量資料或匯出至 *Excel*/*Pandas* 進行分析。 [參考 `CSV 匯入 / 匯出`_]
+
+* **無縫資料遷移**：一行代碼即可完成匯入匯出！ 內建引擎可將關聯式資料庫 (*SQLite*) 轉換為 *NoSQL* 群組結構，並支援 *INI*、*TOML* 配置解析。 [參考 `SQLite 匯入`_ + `INI / TOML 匯入`_]
+
+* **時間序列支援**：每條記錄都帶有時間戳，支援強大的日期切片查詢。 例如使用 ``jdb[yesterday:now]`` 獲取自昨天以來修改的所有記錄。 [參考 `時間序列`_]
+
+* **並行控制**：針對「多讀/單寫」環境優化，具備可靠的文件鎖定機制。 [參考 `進階用法`_]
+
+📌 支援的 Python 版本
+*********************
+
+**omni-json-db** 已在 Python 3.7+ 和 PyPy3 上通過測試。
 
 |Python Version|
 
-🛠️ Quick Start
-**************
+🛠️ 快速入門
+***********
 
-Installation
-------------
+安裝
+----
 
 .. code-block:: bash
 
    pip install omni-json-db
 
-Basic
------
+基本用法
+-------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database from file
-   # Key-Value is Json+mSgpack without compression
+   
+   # 初始化（Json+mSgpack，不壓縮, 檔案模式）
    jdb = JDb("example.jdb")
 
-   # Store data
-   jdb["user1"] = {"name" : "Ryan", "role": "Developer"}
+   # 儲存資料
+   jdb["用家1"] = {"名字" : "小明", "職位": "程式員"}
    
-   # Retrieve data
-   user = jdb["user1"]
-   print(user["name"], user["role"]) # Output: Ryan Developer
-   
-All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
+   # 讀取資料
+   user = jdb["用家1"]
+   print(user["名字"], user["職位"]) # 輸出: 小明 程式員
 
-In-Memory Mode
----------------
+   
+支援所有標準 ``dict`` 方法: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
+
+記憶體模式
+---------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+mSgpack without compression
+   # 初始化（Json+mSgpack，不壓縮, 記憶體模式）
    jdb1 = JDb()
 
-   # Store data
-   jdb1 += {"user1" : {"name" : "Joe", "role": "Senior Developer"}}
+   # 儲存資料
+   jdb1 += {"用家1" : {"名字" : "小強", "職位": "老程式員"}}
    
-   # Retrieve data
-   print(jdb1["user1"]["name"]) # Output: Joe
+   # 讀取資料
+   print(jdb1["用家1"]["名字"], user["職位"]) # 輸出: 小強 老程式員
 
-   # create 2nd JDb sharing same memory
+   # 建立共享同一塊記憶體的第二個 JDb
    jdb2 = JDb(jdb1)
+   jdb2["用家2"] = {"名字" : "小美", "職位": "老闆"}
 
-   # Store data to 2nd JDb
-   jdb2["user2"] = {"name" : "Kathy", "role": "CEO"}
+   # 透過第一個 JDb 讀取新插入的資料
+   print(jdb1["用家2"]["名字"]) 輸出: 小美
 
-   # Retrieve the new inserted data (by 2nd JDb)
-   print(jdb1["user2"]["name"]) # Output: Kathy
 
-Query Engine
-------------
+查詢引擎
+-------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+Marshal with no compression
+
+   # 初始化（Json+Marshal，無壓縮, 記憶體模式）
    jdb = JDb(data_type="J+M")
    
-   # insert many records without key
+   # 批量插入無鍵記錄
    jdb += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
             {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
    
-   # get all records from database
-   print(jdb[:]) # print all records from jdb
+   # 獲取所有記錄
+   print(jdb[:])
 
-   # Use FUNCTION to find record(s) matching the name 'John'
+   # 使用 Lambda 函式搜尋名為 'John' 的記錄
    matches = jdb.find(FUNC=lambda key,val: val['name'] == 'John') 
-   print(matches) # Output : {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
-   
-   # Use Regex to find record(s) matching the name 'John' or 'Bob'
-   matches = jdb.find(RE='John|Bob')
-   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}   
+   print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
 
-Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT``, ``SIZE``, ``ANY``.
+   # 使用正則表達式搜尋 'John' 或 'Bob'
+   matches = jdb.find(RE='John|Bob')
+   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
+
+
+條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT``, ``SIZE``, ``ANY``.
+
 
 Undo
 ----
@@ -182,7 +181,7 @@ Undo
    jdb.revert("apple")
    assert jdb["apple"] == "red"
 
-Backup & Restore
+備份 / 復原
 ----------------
 
 .. code-block:: python
@@ -213,7 +212,7 @@ Backup & Restore
    assert jdb == fruits
    assert jdb == jdb_bak
 
-Groups Mode
+群組模式
 -----------
 
 .. code-block:: python
@@ -246,7 +245,7 @@ Groups Mode
    matches = jdb.find(r':::a')
    print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
 
-CSV Import / Export
+CSV 匯入 / 匯出
 -------------------
 
 .. code-block:: python
@@ -270,7 +269,7 @@ CSV Import / Export
    jdb2.from_csv('example.csv')
    print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
 
-INI / TOML Import
+INI / TOML 匯入
 -----------------
 
 .. code-block:: python
@@ -303,7 +302,7 @@ INI / TOML Import
    print(config_db['/app_name'])    # Output: Omni Test
    print(config_db['network/ip'])   # Output: 192.168.1.1
 
-SQLite Import
+SQLite 匯入
 -------------
 
 Step 1: Prepare *sample.sql*
@@ -373,7 +372,7 @@ Step 2: Import to ``JDb``
    # Combine with powerful Lambda queries to find logs for a specific project
    project_3_logs = logs.find(FUNC=lambda val: val['project_id'] == 3)
 
-Network Mode
+網路模式
 ------------
 
 **Server side**
@@ -402,7 +401,7 @@ Network Mode
    # read remote key from JDb
    print(jdb['remote-key']) # Output: secret
 
-Change Type
+轉換格式
 -----------
 
 .. code-block:: python
@@ -430,7 +429,7 @@ Change Type
    assert jdb == fruits
    print(jdb.data_type, jdb.zip_type) # Output: J+S lz
 
-Time-Series
+時間序列
 ------------
 
 .. code-block:: python
@@ -507,7 +506,7 @@ Time-Series
    jdb.keys[:] = today
    assert jdb[today] == fruits
 
-Operator
+運算子
 --------
 
 .. code-block:: python
@@ -643,9 +642,9 @@ Operator
    assert jdb.has_any({'key10', 'key90', 'key110', 'key190'})
    assert jdb.is_disjoint({'key110', 'key190'})
 
-All standard ``set`` methods work: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
+支援所有標準``set``: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
 
-Advanced
+進階用法
 --------
 
 .. code-block:: python
@@ -733,24 +732,24 @@ Advanced
    assert jdb == fruits
 
 
-📝 Specifications
+📝 規格說明
 *****************
 
-Supported Data Formats
+資料種類
 ----------------------
 
-Configure ``data_type`` during initialization:
+可在初始化時配置``data_type``:
 
-* ``J+J``: JSON Key + JSON Value
-* ``J+S``: JSON Key + MsgPack Value (default)
-* ``J+M``: JSON Key + Marshal Value
-* ``J+P``: JSON Key + Pickle Value
-* ``J+Y``: JSON Key + YAML Value
-* ``S+J``: MsgPack Key + JSON Value
-* ``S+S``: MsgPack Key + MsgPack Value
-* ``S+M``: MsgPack Key + Marshal Value
-* ``S+P``: MsgPack Key + Pickle Value
-* ``S+Y``: MsgPack Key + YAML Value
+* ``J+J``: JSON 鍵 + JSON 值
+* ``J+S``: JSON 鍵 + MsgPack 值 (預設)
+* ``J+M``: JSON 鍵 + Marshal 值
+* ``J+P``: JSON 鍵 + Pickle 值
+* ``J+Y``: JSON 鍵 + YAML 值
+* ``S+J``: MsgPack 鍵 + JSON 值
+* ``S+S``: MsgPack 鍵 + MsgPack 值
+* ``S+M``: MsgPack 鍵 + Marshal 值
+* ``S+P``: MsgPack 鍵 + Pickle 值
+* ``S+Y``: MsgPack 鍵 + YAML 值
 
 *Data size = 70,840,580 (MB = 1,000,000B, no zip)*
 
@@ -781,25 +780,25 @@ Configure ``data_type`` during initialization:
 |                   |            |       |          |           |                |* no tuple [a]_   |
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
 
-.. [a] convert to ``list``
-.. [b] convert to hex string
-.. [c] only support string key
-.. [d] all type = ``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
+.. [a] 用 ``list`` 取代
+.. [b] 用 hex string 取代
+.. [c] 只支援 string key
+.. [d] 所有type = ``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
 
-Supported Zip Formats
+壓縮種類
 ---------------------
 
-Configure ``zip_type`` during initialization:
+可在初始化時配置 ``zip_type``
 
-* ``no``: no compression for Value (default)
-* ``gz``: Gzip (mode=9) compression for Value
-* ``bz``: Bzip2 (mode=9) compression for Value
-* ``xz``: LZMA compression for Value
-* ``zs``: Zstandard (mode=22) compression for Value
-* ``br``: Brotli (mode=6) compression for Value (better than ``gz``)
-* ``z1``: Zstandard (mode=6) compression for Value (better than ``gz``)
-* ``z2``: Zstandard (mode=11) compression for Value
-* ``lz``: LZ4 (mode=0) compression for Value
+* ``no``: 無壓縮（預設, 速度最快)
+* ``gz``: Gzip (mode=9)
+* ``bz``: Bzip2 (mode=9, 壓縮比佳，解壓最慢)
+* ``xz``: LZMA
+* ``zs``: Zstandard (mode=22, 最佳壓縮比)
+* ``br``: Brotli (mode=6, 比``gz``更好)
+* ``z1``: Zstandard (mode=6, 比``gz``更好)
+* ``z2``: Zstandard (mode=11)
+* ``lz``: LZ4 (mode=0, 壓縮/解壓最快，壓縮比最差)
 
 **Data size = 70,840,580 (MB = 1,000,000B)**
 
@@ -829,14 +828,14 @@ Configure ``zip_type`` during initialization:
 |            |            |       |          |           |* fastest unzip|               |
 +------------+------------+-------+----------+-----------+---------------+---------------+
 
-Supported Key Table Formats
----------------------------
+快取種類
+---------
 
-Configure ``key_limit`` during initialization:
+可在初始化時配置 ``key_limit``
 
-* ``no``: ``dict`` for key_table (default)
-* ``bt``: ``BTree`` for key_table (save 44.3% vs ``dict``)
-* ``l0`` - ``l5``: ``LiteKeyTable`` modes (save 60-75% vs ``dict``)
+* ``no``: ``dict`` 作為 key_table (預設)
+* ``bt``: ``BTree`` 作為 key_table (減少 44.3% vs ``dict``)
+* ``l0`` - ``l5``: ``LiteKeyTable`` 模式 (減少 60-75% vs ``dict``)
 
 **Table size = 3,241,854 keys**
 
@@ -850,10 +849,10 @@ Configure ``key_limit`` during initialization:
 | ``l3``        | 85MB   | 2.01Mo/s     | 2.01Mo/s   | 1.59Mo/s     |
 +---------------+--------+--------------+------------+--------------+
 
-📊 Benchmarking
+📊 基準測試
 ***************
 
-Testing
+測試環境
 -------
 
 .. code-block:: python
@@ -863,16 +862,15 @@ Testing
    >> jdb = JDb(data_type='J+J')
    >> data = {f'key{k}':k for k in range(size)}
    
-   >> # Benchmarking operations
-   >> jdb += data        # insert
-   >> jdb[:]             # get_all
-   >> jdb -= data        # remove
-   >> jdb ^= data        # revert=unremove
-   >> jdb[data] = -1     # replace
-   >> jdb ^= data        # revert=unmodify
-   >> print(jdb == data) # Output: True
+   >> jdb += data        # 新增 insert
+   >> jdb[:]             # 讀取全部 get_all
+   >> jdb -= data        # 刪除 remove
+   >> jdb ^= data        # 復原刪除 revert=unremove
+   >> jdb[data] = -1     # 更改 replace
+   >> jdb ^= data        # 復原更改 revert=unmodify
+   >> print(jdb == data) # 輸出: True
 
-Results
+測試結果
 -------
 
 +-------+---------+---------+---------+----------+---------+----------+
@@ -893,15 +891,15 @@ Results
 | 1M    | 3.87 s  | 2.78 s  | 7 s     | 6.09 s   | 8.15 s  | 9.83 s   |
 +-------+---------+---------+---------+----------+---------+----------+
 
-👥 Contributing
+👥 貢獻指南
 ***************
 
-Whether reporting bugs, discussing improvements and new ideas or writing extensions: Contributions to **omni-json-db** are welcome! Here's how to get started:
+我們歡迎任何形式的貢獻，包括回報 Bug、討論改進想法或編寫擴展！   
 
-1. Check for open issues or open a fresh issue to start a discussion around a feature idea or a bug.
-2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on Github, create a new branch off the **master** branch and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
-3. Write a test which shows that the bug was fixed or that the feature works as expected.
-4. Send a pull request and bug the maintainer until it gets merged and published ☺
+1. 檢查現有的 Issue 或開設新的討論。
+2. Fork GitHub `儲存庫 <https://github.com/lukatrum/omni-json-db/>`_ 並在新的分支上進行修改。   
+3. 編寫測試以確保功能正常。   
+4. 提交 Pull Request。
 
 .. |Logo| image:: https://raw.githubusercontent.com/lukatrum/omni-json-db/master/artwork/logo.png
       :height: 400px
@@ -932,3 +930,4 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
 
 .. |Codacy| image:: https://app.codacy.com/project/badge/Grade/861e1d81ccad4b8292d0062413b6daec    
    :target: https://app.codacy.com/gh/Lukatrum/omni-json-db/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade
+

@@ -112,49 +112,49 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
             rules = {'$func' : rules}
 
     for cmd,rule in rules.items():
-        if cmd == '$val':
-            if not _match_rules(key, val, rule, level=level+1):
-                return False
+        if cmd and cmd[0] == '$':
+            is_same_type = isinstance(val, type(rule)) \
+                or isinstance(val, (int, float, bool)) and isinstance(rules, (int, float, bool)) \
+                or isinstance(val, (bytes, bytearray)) and isinstance(rules, (bytes, bytearray))
 
-        elif cmd[0] == '$':
             if cmd == '$gt':
                 try:
-                    if not val.__gt__ or not rule.__gt__ or not val > rule:
+                    if not is_same_type or not val.__gt__ or not rule.__gt__ or not val > rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$ge':
                 try:
-                    if not val.__ge__ or not rule.__ge__ or not val >= rule:
+                    if not is_same_type or not val.__ge__ or not rule.__ge__ or not val >= rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$lt':
                 try:
-                    if not val.__lt__ or not rule.__lt__ or not val < rule:
+                    if not is_same_type or not val.__lt__ or not rule.__lt__ or not val < rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$le':
                 try:
-                    if not val.__le__ or not rule.__le__ or not val <= rule:
+                    if not is_same_type or not val.__le__ or not rule.__le__ or not val <= rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$eq':
                 try:
-                    if not val.__eq__ or not rule.__eq__ or not val == rule:
+                    if not is_same_type or not val.__eq__ or not rule.__eq__ or not val == rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$ne':
                 try:
-                    if not val.__ne__ or not rule.__ne__ or not val != rule:
+                    if not is_same_type or not val.__ne__ or not rule.__ne__ or not val != rule:
                         return False
                 except TypeError: # pragma: no cover
                     return False
@@ -2474,18 +2474,6 @@ class JDbReader:
 
             $all
 
-            $val : {..}
-                $gt, $ge, $lt, $le, $eq, $ne : value
-                $in : {a, b, c}
-                $func : func(a)
-                $has : value
-                $re : string (obj -> json -> str)
-                $re2 : string (obj -> json -> sub(W) -> str)
-                $and, $or, $not {...}
-                $[0-9]+ : {...}
-                $val : {...},
-                field_name : {...}
-
             field_name : {...}
                 $gt, $ge, $lt, $le, $eq, $ne : value
                 $in : {a, b, c}
@@ -2494,7 +2482,6 @@ class JDbReader:
                 $re2 : string (obj -> json -> sub(W) -> str)
                 $and, $or, $not {...}
                 $[0-9]+ : {...}
-                $val : {...},
                 field_name : {...}}
 
             field_name : 1              -> {field_name : {'$eq' : 1}}
@@ -2505,7 +2492,6 @@ class JDbReader:
             example
                 find(r'^[Rr].*[Nn]$', IN=[8,27])
                     -> find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$in' : [8, 27]})
-                find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$val' : {'$gt' : 8} })
                 find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$gt' : 8, '$lt' : 100})
                 find(keys=[r'^[Rr]', r'[Nn]$'], vals={'$or' : {'$eq' : 8, '$lt' : 50}})
                 find(vals={'name' : r'Jo(e|hn)'}, re_flags=re.I)
@@ -2663,12 +2649,7 @@ class JDbReader:
                         value = cache.get(key, None)
 
                 for ref,rules in vals.items():
-                    if ref == '$val':
-                        if not _match_rules(key, value, rules):
-                            is_matched = False
-                            break
-
-                    elif ref == '$any':
+                    if ref == '$any':
                         if isinstance(value, dict):
                             if not any(_match_rules(key, vv, rules, ANY=True) for vv in value.values()):
                                 is_matched = False
@@ -2696,15 +2677,14 @@ class JDbReader:
                                             _is_matched = False
                                             break
 
-                            if _is_matched:
-                                is_matched = True
+                            is_matched = True if _is_matched else is_matched
 
                         if not is_matched:
                             break
 
-                    elif ref[0] == '$':
+                    elif ref and ref[0] == '$':
                         if ref[1:].isdigit(): # eg $1, $2
-                            if not isinstance(value, list):
+                            if not isinstance(value, (list,tuple)):
                                 is_matched = False
                                 break
 

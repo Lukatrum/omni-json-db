@@ -512,7 +512,7 @@ class JDb(JDbReader):
 
                     if func:
                         old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
-                        new_val = func(key, old_val)
+                        new_val = func(_key, old_val)
                         if new_val != old_val:
                             f_write(fp, _key, new_val)
                     else:
