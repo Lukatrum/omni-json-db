@@ -88,7 +88,7 @@ English_ | 中文_
 
    from omni_json_db import JDb
    
-   # 初始化（Json+mSgpack，不壓縮, 檔案模式）
+   # 初始化 Json+mSgpack，不壓縮，檔案模式
    jdb = JDb("example.jdb")
 
    # 儲存資料
@@ -107,7 +107,7 @@ English_ | 中文_
 .. code-block:: python
 
    from omni_json_db import JDb
-   # 初始化（Json+mSgpack，不壓縮, 記憶體模式）
+   # 初始化 Json+mSgpack，不壓縮，記憶體模式
    jdb1 = JDb()
 
    # 儲存資料
@@ -131,7 +131,7 @@ English_ | 中文_
 
    from omni_json_db import JDb
 
-   # 初始化（Json+Marshal，無壓縮, 記憶體模式）
+   # 初始化 Json+Marshal，無壓縮，記憶體模式
    jdb = JDb(data_type="J+M")
    
    # 批量插入無鍵記錄
@@ -147,7 +147,7 @@ English_ | 中文_
 
    # 使用正則表達式搜尋 'John' 或 'Bob'
    matches = jdb.find(RE='John|Bob')
-   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
+   print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
 
 
 條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT``, ``SIZE``, ``ANY``.
@@ -159,25 +159,25 @@ Undo
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database from file
-   # Key-Value is Json+Pickle with zstandard compression
+   
+   # 初始化 Json+Pickle，ZStandard壓縮，檔案模式
    jdb = JDb("fruit.jdb", data_type="J+P", zip_type='zs')
 
-   # add key
+   # 寫入
    jdb["apple"] = "red"
 
-   # modify key
+   # 修改
    jdb["apple"] = "blue" 
 
-   # unmodify key (equivalent to jdb.unmodify())
+   # 還原 (相等於jdb.unmodify())
    jdb.revert("apple")
    assert jdb["apple"] == 'red'
 
-   # remove key
+   # 移除
    del jdb["apple"] 
    assert "apple" not in jdb
 
-   # unremove key (equivalent to jdb.unremove())
+   # 還原 (相等於jdb.unremove())
    jdb.revert("apple")
    assert jdb["apple"] == "red"
 
@@ -187,63 +187,59 @@ Undo
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database from file
-   # Key-Value is mSgpack+Json with Bzip2 compression
+   
+   # 初始化 mSgpack+Json，Brotli壓縮，檔案模
    jdb = JDb("fruit.jdb", data_type="S+J", zip_type='bz')
 
-   # Add fruit to jdb
+   # 寫入水果到JDb
    fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}
    jdb += fruits
    assert jdb == fruits
 
-   # backup jdb to bak folder = ./bak/fruit.jdb
+   # 備份至bak檔案夾 = ./bak/fruit.jdb
    jdb_bak = jdb.backup(folder='bak')
    assert jdb_bak == fruits
-   assert jdb_bak == jdb
-
-   # del all jdb data
+   
+   # 移除所有資料
    del jdb[fruits]
-   assert jdb != fruits
-   assert jdb != jdb_bak
    assert len(jdb) == 0
 
-   # restore bak folder to jdb
+   # 從bak檔案夾還原jdb
    jdb.restore(folder='bak')
    assert jdb == fruits
-   assert jdb == jdb_bak
-
+   
 群組模式
 -----------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database from file
-   # Key-Value is Json+mSgpack with no compression
+   
+   # 初始化 Json+mSgpack，無壓縮，檔案模式
    jdb = JDb('fruit_group.jdb')
 
-   # add red group
+   # 新增 red 群組
    r_jdb = jdb.add_group('red')
    assert r_jdb is jdb['red']
 
-   # add yellow group
+   # 新增yellow群組
    y_jdb = jdb.add_group('yellow')
    assert y_jdb is jdb['yellow']
 
-   # add fruits to red group
+   # 批量增加水果至red群組
    r_jdb += {'apple': {'qty':1}, 'tomato': {'qty':2}}
 
-   # add fruits to yellow group
+   # 批量增加水果至yellow群組
    y_jdb += {'banana': {'qty':4}, 'lemon': {'qty':6}, 'mango': {'qty':8}}
 
-   # read group records
-   print(jdb['red']['apple']['qty'])   # Output: 1
-   print(jdb['red:::apple'])           # Output: {'red:::apple': {'qty': 1}}
-   print(jdb['yellow:::banana'])       # Output: {'yellow:::banana': {'qty': 4}}
+   # 讀取red群組
+   print(jdb['red']['apple']['qty'])   # 輸出: 1
+   print(jdb['red:::apple'])           # 輸出: {'red:::apple': {'qty': 1}}
+   print(jdb['yellow:::banana'])       # 輸出: {'yellow:::banana': {'qty': 4}}
 
-   # find fruits which contains 'a' from all groups
+   # 查詢所有群組的水果有'a'字
    matches = jdb.find(r':::a')
-   print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+   print(matches) # 輸出: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
 
 CSV 匯入 / 匯出
 -------------------
@@ -251,23 +247,23 @@ CSV 匯入 / 匯出
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+Json with no compression      
+   
+   # 初始化 Json+Json，無壓縮，記憶體模式
    jdb1 = JDb(data_type="J+J")
 
-   # insert value without key
+   # 批量插入無鍵記錄
    jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
             {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
    
-   # export the data to CSV
+   # 將JDb的內容匯出至 example.csv
    jdb1.to_csv('example.csv')
 
-   # create another JDb in memory
+   # 建立另一個JDb
    jdb2 = JDb()
    
-   # import the data from CSV
+   # 從CSV檔案匯入至JDb
    jdb2.from_csv('example.csv')
-   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
+   print(jdb2.find(RE='Bob')) # 輸出: {'name': 'Bob', 'age': 42}
 
 INI / TOML 匯入
 -----------------
@@ -279,17 +275,17 @@ INI / TOML 匯入
 
    jdb = JDb()
 
-   # --- Load INI Format ---
+   # --- 準備 INI 格式 ---
    ini_data = """
    [server]
    host = 127.0.0.1
    port = 8080
    """
 
-   jdb.from_ini(io.StringIO(ini_data)) # Also supports direct file paths like 'config.ini'
-   print(jdb['server/host']) # Output: 127.0.0.1
+   jdb.from_ini(io.StringIO(ini_data)) # 除了IO外，還支援檔案路徑 (例如:'config.ini')
+   print(jdb['server/host']) # 輸出: 127.0.0.1
 
-   # --- Load TOML Format ---
+   # --- 準備 TOML 格式 ---
    toml_data = """
    app_name = "Omni Test"
    [network]
@@ -297,10 +293,10 @@ INI / TOML 匯入
    port = 8181
    """
    
-   jdb.from_toml(io.StringIO(toml_data))
+   jdb.from_toml(io.StringIO(toml_data)) # 除了IO外，還支援檔案路徑 (例如:'config.toml')
 
-   print(config_db['/app_name'])    # Output: Omni Test
-   print(config_db['network/ip'])   # Output: 192.168.1.1
+   print(jdb['/app_name'])    # 輸出: Omni Test
+   print(jdb['network/ip'])   # 輸出: 192.168.1.1
 
 SQLite 匯入
 -------------
@@ -355,7 +351,8 @@ Step 2: Import to ``JDb``
 
 .. code-block:: python
 
-   from omni_json_db import JDb   
+   from omni_json_db import JDb
+      
    jdb = JDb("migrated_data.jdb")
 
    # Load an entire SQLite database with one line of code

@@ -199,19 +199,15 @@ Backup & Restore
 
    # backup jdb to bak folder = ./bak/fruit.jdb
    jdb_bak = jdb.backup(folder='bak')
-   assert jdb_bak == fruits
    assert jdb_bak == jdb
 
    # del all jdb data
    del jdb[fruits]
-   assert jdb != fruits
-   assert jdb != jdb_bak
    assert len(jdb) == 0
 
    # restore bak folder to jdb
    jdb.restore(folder='bak')
    assert jdb == fruits
-   assert jdb == jdb_bak
 
 Groups Mode
 -----------
@@ -300,8 +296,8 @@ INI / TOML Import
    
    jdb.from_toml(io.StringIO(toml_data))
 
-   print(config_db['/app_name'])    # Output: Omni Test
-   print(config_db['network/ip'])   # Output: 192.168.1.1
+   print(jdb['/app_name'])    # Output: Omni Test
+   print(jdb['network/ip'])   # Output: 192.168.1.1
 
 SQLite Import
 -------------
