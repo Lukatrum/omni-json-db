@@ -1,0 +1,46 @@
+name: PyPI Installation
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - '*' 
+
+permissions:
+  contents: read
+
+jobs:
+  test-installation:
+    name: Test on ${{ matrix.os }} with Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install omni-json-db from PyPI
+        run: |
+          python -m pip install --upgrade pip
+          pip install omni-json-db
+
+      - name: Create test script
+        shell: bash
+        run: |
+          cat << 'EOF' > test_script.py
+          from omni_json_db import JDb, __version__
+          jdb = JDb('test.jdb')
+          jdb += {f'key{v}': list(range(v+1)) for v in range(100)}
+          assert len(jdb) == 100
+          print(f"omni-json-db=={__version__} is ready！")
+          EOF
+
+      - name: Run verification script
+        run: python test_script.py
