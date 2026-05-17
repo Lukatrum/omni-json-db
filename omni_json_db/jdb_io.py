@@ -1288,13 +1288,13 @@ class JIoVAL_P(JIoVAL):
 
 class JIoVAL_Y(JIoVAL):
     def dumps(self, data:Any) -> bytes:
-        if yaml: # pragma: no cover
+        if yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         return yaml.safe_dump(data, allow_unicode=True).encode('utf8')
 
     def loads(self, data:bytes) -> Any:
-        if yaml: # pragma: no cover
+        if yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         for _ in range(9):
@@ -1780,6 +1780,18 @@ class JIo:
             raise TypeError
         if not isinstance(version, int):
             raise TypeError
+
+        if data_type in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
+            raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
+
+        if zip_type in {ZS_ZIP, Z1_ZIP, Z2_ZIP} and zstd_decompress is None: # pragma: no cover
+            raise ModuleNotFoundError("zstandard is not installed. Please pip install zstandard.")
+
+        if zip_type == LZ_ZIP and lz4_decompress is None: # pragma: no cover
+            raise ModuleNotFoundError("lz4 is not installed. Please pip install lz4.")
+
+        if zip_type == BR_ZIP and br_decompress is None: # pragma: no cover
+            raise ModuleNotFoundError("brotli is not installed. Please pip install brotli.")
 
         if version == API_V0:
             self._data_type     = data_type
