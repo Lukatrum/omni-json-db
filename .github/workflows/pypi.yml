@@ -2,8 +2,8 @@ name: PyPI Installation
 
 on:
   push:
-    branches:
-      - 'main'
+    # branches:
+    #   - 'main'
     tags:
       - '*'
       - '.github/workflows/pypi.yml'
