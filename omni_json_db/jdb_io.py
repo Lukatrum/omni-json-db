@@ -1647,30 +1647,30 @@ class JIo:
                     value, zip_type = value.split('(')
                     self.zip_type = zip_type[:-1]
 
-                if value in {'L+J', 'L:J'}:
-                    value = L_J_TYPE
-                elif value in {'M+M', 'M:M'}:
-                    value = M_M_TYPE
-                elif value in {'J+J', 'J:J'}:
-                    value = J_J_TYPE
-                elif value in {'J+M', 'J:M'}:
-                    value = J_M_TYPE
-                elif value in {'J+P', 'J:P'}:
-                    value = J_P_TYPE
-                elif value in {'S+S', 'S:S'}:
-                    value = S_S_TYPE
-                elif value in {'J+S', 'J:S'}:
+                if value in {'J+S', 'J:S', 'JSON+MSGPACK'}:
                     value = J_S_TYPE
-                elif value in {'S+M', 'S:M'}:
-                    value = S_M_TYPE
-                elif value in {'S+J', 'S:J'}:
+                elif value in {'J+J', 'J:J', 'JSON+JSON'}:
+                    value = J_J_TYPE
+                elif value in {'S+S', 'S:S', 'MSGPACK+MSGPACK'}:
+                    value = S_S_TYPE
+                elif value in {'S+J', 'S:J', 'MSGPACK+JSON'}:
                     value = S_J_TYPE
-                elif value in {'S+P', 'S:P'}:
+                elif value in {'J+M', 'J:M', 'JSON+MARSHAL'}:
+                    value = J_M_TYPE
+                elif value in {'S+M', 'S:M', 'MSGPACK+MARSHAL'}:
+                    value = S_M_TYPE
+                elif value in {'J+P', 'J:P', 'JSON+PICKLE'}:
+                    value = J_P_TYPE
+                elif value in {'S+P', 'S:P', 'MSGPACK+PICKLE'}:
                     value = S_P_TYPE
-                elif value in {'J+Y', 'J:Y'}:
+                elif value in {'J+Y', 'J:Y', 'JSON+YAML'}:
                     value = J_Y_TYPE
-                elif value in {'S+Y', 'S:Y'}:
+                elif value in {'S+Y', 'S:Y', 'MSGPACK+YAML'}:
                     value = S_Y_TYPE
+                elif value in {'M+M', 'M:M', 'MARSHAL+MARSHAL'}:
+                    value = M_M_TYPE
+                elif value in {'L+J', 'L:J'}:
+                    value = L_J_TYPE
                 else:
                     raise ValueError(f'invalid data string {value}')
 

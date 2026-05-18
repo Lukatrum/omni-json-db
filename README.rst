@@ -772,7 +772,7 @@ Configure ``data_type`` during initialization:
 |                   |            |       |          |           |                |* unreadable      |
 |                   |            |       |          |           |                |* security issue  |
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
-| ``J+Y`` or ``S+Y``| ~78,000,000| ~0.90 | ~25.0MB/s| ~15.0MB/s |* readable      |* biggest size    |
+| ``J+Y`` or ``S+Y``| 181,894,885| 2.57  | 0.146MB/s| 0.352MB/s |* readable      |* biggest size    |
 |                   |            |       |          |           |                |* slowest read    |
 |                   |            |       |          |           |                |* slowest write   |
 |                   |            |       |          |           |                |* no tuple [a]_   |
