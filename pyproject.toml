@@ -7,13 +7,13 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.11.31"
+version = "2.11.32"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
 description = "A zero-config, powerful JSON database with compression. No schema, no setup, just data."
 readme = "README.rst"
-requires-python = ">=3.7"
+requires-python = ">=3.7,<4"
 keywords = [
 	"backup",
 	"big-data",
@@ -101,7 +101,8 @@ full = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/lukatrum"
-"Repository" = "https://github.com/lukatrum/omni-json-db"
-"Bug Tracker" = "https://github.com/lukatrum/omni-json-db/issues"
-"Wiki" = "https://github.com/Lukatrum/omni-json-db/wiki"
+Homepage = "https://github.com/lukatrum"
+Documentation = "https://tinydb.readthedocs.org/"
+Repository = "https://github.com/lukatrum/omni-json-db"
+Wiki = "https://github.com/Lukatrum/omni-json-db/wiki"
+Issues = "https://github.com/lukatrum/omni-json-db/issues"
