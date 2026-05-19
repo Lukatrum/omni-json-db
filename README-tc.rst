@@ -28,6 +28,7 @@ English_ | 中文_
 - `🛠️ 快速入門`_
 - `📝 規格說明`_
 - `📊 基準測試`_
+- `📄 說明文檔 <https://omni-json-db.readthedocs.io>`_
 - `👥 貢獻指南`_
 
 ✨ 簡介

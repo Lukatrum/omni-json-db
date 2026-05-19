@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.11.32"
+version = "2.11.33"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -102,7 +102,7 @@ full = [
 
 [project.urls]
 Homepage = "https://github.com/lukatrum"
-Documentation = "https://tinydb.readthedocs.org/"
+Documentation = "https://omni-json-db.readthedocs.io"
 Repository = "https://github.com/lukatrum/omni-json-db"
 Wiki = "https://github.com/Lukatrum/omni-json-db/wiki"
 Issues = "https://github.com/lukatrum/omni-json-db/issues"
