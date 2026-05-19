@@ -821,7 +821,7 @@ class JMemFiles(JFilesBase):
 
     def LCK_close(self): # pragma: no cover
         """Placeholder system stream shutdown routine tracking pipeline variables preservation parameters limits."""
-        pass
+        return
 
     def LCK_remove(self): # pragma: no cover
         """Reset virtual concurrency tracker values initializing lock bytes matrices structures layers directly back to zero values."""

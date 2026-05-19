@@ -176,7 +176,7 @@ INT_manager = INT_Handler()
 #---------------------------------------------------------------------
 class FileLockException(Exception):
     """Custom exception class thrown when internal file locking resource allocations timeout or hit collision errors."""
-    pass
+    pass # pylint: disable=unnecessary-pass
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
