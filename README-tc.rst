@@ -16,7 +16,9 @@ English_ | 中文_
 *********************
 
 **omni-json-db** 已在 Python 3.7+ 和 PyPy3 上通過測試。
+
 |Python Version|
+
 ..
 
    如果您覺得 **omni-json-db** 對您有所幫助，請考慮給它一個⭐️！ 這能幫助專案成長並接觸到更多開發者。

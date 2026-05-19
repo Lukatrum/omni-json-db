@@ -19,7 +19,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful JSON database with compression. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.11.33'
+__version__         = '2.12.00'
 
 __all__ = [
     'JDb',
@@ -61,7 +61,7 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
 
     Examples
         >>> server = run_files_server(host='127.0.0.1', port=8080)
-        >>> server.serve_forever()
+        >>> server.shutdown()
     """
     if files is None or isinstance(files, bytearray):
         files_obj = JMemFiles(files)

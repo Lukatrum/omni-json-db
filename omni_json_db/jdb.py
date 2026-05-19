@@ -337,6 +337,13 @@ class JDb(JDbReader):
         
         Raises:
             TypeError: Raised if provided arguments are of the incorrect type.
+
+        Example:
+            >>> jdb = JDb() # in-memory mode
+            >>> jdb = JDb('192.168.0.1:8181') # Network mode
+            >>> jdb = JDb('file.jdb') # file mode
+            >>> jdb = JDb('example.jdb', data_type='J+J', zip_type='gz')
+        
         """
         super().__init__(KEY_file=KEY_file,
             min_value_size=min_value_size,
@@ -409,6 +416,11 @@ class JDb(JDbReader):
 
         Raises:
             TypeError: If input validation layers discover corrupted lambda parameter signatures rules or mismatched data types.
+
+        Example:
+            >>> jdb['name'] = 'Charlie'
+            >>> jdb[lambda k,v: v == 10] = 11
+            >>> jdb[1:10:2] = "updated"
         """
         if isinstance(key, str):
             idx = key.find(SEP_SYM)
@@ -644,6 +656,11 @@ class JDb(JDbReader):
 
         Raises:
             TypeError: If lookups evaluation candidates strike unrecognizable parameter types rules boundaries models.
+
+        Example:
+            >>> del jdb[:] # delete all records
+            >>> del jdb['name']
+            >>> del jdb[lambda k,v: k.startswith('temp_')]
         """
         if isinstance(key, str):
             idx = key.find(SEP_SYM)
@@ -811,6 +828,11 @@ class JDb(JDbReader):
 
         Returns:
             JDb: Self instance with specified nodes decoupled completely.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['key1', 'key2', 'key3'] = 1
+            >>> jdb -= {'key1', 'key2', 'key3'}
         """
         if isinstance(keys, JDbReader):
             with self.open(read_only=True) as fp:
@@ -901,6 +923,11 @@ class JDb(JDbReader):
         
         Returns:
             JDb: Self repository context manager interface handle reference.
+        
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['key1', 'key2', 'key3'] = 1
+            >>> jdb += {'new_key': 99}
         """
         if isinstance(records, (JDbReader, dict)):
             self.update(records)
@@ -938,6 +965,11 @@ class JDb(JDbReader):
                     >>> jdb |= 'name' # jdb['name'] = None
         Returns:
             JDb: Self proxy repository interface controller instance framework.
+        
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['key1', 'key2', 'key3'] = 1
+            >>> jdb |= {'new_key': 99}
         """
         if isinstance(records, (JDbReader, dict)):
             self.insert(records)
@@ -975,6 +1007,13 @@ class JDb(JDbReader):
                     >>> jdb &= 'name' # jdb['name'] = None
         Returns:
             JDb: Self database environment framework instance configuration wrapper.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['key1', 'key2', 'key3'] = 1
+            >>> jdb &= {'key1': 99}
+            >>> jdb['key1']
+            99
         """
         if isinstance(records, (JDbReader, dict)):
             self.replace(records)
@@ -1011,6 +1050,14 @@ class JDb(JDbReader):
 
         Returns:
             JDb: Self chronologically synchronized operational workspace manager proxy.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['key1'] = 1
+            >>> jdb['key1'] = 99
+            >>> jdb ^= {'key1'}
+            >>> jdb['key1']
+            1
         """
         if isinstance(keys, str):
             keys = {keys}
@@ -1123,6 +1170,9 @@ class JDb(JDbReader):
 
         Returns:
             Any: Unpacked Python object value, or default_val if missing from storage tables.
+
+        Example:
+            >>> previous_value = jdb.pop('key_to_remove', default_val=0)
         """
         with self.open(read_only=True) as fp:
             try:
@@ -1144,6 +1194,9 @@ class JDb(JDbReader):
 
         Returns:
             Dict[str, Any]: Mapping dictionary summarizing all successfully restored entities linked along previous positions data.
+        
+        Example:
+            >>> recovered_info = jdb.unremove('accidental_delete_key')
         """
         keys = set()
         results = {}
@@ -1246,6 +1299,9 @@ class JDb(JDbReader):
 
         Returns:
             Dict[str, Any]: Collection mapping keys fields onto recovery structural outcomes status codes.
+            
+        Example:
+            >>> status = jdb.revert('target_key_1', 'target_key_2')
         """
         results = {}
         keys = set()
@@ -1318,6 +1374,9 @@ class JDb(JDbReader):
             merge (bool, optional): Combine contiguous sparse gaps inside data segments layout storage files. Defaults to False.
             fill_zero (bool, optional): Overwrite unallocated physical tracks with structural zeroes vectors preventing leakage traces. Defaults to False.
             verbose (bool, optional): Enable terminal logging text parameters metrics visualization alerts. Defaults to True.
+        
+        Example:
+            >>> jdb.recycle(level=4, merge=False, verbose=False)
         """
         del_rows = []
         with self.open(read_only=False) as fp:

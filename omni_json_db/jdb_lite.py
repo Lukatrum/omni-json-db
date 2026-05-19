@@ -132,6 +132,13 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
 
     Returns:
         bool: True if the value satisfies all specified rules, False otherwise.
+
+    Example:
+        >>> rules = {'$gt': 10, '$lt': 20}
+        >>> _match_rules("age", 15, rules)
+        True
+        >>> _match_rules("name", "Alice", {"$re": r"Al.*"})
+        True
     """
     if ANY and hasattr(val, '__iter__'): # pragma: no cover
         if isinstance(val, (list, set, frozenset, tuple)):
@@ -1563,6 +1570,12 @@ class JDbReader:
 
         Returns:
             bool: True if all provided keys exist in the database, False otherwise.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['user_1', 'user_2', 'user_3'] = 0
+            >>> {'user_1', 'user_2'} in jdb
+            True
         """
         return self.is_superset(keys)
 
@@ -1578,6 +1591,12 @@ class JDbReader:
 
         Returns:
             bool: True if the keys are identical, False otherwise.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['user_1', 'user_2'] = 0
+            >>> jdb == {'user_1', 'user_2'}
+            True    
         """
         if isinstance(jdb, JDbReader):
             if jdb is self:
@@ -1651,6 +1670,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The resulting difference set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {f'user_{v+1}':v for v in range(3)}
+            >>> jdb - {'user_1'}
+            {'user_2', 'user_3'}
         """
         return self.difference(keys)
 
@@ -1663,6 +1688,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The resulting union set.
+        
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb + {'new_user'}
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -1675,6 +1706,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb | {'new_user'}
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -1687,6 +1724,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The intersection set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb & {'user_1', 'missing_user'}
+            {'user_1'}
         """
         return self.intersection(keys)
 
@@ -1699,6 +1742,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The symmetric difference set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb ^ {'user_1', 'new_user'}
+            {'user_2', 'new_user'}
         """
         return self.non_intersection(keys)
 
@@ -1711,6 +1760,12 @@ class JDbReader:
 
         Returns:
             Set[str]: Elements in the given set but not in the database.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'new_user'} - jdb
+            {'new_user'}
         """
         if isinstance(keys, str):
             keys = {keys}
@@ -1739,6 +1794,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'new_user'} + jdb
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -1751,6 +1812,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'new_user'} | jdb
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -1763,6 +1830,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The intersection set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'missing_user'} & jdb
+            {'user_1'}
         """
         return self.intersection(keys)
 
@@ -1775,6 +1848,12 @@ class JDbReader:
 
         Returns:
             Set[str]: The symmetric difference set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'new_user'} ^ jdb
+            {'user_2', 'new_user'}
         """
         return self.symmetric_difference(keys)
 
