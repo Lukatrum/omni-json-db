@@ -362,50 +362,50 @@ class JDb(JDbReader):
                 
                 - str | int | float | bool | bytes
                     
-                    - jdb['name'] = val
+                    >>> jdb['name'] = val
             
                 - slice | date | datetime
                     
-                    - jdb[1:10:2] = val
-                    - jdb[-10.:] = val
-                    - jdb[:] = val
-                    - jdb[date(2020,1,1)::r'key[0-9]'] = val
-                    - jdb[:100:r'key[0-9]'] = val
-                    - jdb[date(2020,1,1)] = val
-                    - jdb[datetime(2020,1,1)] = val
+                    >>> jdb[1:10:2] = val
+                    >>> jdb[-10.:] = val
+                    >>> jdb[:] = val
+                    >>> jdb[date(2020,1,1)::r'key[0-9]'] = val
+                    >>> jdb[:100:r'key[0-9]'] = val
+                    >>> jdb[date(2020,1,1)] = val
+                    >>> jdb[datetime(2020,1,1)] = val
             
                 - function(k,v)
                     
-                    - jdb[lambda k,v: k.startswith('key') and v > 0] = val
-                    - jdb[lambda k,v: v == 10] = val
+                    >>> jdb[lambda k,v: k.startswith('key') and v > 0] = val
+                    >>> jdb[lambda k,v: v == 10] = val
             
                 - function(k)
                     
-                    - jdb[lambda k: k[0] == 'k'] = val
+                    >>> jdb[lambda k: k[0] == 'k'] = val
             
                 - re.Pattern
                     
-                    - jdb[re.compile(r'key[0-9]')] = val
+                    >>> jdb[re.compile(r'key[0-9]')] = val
             
                 - tuple | set | list | dict
                     
-                    - jdb['a', 'b', 'c', 'd'] = val | func
-                    - jdb[('a', 'b'', 'c', 'd')] = val | func
-                    - jdb[{'a', 'b'', 'c', 'd'}] = val | func
-                    - jdb[['a', 'b'', 'c', 'd']] = val | func
-                    - jdb[{'a':0, 'b':1, 'c':2, 'd':3}] = val | func
+                    >>> jdb['a', 'b', 'c', 'd'] = val | func
+                    >>> jdb[('a', 'b'', 'c', 'd')] = val | func
+                    >>> jdb[{'a', 'b'', 'c', 'd'}] = val | func
+                    >>> jdb[['a', 'b'', 'c', 'd']] = val | func
+                    >>> jdb[{'a':0, 'b':1, 'c':2, 'd':3}] = val | func
 
             val (Any): Payload value context or updating mutation callback functional lambda routine.
 
                 - any type but function
                     
-                    - jdb['name'] = val
+                    >>> jdb['name'] = val
             
                 - function(k,v)
                     
-                    - jdb['name'] = lambda k,v : v+1
-                    - jdb['name'] = lambda k,v : v+1 if v is not None else None # replace if exist
-                    - jdb['name'] = lambda k,v : v if v is not None else 1 # insert if not exist        
+                    >>> jdb['name'] = lambda k,v : v+1
+                    >>> jdb['name'] = lambda k,v : v+1 if v is not None else None # replace if exist
+                    >>> jdb['name'] = lambda k,v : v if v is not None else 1 # insert if not exist        
 
         Raises:
             TypeError: If input validation layers discover corrupted lambda parameter signatures rules or mismatched data types.
@@ -609,38 +609,38 @@ class JDb(JDbReader):
 
                 - str | int | float | bool | bytes
                     
-                    - del jdb['name']
+                    >>> del jdb['name']
             
                 - slice | date | datetime
                     
-                    - del jdb[1:10:2]
-                    - del jdb[-10.:]
-                    - del jdb[:]
-                    - del jdb[dt.date(2020,1,1)::r'key[0-9]']
-                    - del jdb[:100:r'key[0-9]']
-                    - del jdb[date(2020,1,1)]
-                    - del jdb[datetime(2020,1,1)]
+                    >>> del jdb[1:10:2]
+                    >>> del jdb[-10.:]
+                    >>> del jdb[:]
+                    >>> del jdb[dt.date(2020,1,1)::r'key[0-9]']
+                    >>> del jdb[:100:r'key[0-9]']
+                    >>> del jdb[date(2020,1,1)]
+                    >>> del jdb[datetime(2020,1,1)]
             
                 - function(k,v)
                     
-                    - del jdb[lambda k,v: k.startswith('key')]
-                    - del jdb[lambda k,v: v == 10] = val
+                    >>> del jdb[lambda k,v: k.startswith('key')]
+                    >>> del jdb[lambda k,v: v == 10] = val
             
                 - function(k)
                     
-                    - del jdb[lambda k: k[0] == 'k']
+                    >>> del jdb[lambda k: k[0] == 'k']
             
                 - re.Pattern
                     
-                    - del jdb[re.compile(r'key[0-9]')]
+                    >>> del jdb[re.compile(r'key[0-9]')]
             
                 - tuple | set | list | dict
                     
-                    - del jdb['a', 'b', 'c', 'd']
-                    - del jdb[('a', 'b', 'c', 'd')]
-                    - del jdb[{'a', 'b', 'c', 'd'}]
-                    - del jdb[['a', 'b', 'c', 'd']]
-                    - del jdb[{'a':0, 'b':1, 'c':2, 'd':3}]
+                    >>> del jdb['a', 'b', 'c', 'd']
+                    >>> del jdb[('a', 'b', 'c', 'd')]
+                    >>> del jdb[{'a', 'b', 'c', 'd'}]
+                    >>> del jdb[['a', 'b', 'c', 'd']]
+                    >>> del jdb[{'a':0, 'b':1, 'c':2, 'd':3}]
 
         Raises:
             TypeError: If lookups evaluation candidates strike unrecognizable parameter types rules boundaries models.
@@ -796,18 +796,18 @@ class JDb(JDbReader):
 
                 - JDbReader
                     
-                    - jdb -= other_jdb 
+                    >>> jdb -= other_jdb 
             
                 - str | int | float | bool | bytes
                     
-                    - jdb -= 'name'
+                    >>> jdb -= "name" # jdb -= {"name"}
             
-                 - tuple | set | list | dict
+                - tuple | set | list | dict
                     
-                    - jdb -= {'a'', 'b'', 'c'', 'd'}
-                    - jdb -= ('a'', 'b'', 'c'', 'd')
-                    - jdb -= ['a'', 'b'', 'c'', 'd']
-                    - jdb -= {'a':0, 'd':1, 'c'':2, 'd':3}      
+                    >>> jdb -= {'a'', 'b'', 'c', 'd'}
+                    >>> jdb -= ('a'', 'b'', 'c', 'd')
+                    >>> jdb -= ['a'', 'b'', 'c', 'd']
+                    >>> jdb -= {'a':0, 'd':1, 'c':2, 'd':3}      
 
         Returns:
             JDb: Self instance with specified nodes decoupled completely.
@@ -883,21 +883,21 @@ class JDb(JDbReader):
                 
                 - JDbReader
                     
-                    - jdb += other_jdb 
+                    >>> jdb += other_jdb 
 
                 - dict == Dict[str,Any] == {key1:val1, key2:val2, ..}
                     
-                    - jdb += {'a':1, 'b':2}
+                    >>> jdb += {'a':1, 'b':2}
             
                 - tuple | set | list == List[Any] == (val1, val2, ..)
                     
-                    - jdb += {'a', 'b'} # jdb.update_vals({'a', 'b'})
-                    - jdb += ('a', 'b') # jdb.update_vals(('a', 'b'))
-                    - jdb += ['a', 'b'] # jdb.update_vals(['a', 'b'])
+                    >>> jdb += {'a', 'b'} # jdb.update_vals({'a', 'b'})
+                    >>> jdb += ('a', 'b') # jdb.update_vals(('a', 'b'))
+                    >>> jdb += ['a', 'b'] # jdb.update_vals(['a', 'b'])
         
                 - str | int | float | bool | bytes
                     
-                    - jdb += 'name' # jdb['name'] = None
+                    >>> jdb += 'name' # jdb['name'] = None
         
         Returns:
             JDb: Self repository context manager interface handle reference.
@@ -921,21 +921,21 @@ class JDb(JDbReader):
                 
                 - JDbReader
                     
-                    - jdb |= other_jdb 
+                    >>> jdb |= other_jdb 
 
                 - dict == Dict[str,Any] == {key1:val1, key2:val2, ..}
                     
-                    - jdb |= {'a':1, 'b':2}
+                    >>> jdb |= {'a':1, 'b':2}
             
                 - tuple | set | list == List[Any] == (val1, val2, ..)
                     
-                    - jdb |= {'a', 'b'} # jdb.insert_vals({'a', 'b'})
-                    - jdb |= ('a', 'b') # jdb.insert_vals(('a', 'b'))
-                    - jdb |= ['a', 'b'] # jdb.insert_vals(['a', 'b'])
+                    >>> jdb |= {'a', 'b'} # jdb.insert_vals({'a', 'b'})
+                    >>> jdb |= ('a', 'b') # jdb.insert_vals(('a', 'b'))
+                    >>> jdb |= ['a', 'b'] # jdb.insert_vals(['a', 'b'])
         
                 - str | int | float | bool | bytes
                     
-                    - jdb |= 'name' # jdb['name'] = None
+                    >>> jdb |= 'name' # jdb['name'] = None
         Returns:
             JDb: Self proxy repository interface controller instance framework.
         """
@@ -958,21 +958,21 @@ class JDb(JDbReader):
 
                 - JDbReader
                     
-                    - jdb &= other_jdb 
+                    >>> jdb &= other_jdb 
 
                 - dict == Dict[str,Any] == {key1:val1, key2:val2, ..}
                     
-                    - jdb &= {'a':1, 'b':2}
+                    >>> jdb &= {'a':1, 'b':2}
             
                 - tuple | set | list == Tuple[Any] == (val1, val2, ..)
                     
-                    - jdb &= {'a', 'b'} # jdb.replace_vals({'a', 'b'})
-                    - jdb &= ('a', 'b') # jdb.replace_vals(('a', 'b'))
-                    - jdb &= ['a', 'b'] # jdb.replace_vals(['a', 'b'])
+                    >>> jdb &= {'a', 'b'} # jdb.replace_vals({'a', 'b'})
+                    >>> jdb &= ('a', 'b') # jdb.replace_vals(('a', 'b'))
+                    >>> jdb &= ['a', 'b'] # jdb.replace_vals(['a', 'b'])
         
                 - str | int | float | bool | bytes
                     
-                    - jdb &= 'name' # jdb['name'] = None
+                    >>> jdb &= 'name' # jdb['name'] = None
         Returns:
             JDb: Self database environment framework instance configuration wrapper.
         """
@@ -995,18 +995,18 @@ class JDb(JDbReader):
 
                 - JDbReader
                     
-                    - jdb ^= other_jdb 
+                    >>> jdb ^= other_jdb 
 
                 - str | int | float | bool | bytes
                     
-                    - jdb ^= 'name' 
+                    >>> jdb ^= 'name' 
             
                 - dict | tuple | set | list
                     
-                    - jdb ^= {'a', 'b'} 
-                    - jdb ^= ('a', 'b') 
-                    - jdb ^= ['a', 'b'] 
-                    - jdb ^= {'a':1, 'b':2} # == {'a', 'b}
+                    >>> jdb ^= {'a', 'b'} 
+                    >>> jdb ^= ('a', 'b') 
+                    >>> jdb ^= ['a', 'b'] 
+                    >>> jdb ^= {'a':1, 'b':2} # == {'a', 'b}
         
 
         Returns:
@@ -1657,6 +1657,12 @@ class JDb(JDbReader):
 
         Raises:
             ValueError: If target codes evaluate out of structural ranges definitions thresholds.
+
+        Example:
+            >>> jdb = JDb(date_type='J+J')
+            >>> jdb.change_KEY('S')
+            >>> print(jdb.data_type)
+            S+J
         """
         KEY_type_u = KEY_type.upper()
         if KEY_type_u not in 'LMJS':
@@ -1874,6 +1880,10 @@ class JDb(JDbReader):
         Raises:
             ValueError: If lookup coordinates target unallocated positions boundaries paths context lines.
             TypeError: If input structural data candidate fails standard module validation checks.
+
+        Example:
+            >>> jdb = JDb('example.jdb')
+            >>> jdb.restore(folder='bak')
         """
         if isinstance(folder, JDb):
             jdb = folder
@@ -1930,6 +1940,13 @@ class JDb(JDbReader):
 
         Returns:
             JDb: Initialized destination replica workspace proxy connection interface object.
+
+        Example:
+            >>> jdb = JDb('example.jdb', data_type='J+M', zip_type='gz')
+            >>> jdb += {f'key{v}':list(range(v)) for v in range(100)}
+            >>> bak_jdb = jdb.backup(folder='bak', data_type='S+S', zip_type='br')
+            >>> print(bak_jdb.date_type, bak_jdb.zip_type)
+            S+S br
         """
         if zip_type is None:
             zip_type = self.io._zip_type
@@ -2250,23 +2267,23 @@ class JDb(JDbReader):
                 
                 - str
 
-                    - jdb[ke)] = val
+                    >>> jdb[ke)] = val
 
                 - int | float | bool
 
-                    - jdb[str(key)] = val
+                    >>> jdb[str(key)] = val
 
             val (Any): Scalar object layout payload or conditional update callback lambda routine context.
 
                 - any type but function
                     
-                    - jdb['name'] = val
+                    >>> jdb['name'] = val
 
                 - function(k,v)
 
-                    - jdb['name'] = lambda k,v : v+1
-                    - jdb['name'] = lambda k,v : v+1 if v is not None else None # replace if exist
-                    - jdb['name'] = lambda k,v : v if v is not None else 1 # insert if not exist
+                    >>> jdb['name'] = lambda k,v : v+1
+                    >>> jdb['name'] = lambda k,v : v+1 if v is not None else None # replace if exist
+                    >>> jdb['name'] = lambda k,v : v if v is not None else 1 # insert if not exist
             
             flags (Optional[JFlag], optional): strategic behavioral modifiers. Defaults to None.
 
@@ -2334,8 +2351,19 @@ class JDb(JDbReader):
             days (Union[int, float, str, dt_date, datetime]): Timeline offset integer, calendar object instance, or formatted date text code.
                 
                 - int : days since 1-1-1
+                    
+                    >>> jdb.set_days('key', 1)
+
                 - str : 'YYYY-MM-DD' or 'YYYY-MM-DD YYYY-MM-DD'
+
+                    >>> jdb.set_days('key', "2000-01-01")
+                    >>> jdb.set_days('key', "2000-01-01 2001-12-31")
+
                 - date | datetime 
+
+                    >>> jdb.set_days('key', date(2000, 1, 1))
+                    >>> jdb.set_days('key', datetime(2000, 1, 1))
+
                 - float : timestamp
 
         Returns:
@@ -4972,7 +5000,32 @@ class JDb(JDbReader):
         return io, fp_dict, key_fp, sync_id != io.sync_id
 
     @staticmethod
-    def z_upgrade_API(KEY_path:str) -> JDb: # pragma: no cover
+    def z_upgrade_API(KEY_path:Union[str,JDb]) -> JDb: # pragma: no cover
+        """
+        Upgrade an older version of the database to the latest API structural format.
+
+        This method reads the existing database schema, resizes the index structure if necessary,
+        migrates all tracking properties and physical indices to match the specifications of `API_LATEST`,
+        and overwrites the legacy header. It ensures backward compatibility for older `.jdb` files by 
+        re-encoding the storage pipelines.
+
+        Args:
+            KEY_path (Union[str, JDb]): The file path string to the legacy database, or an already 
+                initialized JDb instance that requires upgrading.
+
+        Returns:
+            JDb: The fully upgraded database controller instance running on the newest API format.
+
+        Raises:
+            TypeError: If the provided `KEY_path` cannot be resolved into a valid JDb instance, 
+                or if the current API version is missing/invalid.
+
+        Example:
+            >>> from omni_json_db import JDb
+            >>> # Upgrade a legacy database file to the latest API
+            >>> upgraded_db = JDb.z_upgrade_API('db/legacy_data.jdb')
+            >>> print(upgraded_db.io.api_ver)
+        """
         if isinstance(KEY_path, JDb):
             jdb = KEY_path
         else:
@@ -5051,7 +5104,29 @@ class JDb(JDbReader):
         return jdb
 
     @staticmethod
-    def z_upgrade_KEY_day(KEY_path:str) -> JDb: # pragma: no cover
+    def z_upgrade_KEY_day(KEY_path:Union[str,JDbReader]) -> JDb: # pragma: no cover
+        """
+        Upgrade and rectify the legacy timeline tracking format (days) inside the database index.
+
+        This migration method patches older date formats (specifically targeting pre-2000 epoch offsets)
+        within the index registries. It sequentially scans all allocated rows, updates the timestamp 
+        metadata values directly via bitwise masks, and rewrites the file header safely.
+
+        Args:
+            KEY_path (Union[str, JDbReader]): The absolute file path to the database, or an active 
+                JDb/JDbReader instance wrapper.
+
+        Returns:
+            JDb: The database controller instance with fully rectified timeline index matrices.
+
+        Raises:
+            TypeError: If the input target cannot be instantiated or validated as a proper JDb environment.
+
+        Example:
+            >>> from omni_json_db import JDb
+            >>> # Fix timeline metadata constraints for an older database
+            >>> fixed_db = JDb.z_upgrade_KEY_day('db/old_timestamps.jdb')
+        """
         if isinstance(KEY_path, JDbReader):
             jdb = KEY_path
         else:

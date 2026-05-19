@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.abspath('../../'))
 
 project = 'omni-json-db'
-copyright = '2026, omni-json-db Contributors'
+copyright = '2026, omni-json-db'
 author = 'Lukatrum'
 release = '2.11.30'
 
@@ -30,13 +30,10 @@ napoleon_google_docstring = True
 napoleon_numpy_docstring = False
 napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False
+napoleon_include_special_with_doc = True
 
 templates_path = ['_templates']
 exclude_patterns = []
-
-nitpick_ignore = [
-    ('py:class', 'omni_json_db.JFlag'),
-]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

@@ -74,8 +74,8 @@ class JFlag(IntFlag):
     Enumeration flag to control write/delete behavior in database operations.
     """
 
-    REVERT  = 0x01  # [r]allow to revert after write/delete operation
-    SPLIT   = 0x02  # [s]allow to split large row into two
+    REVERT  = 0x01  # allow to revert after write/delete operation
+    SPLIT   = 0x02  # allow to split large row into two
 
     @classmethod
     def _missing_(cls, value):
@@ -83,7 +83,7 @@ class JFlag(IntFlag):
         Handle missing values by parsing string combinations into valid IntFlags.
 
         Args:
-            value (Any): The string representation of flags (e.g., 'rs' for REVERT and SPLIT).
+            value (Any): The string representation of flags.
 
         Returns:
             JFlag: The combined flag instance.
@@ -105,7 +105,7 @@ class JFlag(IntFlag):
         Return a string representation of the currently active flags.
 
         Returns:
-            str: A string where each character represents an active flag's initial (e.g., 'R_' or 'RS').
+            str: A string where each character represents an active flag's initial.
         """
         ret = ''
         for flag in JFlag:
@@ -409,7 +409,7 @@ class JDbKey:
         Args:
             jdb (JDbReader): The parent database reader instance to bind to.
         """
-        self.jdb = jdb
+        self.jdb:JDbReader = jdb
 
     def __repr__(self) -> str:
         """
@@ -430,35 +430,35 @@ class JDbKey:
                         - val = jdb.keys['name']
 
                     - slice | date | datetime | float | int
-                        - val:dict = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
-                        - val:dict = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
-                        - val:dict = jdb.keys[date.today()]     # get today modified/new keys
-                        - val:dict = jdb.keys[datetime.now()]   # get today new keys
-                        - val:dict = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
-                        - val:dict = jdb.keys[-10.:]    # get key info and match sync_id
-                        - val:dict = jdb.keys[:]        # get all key info
-                        - val:dict = jdb.keys[0]        # get 1st key info
-                        - val:dict = jdb.keys[-1]       # get last key info
-                        - val:dict = jdb.keys[0]        # get 1st key info
-                        - val:dict = jdb.keys[-1]       # get last key info
-                        - val:dict = jdb.keys[-1.]      # get all key info which sync_id is matched
+                        >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
+                        >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
+                        >>> matches = jdb.keys[date.today()]     # get today modified/new keys
+                        >>> matches = jdb.keys[datetime.now()]   # get today new keys
+                        >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
+                        >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
+                        >>> matches = jdb.keys[:]        # get all key info
+                        >>> matches = jdb.keys[0]        # get 1st key info
+                        >>> matches = jdb.keys[-1]       # get last key info
+                        >>> matches = jdb.keys[0]        # get 1st key info
+                        >>> matches = jdb.keys[-1]       # get last key info
+                        >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
 
                     - re.Pattern
-                        - val:dict = jdb.keys[re.compile(r'key[0-9]')]
+                        >>> matches = jdb.keys[re.compile(r'key[0-9]')]
 
                     - function(k,v)
-                        - val:dict = jdb.keys[lambda k,v: k.startswith('key')]
-                        - val:dict = jdb.keys[lambda k,v: v == 10]
+                        >>> matches = jdb.keys[lambda k,v: k.startswith('key')]
+                        >>> matches = jdb.keys[lambda k,v: v == 10]
 
                     - function(k)
-                        - val:dict = jdb.keys[lambda k: k[0] == 'k']
+                        >>> matches = jdb.keys[lambda k: k[0] == 'k']
 
                     - tuple | set | list | dict
-                        - val:dict = jdb.keys[1, 2, 3, 'a']
-                        - val:dict = jdb.keys[(1, 2, 3, 'a')]
-                        - val:dict = jdb.keys[{1, 2, 3, 'a'}]
-                        - val:dict = jdb.keys[[1, 2, 3, 'a']]
-                        - val:dict = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
+                        >>> matches = jdb.keys[1, 2, 3, 'a']
+                        >>> matches = jdb.keys[(1, 2, 3, 'a')]
+                        >>> matches = jdb.keys[{1, 2, 3, 'a'}]
+                        >>> matches = jdb.keys[[1, 2, 3, 'a']]
+                        >>> matches = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
 
             Returns:
                 Union[dict, tuple, None]: Metadata tuple if a single string is passed, or a dictionary of matched keys to their metadata.
@@ -539,6 +539,14 @@ class JDbKey:
 
         Yields:
             Union[str, Tuple[str, tuple]]: Matched key, or (key, metadata) if `with_value` is True.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'key1':[0,1], 'key2':[1,2], 'key3':[3,4,5]}
+            >>> print(set(jdb.keys(r'[12]$', ANY=2)))
+            {'key2'}
+            >>> print(set(jdb.keys(HAS=3))) # any record contains 3
+            {'key3'}
         """
         jdb = self.jdb
         if keys or vals or kwargs:
@@ -571,6 +579,12 @@ class JDbKey:
 
         Returns:
             bool: True if all provided keys exist in the database, False otherwise.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['user_1', 'user_2', 'user_3'] = 0
+            >>> {'user_1', 'user_2'} in jdb.keys
+            True
         """
         return self.is_superset(keys)
 
@@ -583,6 +597,12 @@ class JDbKey:
 
         Returns:
             bool: True if the keys are identical, False otherwise.
+        
+        Example:
+            >>> jdb = JDb()
+            >>> jdb['user_1', 'user_2'] = 0
+            >>> jdb.keys == {'user_1', 'user_2'}
+            True            
         """
         return self.jdb == keys
 
@@ -595,6 +615,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The resulting difference set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {f'user_{v+1}':v for v in range(3)}
+            >>> jdb.keys - {'user_1'}
+            {'user_2', 'user_3'}
         """
         return self.difference(keys)
 
@@ -607,6 +633,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The resulting union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.keys + {'new_user'}
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -619,6 +651,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.keys | {'new_user'}
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -631,6 +669,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The intersection set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.keys & {'user_1', 'missing_user'}
+            {'user_1'}
         """
         return self.intersection(keys)
 
@@ -643,6 +687,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The symmetric difference set.
+        
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.keys ^ {'user_1', 'new_user'}
+            {'user_2', 'new_user'}
         """
         return self.non_intersection(keys)
 
@@ -655,6 +705,12 @@ class JDbKey:
 
         Returns:
             Set[str]: Elements in the given set but not in the database.
+    
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'new_user'} - jdb.keys
+            {'new_user'}
         """
         return self.jdb.__rsub__(keys)
 
@@ -667,6 +723,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'new_user'} + jdb.keys
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -679,6 +741,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The union set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'new_user'} | jdb.keys
+            {'user_1', 'user_2', 'new_user'}
         """
         return self.union(keys)
 
@@ -691,6 +759,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The intersection set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'missing_user'} & jdb.keys
+            {'user_1'}
         """
         return self.intersection(keys)
 
@@ -703,6 +777,12 @@ class JDbKey:
 
         Returns:
             Set[str]: The symmetric difference set.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> {'user_1', 'new_user'} ^ jdb.keys
+            {'user_2', 'new_user'}
         """
         return self.symmetric_difference(keys)
 
@@ -870,45 +950,45 @@ class JDbKey:
             key (Optional[Any], optional): Filtering criteria (slice, date, regex, etc.). Defaults to None.
 
                 - str | bool | bytes
-                    - val = jdb.keys['name']
-                    - val:dict = jdb.key['child:::name']
-                    - val:dict = jdb.key[':::name']
+                    >>> matches = jdb.keys['name']
+                    >>> matches = jdb.key['child:::name']
+                    >>> matches = jdb.key[':::name']
 
                 - int
-                    - val = jdb.keys[1]             # get 2nd line row key info
-                    - val = jdb.keys[-1]            # get last line row key info
+                    >>> matches = jdb.keys[1]             # get 2nd line row key info
+                    >>> matches = jdb.keys[-1]            # get last line row key info
 
                 - float
-                    - val:dict = jdb.keys[-1.]      # get all key info which sync_id is matched
+                    >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
 
                 - slice | date | datetime
-                    - val:dict = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
-                    - val:dict = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
-                    - val:dict = jdb.keys[date.today()]     # get today modified/new keys
-                    - val:dict = jdb.keys[datetime.now()]   # get today new keys
-                    - val:dict = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
-                    - val:dict = jdb.keys[-10.:]    # get key info and match sync_id
-                    - val:dict = jdb.keys[:]        # get all key info
+                    >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
+                    >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
+                    >>> matches = jdb.keys[date.today()]     # get today modified/new keys
+                    >>> matches = jdb.keys[datetime.now()]   # get today new keys
+                    >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
+                    >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
+                    >>> matches = jdb.keys[:]        # get all key info
 
                 - re.Pattern
-                    - val:dict = jdb.keys[re.compile(r'key[0-9]')]
+                    >>> matches = jdb.keys[re.compile(r'key[0-9]')]
 
                 - function(k,v)
-                    - val:dict = jdb.keys[lambda k,v: k.startswith('key')]
-                    - val:dict = jdb.keys[lambda k,v: v == 10]
+                    >>> matches = jdb.keys[lambda k,v: k.startswith('key')]
+                    >>> matches = jdb.keys[lambda k,v: v == 10]
 
                 - function(k)
-                    - val:dict = jdb.keys[lambda k: k[0] == 'k']
+                    >>> matches = jdb.keys[lambda k: k[0] == 'k']
 
                 - tuple | set | list | dict
-                    - val:dict = jdb.keys[1, 2, 3, 'a']
-                    - val:dict = jdb.keys[(1, 2, 3, 'a')]
-                    - val:dict = jdb.keys[{1, 2, 3, 'a'}]
-                    - val:dict = jdb.keys[[1, 2, 3, 'a']]
-                    - val:dict = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
+                    >>> matches = jdb.keys[1, 2, 3, 'a']
+                    >>> matches = jdb.keys[(1, 2, 3, 'a')]
+                    >>> matches = jdb.keys[{1, 2, 3, 'a'}]
+                    >>> matches = jdb.keys[[1, 2, 3, 'a']]
+                    >>> matches = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
 
-                - None == slice(0,None)
-                    - get all items
+                - None: get all items
+                    >>> all_keys = dict(jdb.keys.item_iter(None))
 
         Yields:
             Tuple[str, tuple]
@@ -1328,24 +1408,24 @@ class JDbReader:
         else:
             flags = JFlag(flags)
 
-        self.files_obj = files_obj
-        self.file_lock = FileLock(files_obj)
+        self.files_obj:JFilesBase = files_obj
+        self.file_lock:FileLock = FileLock(files_obj)
         self.lock = RLock() # solve iter issue [cannot use Lock]
         self.fsize = self.safe_line = 0
-        self.childs = {}
-        self.fp_table = {}
-        self.chg_keys = set()
-        self._cache = {}
+        self.childs:Dict[str,JDbReader] = {}
+        self.fp_table:Dict[int,dict] = {}
+        self.chg_keys:Set = set()
+        self._cache:Dict[str,Any] = {}
         self._cache_limit = cache_limit
         if JDbKey_obj is None:
-            self.keys = JDbKey(self)
+            self.keys:JDbKey = JDbKey(self)
         else:
-            self.keys = JDbKey_obj
+            self.keys:JDbKey = JDbKey_obj
 
         self.write_hook = write_hook
-        self.flags = flags
-        self.max_wsize = 4 if max_wsize is None else max_wsize
-        self.io = JIo(
+        self.flags:JFlag = flags
+        self.max_wsize:int = 4 if max_wsize is None else max_wsize
+        self.io:JIo = JIo(
                 files_obj=files_obj,
                 data_type=data_type,
                 zip_type=zip_type,
@@ -1424,28 +1504,28 @@ class JDbReader:
             key (Set[str]): The identifier or condition mapping to locate specific values.
                 
                 - str | int | float | bool | bytes
-                    - val = jdb['name']
+                    >>> val = jdb['name']
 
                 - slice | date | datetime
-                    - val:dict = jdb[1:10:2]
-                    - val:dict = jdb[-10.:]
-                    - val:dict = jdb[:]
-                    - val:dict = jdb[dt.date(2020,1,1)::r'key[0-9]']
-                    - val:dict = jdb[:100:r'key[0-9]']
+                    >>> data = jdb[1:10:2]
+                    >>> data = jdb[-10.:]
+                    >>> data = jdb[:]
+                    >>> data = jdb[dt.date(2020,1,1)::r'key[0-9]']
+                    >>> data = jdb[:100:r'key[0-9]']
 
                 - function(k,v)
-                    - val:dict = jdb[lambda k,v: k.startswith('key')]
-                    - val:dict = jdb[lambda k,v: v == 10]
+                    >>> data = jdb[lambda k,v: k.startswith('key')]
+                    >>> data = jdb[lambda k,v: v == 10]
 
                 - function(k)
-                    - val:dict = jdb[lambda k: k[0] == 'k']
+                    >>> data = jdb[lambda k: k[0] == 'k']
 
                 - tuple | se | list | dict
-                    - val:dict = jdb[1, 2, 3, 'a']
-                    - val:dict = jdb[(1, 2, 3, 'a')]
-                    - val:dict = jdb[{1, 2, 3, 'a'}]
-                    - val:dict = jdb[[1, 2, 3, 'a']]
-                    - val:dict = jdb[{1:0, 2:1, 3:2, 'a':3}]
+                    >>> data = jdb[1, 2, 3, 'a']
+                    >>> data = jdb[(1, 2, 3, 'a')]
+                    >>> data = jdb[{1, 2, 3, 'a'}]
+                    >>> data = jdb[[1, 2, 3, 'a']]
+                    >>> data = jdb[{1:0, 2:1, 3:2, 'a':3}]
 
         Returns:
             Union[Dict[str, Any], Any]: The target value, or a dictionary of matched keys and values.
@@ -3284,13 +3364,29 @@ class JDbReader:
 
         Args:
             keys (Optional[Any], optional): Pattern, function, or string key matches.
-            vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).
                 
-                - $gt, $ge, $lt, $le, $eq, $ne, $in ,$re, $re2, $has, $func
-                - $and, $or
-                - $not
-                - $any
+                >>> jdb.find(re.compile(r'Jo(e|hn)')) == jdb.find(r'Jo(e|hn)')
+                >>> jdb.find(lambda k: k[-1] == 'n')
 
+            vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).                
+                
+                >>> jdb.find(GT=12) == dict(jdb.find_iter(vals={'$gt':12})) # value > 12
+                >>> jdb.find(GE=12) == dict(jdb.find_iter(vals={'$ge':12})) # value >= 12
+                >>> jdb.find(LT=12) == dict(jdb.find_iter(vals={'$lt':12})) # value < 12
+                >>> jdb.find(LE=12) == dict(jdb.find_iter(vals={'$le':12})) # value <= 12
+                >>> jdb.find(EQ=12) == dict(jdb.find_iter(vals={'$eq':12})) # value == 12
+                >>> jdb.find(NE=12) == dict(jdb.find_iter(vals={'$ne':12})) # value != 12
+                >>> jdb.find(EQ='Joe') == dict(jdb.find_iter(vals={'$eq':'Joe'})) # value == "Joe"
+                >>> jdb.find(NE='Joe') == dict(jdb.find_iter(vals={'$ne':'Joe'})) # value != "Joe"
+                >>> jdb.find(RE=r'Jo(hn|e)') == dict(jdb.find_iter(vals={'$re':'Jo(hn|e)'})) # re.search(r'Jo(hn|e)', value)
+                >>> jdb.find(HAS=12) == dict(jdb.find_iter(vals={'$has':12})) # 12 in value
+                >>> jdb.find(IN=[1,2]) == dict(jdb.find_iter(vals={'$in':[1,2]})) # value in [1,2]
+                >>> jdb.find(FUNC=lambda k,v: v == 1) == dict(jdb.find_iter(vals={'$func':lambda k,v: v == 1}))
+                >>> jdb.find(AND=[{'name':'A'}, {'age':{'$ge':20}}]) # value['name'] == 'A' and value['age'] >= 20
+                >>> jdb.find(OR=[{'name':'A'}, {'age':{'$ge':20}}]) # value['name'] == 'A' or value['age'] >= 20
+                >>> jdb.find(NOT={'name':'A'}}]) # not value['name] == 'A'
+                >>> jdb.find(ANY='A')  # any record's value with 'A'
+                
             date (Union[str, datetime, dt_date, int, None], optional): Timeline constraint for record modifications.
             limit (int, optional): Max results to return. 0 means unlimited. Defaults to 0.
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
@@ -3299,29 +3395,29 @@ class JDbReader:
         Yields:
             Tuple[str, Any]: Matching key and its associated value (or None if `with_value` is False).
 
-        Examples:
+        Example:
 
-            - find_iter(vals={'$eq': "value"})
-            - find_iter(EQ="value")
-            - find_iter(vals={'$in': ["value1", "value2"]})
-            - find_iter(IN=["value1", "value2"])
-            - find_iter(vals={'$func': lamdba value:value == "any"})
-            - find_iter(FUNC=lambda value:value == "any")
-            - find_iter(FUNC=lambda key,val:val == "any")
-            - find_iter(r'^[Rr].*[Nn]$', IN=[8,27])
-            - find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$in' : [8, 27]})
-            - find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$gt' : 8, '$lt' : 100})
-            - find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$or' : {'$eq' : 8, '$lt' : 50}})
-            - find_iter(vals={'name' : r'Jo(e|hn)'}, re_flags=re.I)
-            - find_iter(ANY='name')
-            - find_iter(vals={'$any' : r'name'})
-            - find_iter(vals={'$any' : {'$re' : r'name'}})
-            - find_iter(vals={'$or': [{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            - find_iter(OR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            - find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$le':100}}])
-            - find_iter(AND=[{'age':{'$gt':0}, {'age':{'$le':100}}]) # 100 >= age >= 0
-            - find_iter(vals={'$not: {'$eq':'value1'})
-            - find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
+            >>> jdb.find_iter(vals={'$eq': "value"})
+            >>> jdb.find_iter(EQ="value")
+            >>> jdb.find_iter(vals={'$in': ["value1", "value2"]})
+            >>> jdb.find_iter(IN=["value1", "value2"])
+            >>> jdb.find_iter(vals={'$func': lamdba value:value == "any"})
+            >>> jdb.find_iter(FUNC=lambda value:value == "any")
+            >>> jdb.find_iter(FUNC=lambda key,val:val == "any")
+            >>> jdb.find_iter(r'^[Rr].*[Nn]$', IN=[8,27])
+            >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$in' : [8, 27]})
+            >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$gt' : 8, '$lt' : 100})
+            >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$or' : {'$eq' : 8, '$lt' : 50}})
+            >>> jdb.find_iter(vals={'name' : r'Jo(e|hn)'}, re_flags=re.I)
+            >>> jdb.find_iter(ANY='name')
+            >>> jdb.find_iter(vals={'$any' : r'name'})
+            >>> jdb.find_iter(vals={'$any' : {'$re' : r'name'}})
+            >>> jdb.find_iter(vals={'$or': [{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
+            >>> jdb.find_iter(OR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
+            >>> jdb.find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$le':100}}])
+            >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$le':100}}]) # 100 >= age >= 0
+            >>> jdb.find_iter(vals={'$not: {'$eq':'value1'})
+            >>> jdb.find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
         """
         re_flags = kwargs.get('re_flags', re_I)
 

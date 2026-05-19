@@ -15,19 +15,60 @@
 |Python Version|
 
 
-omni-json-db documentation
-==========================
+Welcome to omni-json-db!
+-------------------------
+**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
 
+Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
+
+* **Schema-LESS**: Store complex, nested data without pre-defining tables.
+
+* **Server-LESS**: Direct disk access without the overhead of a database server.
+
+* **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
+
+**Installation**:
+
+.. code-block:: bash
+
+   pip install omni-json-db
+
+**Quick Start**:
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   # Initialize the database
+   jdb = JDb("example.jdb")
+
+   # Store data
+   jdb["user:1"] = {"name": "Ryan", "role": "Developer"}
+
+   # Retrieve data
+   print(jdb["user:1"]["name"]) # Output: Ryan
+
+   # Bulk Update
+   jdb += {
+       "user:2": {"name": "Alice", "role": "Admin"},
+       "user:3": {"name": "Bob", "role": "Developer"}
+   }
+
+   # Query data
+   matches = jdb.find(ANY="Alice")
+   print(matches["user:2"]["name"]) # Output: Alice
+
+API Reference
+-------------
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
    api/modules
+
 
 .. |Logo| image:: https://raw.githubusercontent.com/lukatrum/omni-json-db/master/artwork/logo.png
       :height: 400px
