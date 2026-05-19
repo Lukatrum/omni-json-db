@@ -2,8 +2,8 @@ name: Pylint
 
 on:
   push:
-    branches:
-      - 'main'
+    # branches:
+    #   - 'main'
     paths: 
       - 'omni_json_db/**'
       - '.github/workflows/pylint.yml'

@@ -2,8 +2,8 @@ name: Publish to TestPyPI
 
 on:
   push:
-    branches:
-      - 'main'
+    # branches:
+    #   - 'main'
     paths: 
       - 'pyproject.toml'      
     

@@ -2,8 +2,8 @@ name: Codecov
 
 on: 
   push:
-    branches:
-      - 'main'
+    # branches:
+    #   - 'main'
     paths:
       - 'tests/**'
       - 'pyproject.toml'
