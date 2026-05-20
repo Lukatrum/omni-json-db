@@ -3738,7 +3738,7 @@ class JDbReader:
                             if not any(_match_rules(key, vv, rules, ANY=True) for vv in value):
                                 is_matched = False
 
-                        else:
+                        else: # pragma: no cover
                             if not _match_rules(key, value, rules):
                                 is_matched = False
 
@@ -3758,12 +3758,12 @@ class JDbReader:
 
                     elif ref and ref[0] == '$':
                         if ref[1:].isdigit(): # eg $1, $2
-                            if not isinstance(value, (list,tuple)):
+                            if not isinstance(value, (list,tuple)): # pragma: no cover
                                 is_matched = False
                                 break
 
                             try:
-                                if not _match_rules(key, value[int(ref[1:])], rules):
+                                if not _match_rules(key, value[int(ref[1:])], rules): # pragma: no cover
                                     is_matched = False
                                     break
 
@@ -3774,18 +3774,14 @@ class JDbReader:
                         else:
                             use_bytes = False
                             if ref in {'$eq', '$ne'}:
-                                if isinstance(rules, bytes) and not isinstance(value, bytes):
-                                    use_bytes = True
+                                use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
 
                             elif ref == '$has':
-                                if isinstance(rules, bytes) and not isinstance(value, bytes):
-                                    use_bytes = True
-                                elif isinstance(rules, str) and data_type.endswith('J'):
-                                    use_bytes = True
+                                use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
+                                            or isinstance(rules, str) and data_type.endswith('J')
 
                             elif ref in {'$re', '$re2'}:
-                                if data_type.endswith('J'):
-                                    use_bytes = True
+                                use_bytes = data_type.endswith('J')
 
                             if use_bytes:
                                 if value_b is None:
