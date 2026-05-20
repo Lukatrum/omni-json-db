@@ -360,6 +360,142 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
+            # Sample user records
+            users = {
+               'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+               'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+               'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+               'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+            }
+            # Insert data
+            jdb += users
+            self.assertTrue(jdb == users)
+
+            # 1. Exact Match & Global Search (ANY, RE, RE2)
+            #----------------------------------------------------------
+            # Find users where any attribute exactly matches 'Alice'
+            res = jdb.find(ANY='Alice')
+            self.assertTrue(set(res) == {'user_1'})
+
+            # RE/RE2 convert value into JSON string format for searching.
+            # Find any record that has the string 'designer' inside it
+            res = jdb.find(RE=r'designer')
+            self.assertTrue(set(res) == {'user_4'})
+
+            # RE2 remove some JSON symbol ([]{}") before searching (not RE)
+            res = jdb.find(RE2=r'role:designer')
+            self.assertTrue(set(res) == {'user_4'})
+
+            res = jdb.find(RE=r'role:designer')
+            self.assertTrue(set(res) == set())
+
+            # 2. Relational & Conditional Operators (vals)
+            #----------------------------------------------------------
+            # Age is greater than or equal to 30
+            res = jdb.find(vals={'age': {'$ge': 30}})
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            res = jdb.find(ANY={'$ge': 30})
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # Age is strictly less than 30
+            res = jdb.find(vals={'age': {'$lt': 30}})
+            self.assertTrue(set(res) == {'user_2', 'user_4'})
+
+            res = jdb.find(ANY={'$lt': 30})
+            self.assertTrue(set(res) == {'user_2', 'user_4'})
+
+            # Role is either 'admin' or 'designer'
+            res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
+            self.assertTrue(set(res) == {'user_1', 'user_4'})
+
+            res = jdb.find(ANY={'$in': ['admin', 'designer']})
+            self.assertTrue(set(res) == {'user_1', 'user_4'})
+
+            # tags contains 'python'
+            res = jdb.find(vals={'tags': {'$has': 'python'}})
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            res = jdb.find(ANY={'$has': 'python'})
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # Age is NOT 30
+            res = jdb.find(vals={'age': {'$ne': 30}})
+            self.assertTrue(set(res) == {'user_2', 'user_3', 'user_4'})
+
+            res = jdb.find(ANY={'$ne': 30})
+            self.assertTrue(set(res) == {'user_2', 'user_3', 'user_4'})
+
+            # Age is 28
+            res = jdb.find(vals={'age': {'$eq': 28}})
+            self.assertTrue(set(res) == {'user_4'})
+
+            res = jdb.find(ANY={'$eq': 28})
+            self.assertTrue(set(res) == {'user_4'})
+
+            # 3. Logical Grouping (AND, OR, NOT)
+            #----------------------------------------------------------
+            # Age >= 25 AND Age <= 30
+            res = jdb.find(AND=[{'age': {'$ge': 25}}, {'age': {'$le': 30}}])
+            self.assertTrue(set(res) == {'user_1', 'user_2', 'user_4'})
+
+            # Role is 'admin' OR Age > 30
+            res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # User is NOT a developer
+            res = jdb.find(NOT={'role': 'developer'})
+            self.assertTrue(set(res) == {'user_1', 'user_4'})
+
+            # (Role is 'admin' OR Age > 30) AND 'linux' not in tags
+            res = jdb.find(AND=[
+               {'$or': [
+                  {'role': 'admin'},
+                  {'age': {'$gt': 30}}
+               ]},
+               {'$not': {'tags': {'$has': 'linux'}}}
+            ])
+            self.assertTrue(set(res) == {'user_1'})
+
+            # 4. Regular Expressions (RE, RE2, re.compile)
+            #----------------------------------------------------------
+            # Values matching an email domain regex
+            res = jdb.find(vals={'email': r'.@example.com'})
+            self.assertTrue(set(res) == {'user_1'})
+
+            # Find users where any attribute exactly matches regex
+            res = jdb.find(ANY=r'.@example.com')
+            self.assertTrue(set(res) == {'user_1'})
+
+            # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
+            res = jdb.find(RE=r'li[a-z]')
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # Match specific Database Keys using compiled regex (e.g., matching 'user_1', 'user_2')
+            res = jdb.find(re.compile(r'^user_[1-2]$'))
+            self.assertTrue(set(res) == {'user_1', 'user_2'})
+
+            # 5. Array / List Operations
+            #----------------------------------------------------------
+            # Users with exactly 2 tags in their list
+            res = jdb.find(vals={'tags': {'$size': 2}})
+            self.assertTrue(set(res) == {'user_1', 'user_2', 'user_4'})
+
+            # Users whose FIRST tag (index 0) is 'python'
+            res = jdb.find(vals={'tags': {'$0': 'python'}})
+            self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # 6. Lambda / Custom Functions (FUNC) & Pagination (limit)
+            #----------------------------------------------------------
+            # Pass a lambda to evaluate both the key and the value dynamically
+            # Example: Find the first users whose age is an even number
+            res = jdb.find(
+                FUNC=lambda k, v: isinstance(v, dict) and v.get('age', 1) % 2 == 0,
+               limit=1
+            )
+            self.assertTrue(set(res) == {'user_1'})
+
+            del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
                         {'name': 'Bob', 'age': 25, 'role': 'helper'},
                         {'name': 'Charlie', 'age': 35, 'tags' :['python', 'programming']}]

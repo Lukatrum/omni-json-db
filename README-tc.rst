@@ -7,9 +7,9 @@ English_ | 中文_
 
 ..
 
-	一隻敏捷的小松鼠迅速地收集森林裡的金色橡子！
+	靈巧的小松鼠迅速地收集森林的金色橡子！
 
-|Version| |Build Status| |Pylint| |Codacy| |Coverage| |License|
+|Version| |Build Status| |readthedocs| |Pylint| |Codacy| |Coverage| |License|
 
 
 📌 支援的 Python 版本
@@ -54,7 +54,7 @@ English_ | 中文_
 
 * **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
 
-* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_]
+* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_ + `更多查詢示範`_]
 
 * **記憶體快取**：可調整的 ``cache_limit`` 用以平衡記憶體使用率與 I/O 速度。 [參考 `快取種類`_]
 
@@ -155,6 +155,7 @@ English_ | 中文_
 
 條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT``, ``SIZE``, ``ANY``.
 
+了解 `更多查詢示範`_
 
 救回
 ----
@@ -644,6 +645,140 @@ Step 2: Import to ``JDb``
 
 支援所有標準``set``: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
 
+更多查詢示範
+-----------
+Below are examples of how to utilize the various parameters and NoSQL syntax.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+   import re
+
+   # Initialize an in-memory database
+   jdb = JDb()
+
+   # Sample user records
+   users = {
+      'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+      'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+      'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+      'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+   }
+
+   # Insert data 
+   jdb += users
+
+   # 1. Exact Match & Global Search (ANY, RE, RE2)
+   #----------------------------------------------------------
+   # Find users where any attribute exactly matches 'Alice'
+   res = jdb.find(ANY='Alice')
+   assert list(res) == ['user_1']
+
+   # RE/RE2 convert value into JSON string format for searching.
+   # Find any record that has the string 'designer' inside it
+   res = jdb.find(RE=r'designer')
+   assert list(res) == ['user_4']
+   
+   # RE2 remove some JSON symbol (,[]{}") before searching
+   res = jdb.find(RE2=r'role:designer')
+   assert list(res) == ['user_4']
+   
+   # 2. Relational & Conditional Operators (vals)
+   #----------------------------------------------------------
+   # Age is greater than or equal to 30
+   res = jdb.find(vals={'age': {'$ge': 30}}) # find(ANY={'$ge': 30})
+   assert list(res) == ['user_1', 'user_3']
+
+   # Age is strictly less than 30
+   res = jdb.find(vals={'age': {'$lt': 30}}) # find(ANY={'$lt': 30})
+   assert list(res) == ['user_2', 'user_4']
+
+   # Role is either 'admin' or 'designer'
+   res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
+   assert list(res) == ['user_1', 'user_4']
+
+   # tags contains 'python'
+   res = jdb.find(vals={'tags': {'$has': 'python'}})
+   assert list(res) == ['user_1', 'user_3']
+
+   # Age is NOT 30
+   res = jdb.find(vals={'age': {'$ne': 30}}) # find(ANY={'$ne': 30})
+   assert list(res) == ['user_2', 'user_3', 'user_4']
+
+   # Age is 28
+   res = jdb.find(vals={'age': {'$eq': 28}}) # find(ANY={'$eq': 28})
+   assert list(res) == ['user_4']
+
+   # 3. Logical Grouping (AND, OR, NOT)
+   #----------------------------------------------------------
+   # Age >= 25 AND Age <= 30
+   res = jdb.find(AND=[{'age': {'$ge': 25}}, {'age': {'$le': 30}}])
+   assert list(res) == ['user_1', 'user_2', 'user_4']
+   
+   # Role is 'admin' OR Age > 30
+   res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+   assert list(res) == ['user_1', 'user_3']
+
+   # User is NOT a developer
+   res = jdb.find(NOT={'role': 'developer'})
+   assert list(res) == ['user_1', 'user_4']
+
+   # (Role is 'admin' OR Age > 30) AND 'linux' not in tags
+   res = jdb.find(AND=[
+      {'$or': [
+         {'role': 'admin'},
+         {'age': {'$gt': 30}}
+      ]},
+      {'$not': {'tags': {'$has': 'linux'}}}
+   ])
+   assert list(res) == ['user_1']
+
+   # 4. Regular Expressions (RE, RE2, re.compile)
+   #----------------------------------------------------------
+   # Values matching an email domain regex
+   res = jdb.find(vals={'email': r'.@example.com'})
+   assert list(res) == ['user_1']
+
+   # Find users where any attribute exactly matches regex
+   res = jdb.find(ANY=r'.@example.com')
+   assert list(res) == ['user_1']
+
+   # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
+   res = jdb.find(RE=r'li[a-z]')
+   assert list(res) == ['user_1', 'user_3']
+
+   # Match specific Database Keys using compiled regex (e.g., matching 'user_1', 'user_2')
+   res = jdb.find(re.compile(r'^user_[1-2]$'))
+   assert list(res) == ['user_1', 'user_2']
+
+   # 5. Array / List Operations
+   #----------------------------------------------------------
+   # Users with exactly 2 tags in their list
+   res = jdb.find(vals={'tags': {'$size': 2}})
+   assert list(res) == ['user_1', 'user_2', 'user_4']
+
+   # Users whose FIRST tag (index 0) is 'python'
+   res = jdb.find(vals={'tags': {'$0': 'python'}})
+   assert list(res) == ['user_1', 'user_3']
+
+   # 6. Lambda / Custom Functions (FUNC) & Pagination (limit)
+   #----------------------------------------------------------
+   # Pass a lambda to evaluate both the key and the value dynamically
+   # Example: Find the first users whose age is an even number
+   res = jdb.find(
+       FUNC=lambda k, v: isinstance(v, dict) and v.get('age', 1) % 2 == 0, 
+      limit=1
+   )
+   assert list(res) == ['user_1']
+
+   # For primitive stored values (non-nested), you can use quick keyword arguments:
+   jdb['simple_counter'] = 50
+   res = jdb.find(EQ=50)       # Equals 50
+   assert list(res) == ['simple_counter']
+
+   res = jdb.find(IN=[40, 50]) # Value in list
+   assert list(res) == ['simple_counter']
+
 進階用法
 --------
 
@@ -908,6 +1043,10 @@ Step 2: Import to ``JDb``
 .. |Build Status| image:: https://img.shields.io/pypi/status/omni-json-db?logo=python&logoColor=white
    :alt: PyPI - Status
    :target: https://github.com/lukatrum/omni-json-db
+
+.. |readthedocs| image:: https://img.shields.io/readthedocs/omni-json-db?logo=readthedocs&logoColor=white
+   :alt: Read the Docs
+   :target: https://omni-json-db.readthedocs.io
 
 .. |Version| image:: https://img.shields.io/pypi/v/omni-json-db?pypiBaseUrl=https%3A%2F%2Fpypi.org&logo=pypi&logoColor=white
    :alt: PyPI - Version
