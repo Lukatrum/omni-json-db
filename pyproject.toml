@@ -38,7 +38,7 @@ keywords = [
 	"key-value",
 	"marshal",
 	"messagepack",
-	"mongodb"
+	"mongodb",
 	"mrsw-lock",	
 	"msgpack",
 	"multiprocessing",
