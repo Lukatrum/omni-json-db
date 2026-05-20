@@ -155,7 +155,7 @@ English_ | 中文_
    print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
 
 
-條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GE``, ``LE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOT``, ``SIZE``, ``ANY``.
+條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
 
 了解 `更多查詢示範`_
 
@@ -688,7 +688,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    # 2. Relational & Conditional Operators (vals)
    #----------------------------------------------------------
    # Age is greater than or equal to 30
-   res = jdb.find(vals={'age': {'$ge': 30}}) # find(ANY={'$ge': 30})
+   res = jdb.find(vals={'age': {'$gte': 30}}) # find(ANY={'$gte': 30})
    assert list(res) == ['user_1', 'user_3']
 
    # Age is strictly less than 30
@@ -712,18 +712,22 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    assert list(res) == ['user_4']
 
    # 40 >= Age > 25
-   res = jdb.find(vals={'age': {'$gt': 25, '$le': 40}})
+   res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}})
    assert list(res) == ['user_1', 'user_3', 'user_4']
 
-   # 3. Logical Grouping (AND, OR, NOT)
+   # 3. Logical Grouping (AND, OR, NOR, NOT)
    #----------------------------------------------------------
    # Age >= 25 AND Age <= 30
-   res = jdb.find(AND=[{'age': {'$ge': 25}}, {'age': {'$le': 30}}])
+   res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
    assert list(res) == ['user_1', 'user_2', 'user_4']
    
    # Role is 'admin' OR Age > 30
    res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
    assert list(res) == ['user_1', 'user_3']
+
+   # Role is not 'admin' AND Age <= 30
+   res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+   assert list(res) == ['user_2', 'user_4']
 
    # User is NOT a developer
    res = jdb.find(NOT={'role': 'developer'})
@@ -742,11 +746,11 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    # 4. Regular Expressions (RE, RE2, re.compile)
    #----------------------------------------------------------
    # Values matching an email domain regex
-   res = jdb.find(vals={'email': r'.@example.com'})
+   res = jdb.find(vals={'email': re.compile(r'.@example.com')})
    assert list(res) == ['user_1']
 
    # Find users where any attribute exactly matches regex
-   res = jdb.find(ANY=r'.@example.com')
+   res = jdb.find(ANY=re.complie(r'.@example.com'))
    assert list(res) == ['user_1']
 
    # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
@@ -776,6 +780,14 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
       limit=1
    )
    assert list(res) == ['user_1']
+
+   # Users has email
+   res = jdb.find(vals={'email': lambda v: v != ''})
+   assert list(res) == ['user_1', 'user_4']
+
+   # Users don't have email
+   res = jdb.find(NOT={'email': lambda v: v != ''})
+   assert list(res) == ['user_2', 'user_3']
 
    # For primitive stored values (non-nested), you can use quick keyword arguments:
    jdb['simple_counter'] = 50

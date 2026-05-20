@@ -55,12 +55,12 @@ Find records where any field exactly matches or contains a specific value.
 2. Relational & Conditional Operators
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Filter data within dictionary fields using NoSQL operators (``$eq``, ``$ne``, ``$lt``, ``$le``, ``$gt``, ``$ge``, ``$in``, ``$has``).
+Filter data within dictionary fields using NoSQL operators (``$eq``, ``$ne``, ``$lt``, ``$lte``, ``$gt``, ``$gte``, ``$in``, ``$has``).
 
 .. code-block:: python
 
     # Age is greater than or equal to 30
-   res = jdb.find(vals={'age': {'$ge': 30}}) # find(ANY={'$ge': 30})
+   res = jdb.find(vals={'age': {'$gte': 30}}) # find(ANY={'$gte': 30})
    assert list(res) == ['user_1', 'user_3']
 
    # Age is strictly less than 30
@@ -84,11 +84,11 @@ Filter data within dictionary fields using NoSQL operators (``$eq``, ``$ne``, ``
    assert list(res) == ['user_4']
 
    # 40 >= Age > 25
-   res = jdb.find(vals={'age': {'$gt': 25, '$le': 40}})
+   res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}})
    assert list(res) == ['user_1', 'user_3', 'user_4']
 
 
-3. Logical Grouping (AND, OR, NOT)
+3. Logical Grouping (AND, OR, NOR, NOT)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Combine multiple conditions for complex lookups.
@@ -96,12 +96,16 @@ Combine multiple conditions for complex lookups.
 .. code-block:: python
 
    # Age >= 25 AND Age <= 30
-   res = jdb.find(AND=[{'age': {'$ge': 25}}, {'age': {'$le': 30}}])
+   res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
    assert list(res) == ['user_1', 'user_2', 'user_4']
    
    # Role is 'admin' OR Age > 30
    res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
    assert list(res) == ['user_1', 'user_3']
+
+   # Role is not 'admin' AND Age <= 30
+   res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+   assert list(res) == ['user_2', 'user_4']
 
    # User is NOT a developer
    res = jdb.find(NOT={'role': 'developer'})
@@ -125,11 +129,11 @@ Combine multiple conditions for complex lookups.
 .. code-block:: python
 
    # Values matching an email domain regex
-   res = jdb.find(vals={'email': r'.@example.com'})
+   res = jdb.find(vals={'email': re.compile(r'.@example.com')})
    assert list(res) == ['user_1']
 
    # Find users where any attribute exactly matches regex
-   res = jdb.find(ANY=r'.@example.com')
+   res = jdb.find(ANY=re.compile(r'.@example.com'))
    assert list(res) == ['user_1']
 
    # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
@@ -171,6 +175,14 @@ For highly specific rules, pass a Python function. Use ``limit`` to stop searchi
       limit=1
    )
    assert list(res) == ['user_1']
+
+    # Users has email
+   res = jdb.find(vals={'email': lambda v: v != ''})
+   assert list(res) == ['user_1', 'user_4']
+
+   # Users don't have email
+   res = jdb.find(NOT={'email': lambda v: v != ''})
+   assert list(res) == ['user_2', 'user_3']
 
    # For primitive stored values (non-nested), you can use quick keyword arguments:
    jdb['simple_counter'] = 50

@@ -392,10 +392,10 @@ class TestJDb(unittest.TestCase):
             # 2. Relational & Conditional Operators (vals)
             #----------------------------------------------------------
             # Age is greater than or equal to 30
-            res = jdb.find(vals={'age': {'$ge': 30}})
+            res = jdb.find(vals={'age': {'$gte': 30}})
             self.assertTrue(set(res) == {'user_1', 'user_3'})
 
-            res = jdb.find(ANY={'$ge': 30})
+            res = jdb.find(ANY={'$gte': 30})
             self.assertTrue(set(res) == {'user_1', 'user_3'})
 
             # Age is strictly less than 30
@@ -412,12 +412,24 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(ANY={'$in': ['admin', 'designer']})
             self.assertTrue(set(res) == {'user_1', 'user_4'})
 
+            # Role is not 'admin' and not 'designer'
+            res = jdb.find(ANY={'role': {'$nin': ['admin', 'designer']}})
+            self.assertTrue(set(res) == {'user_2', 'user_3'})
+
             # tags contains 'python'
             res = jdb.find(vals={'tags': {'$has': 'python'}})
             self.assertTrue(set(res) == {'user_1', 'user_3'})
 
             res = jdb.find(ANY={'$has': 'python'})
             self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # tags contains 'python' AND 'linux'
+            res = jdb.find(vals={'tags': {'$and' : [{'$has':'python'}, {'$has':'linux'}]}})
+            self.assertTrue(set(res) == {'user_3'})
+
+            # ANY contains 'Bo'
+            res= jdb.find(ANY={'$has': 'Bo'})
+            self.assertTrue(set(res) == {'user_2'})
 
             # Age is NOT 30
             res = jdb.find(vals={'age': {'$ne': 30}})
@@ -434,22 +446,30 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(set(res) == {'user_4'})
 
             # 40 >= Age > 25
-            res = jdb.find(vals={'age': {'$gt': 25, '$le':40}})
+            res = jdb.find(vals={'age': {'$gt': 25, '$lte':40}})
             self.assertTrue(set(res) == {'user_1', 'user_3', 'user_4'})
 
             # not 40 >= Age > 25
-            res = jdb.find(NOT={'age': {'$gt': 25, '$le':40}})
+            res = jdb.find(NOT={'age': {'$gt': 25, '$lte':40}})
             self.assertTrue(set(res) == {'user_2'})
 
-            # 3. Logical Grouping (AND, OR, NOT)
+            # name in ['Alice', 'Bob'] AND age in [30, 25]
+            res = jdb.find(vals={'name':re.compile('Alice|Bob'), 'age':{'$in':[30, 25]}})
+            self.assertTrue(set(res) == {'user_1', 'user_2'})
+
+            # 3. Logical Grouping (AND, OR, NOR, NOT)
             #----------------------------------------------------------
             # Age >= 25 AND Age <= 30
-            res = jdb.find(AND=[{'age': {'$ge': 25}}, {'age': {'$le': 30}}])
+            res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
             self.assertTrue(set(res) == {'user_1', 'user_2', 'user_4'})
 
             # Role is 'admin' OR Age > 30
             res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
             self.assertTrue(set(res) == {'user_1', 'user_3'})
+
+            # Role is not 'admin' AND Age <= 30
+            res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+            self.assertTrue(set(res) == {'user_2', 'user_4'})
 
             # User is NOT a developer
             res = jdb.find(NOT={'role': 'developer'})
@@ -468,11 +488,11 @@ class TestJDb(unittest.TestCase):
             # 4. Regular Expressions (RE, RE2, re.compile)
             #----------------------------------------------------------
             # Values matching an email domain regex
-            res = jdb.find(vals={'email': r'.@example.com'})
+            res = jdb.find(vals={'email': {'$re':r'.@example.com'}})
             self.assertTrue(set(res) == {'user_1'})
 
             # Find users where any attribute exactly matches regex
-            res = jdb.find(ANY=r'.@example.com')
+            res = jdb.find(ANY=re.compile(r'.@example.com'))
             self.assertTrue(set(res) == {'user_1'})
 
             # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
@@ -503,6 +523,14 @@ class TestJDb(unittest.TestCase):
             )
             self.assertTrue(set(res) == {'user_1'})
 
+            # Users has email
+            res = jdb.find(vals={'email': lambda v: v != ''})
+            self.assertTrue(set(res) == {'user_1', 'user_4'})
+
+            # Users don't have email
+            res = jdb.find(NOT={'email': lambda v: v != ''})
+            self.assertTrue(set(res) == {'user_2', 'user_3'})
+
             del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
                         {'name': 'Bob', 'age': 25, 'role': 'helper'},
@@ -517,31 +545,35 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(matches, matches_2)
 
             # name contains 'li[a-e]' regex
-            matches = jdb.find(vals={'name': r'li[a-z]'})
+            matches = jdb.find(vals={'name': re.compile(r'li[a-z]')})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
 
-            matches_2 = jdb.find(ANY=r'li[a-z]')
+            matches_2 = jdb.find(ANY=re.compile(r'li[a-z]'))
             self.assertEqual(matches, matches_2)
 
-            matches = jdb.find(ANY=r'li[a-z]', limit=1)
+            matches = jdb.find(ANY=re.compile(r'li[a-z]'), limit=1)
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
 
             # any contains r'ob'
-            matches = jdb.find(ANY=r'ob')
+            matches = jdb.find(ANY=re.compile(r'ob'))
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob'})
 
             # with email
-            matches = jdb.find(vals={'email': r'[a-z]@[a-z]'})
+            matches = jdb.find(vals={'email': re.compile(r'[a-z]@[a-z]')})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
 
+            # without email
+            matches = jdb.find(NOT={'email': lambda v: v != ''})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob', 'Charlie'})
+
             # age >= 30
-            matches = jdb.find(vals={'age': {'$le':30}})
+            matches = jdb.find(vals={'age': {'$le': 30}})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob'})
-            matches_2 = jdb.find(ANY={'$le':30})
+            matches_2 = jdb.find(ANY={'$le': 30})
             self.assertEqual(matches, matches_2)
 
             # age == 30
-            matches = jdb.find(vals={'age': {'$eq':30}})
+            matches = jdb.find(vals={'age': {'$eq': 30}})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
             matches_2 = jdb.find(vals={'age': 30})
             self.assertEqual(matches, matches_2)
@@ -585,12 +617,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob', 'Charlie'})
 
             matches_2 = jdb.find(AND=[
-                {'age':{'$ge': 25}},
-                {'age':{'$le': 35}}
+                {'age':{'$gte': 25}},
+                {'age':{'$lte': 35}}
             ])
             self.assertEqual(matches, matches_2)
 
-            matches_2 = jdb.find(vals={'age': {'$ge': 25 , '$le': 35}})
+            matches_2 = jdb.find(vals={'age': {'$gte': 25 , '$lte': 35}})
             self.assertEqual(matches, matches_2)
 
             # age < 25 or age > 35
@@ -607,11 +639,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(matches, matches_2)
 
             # age == 25 or role != '' or name[:2] == 'Bo'
-            matches = jdb.find(OR=[{'age': 25}, {'role':'.'}, {'name':r'^Bo'}])
+            matches = jdb.find(OR=[{'age': 25}, {'role':re.compile(r'.')}, {'name':re.compile(r'^Bo')}])
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Bob'})
 
             # not age >= 19
-            matches = jdb.find(NOT={'age': {'$ge': 18}})
+            matches = jdb.find(NOT={'age': {'$gte': 18}})
             self.assertEqual(len(matches), 0)
 
             # len(tags) == 2
@@ -723,13 +755,13 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(matches), 1)
 
             # name contains 'li[a-e]' regex
-            matches = jdb.find(vals={'name': r'li[a-z]'})
+            matches = jdb.find(vals={'name': re.compile(r'li[a-z]')})
             self.assertEqual(len(matches), 2)
 
-            matches_2 = jdb.find(ANY=r'li')
+            matches_2 = jdb.find(ANY=re.compile(r'li'))
             self.assertEqual(matches, matches_2)
 
-            matches_3 = jdb.find(ANY=r'o')
+            matches_3 = jdb.find(ANY=re.compile(r'o'))
             self.assertEqual(set(jdb), set(matches_2).union(matches_3))
 
             # age start with 3x
@@ -3698,19 +3730,22 @@ class TestJDb(unittest.TestCase):
             matches = jdb.find(IN=[2,4,6,8])
             self.assertEqual(matches, {f'kkk{i}':i for i in (2,4,6,8)})
 
+            matches = jdb.find(NIN=[2,4,6,8])
+            self.assertEqual(matches, {f'kkk{i}':i for i in range_100 if i not in {2,4,6,8}})
+
             matches = jdb.find(lambda k: k.find('0') > 0)
             self.assertEqual(matches, {f'kkk{i}':None for i in range(0,100,10)})
 
             matches = jdb.find(lambda k,v: k.find('0') > 0 and v <= 20)
             self.assertEqual(matches, {f'kkk{i}':i for i in (0, 10,20)})
 
-            matches = jdb.find(NOT={'$ge':10})
+            matches = jdb.find(NOT={'$gte':10})
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10)})
 
-            matches = jdb.find(AND=[{'$ge':10}, {'$lt':20}])
+            matches = jdb.find(AND=[{'$gte':10}, {'$lt':20}])
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10, 20)})
 
-            matches = jdb.find(NOT={'$or':[{'$lt':10}, {'$ge':20}]})
+            matches = jdb.find(NOT={'$or':[{'$lt':10}, {'$gte':20}]})
             self.assertEqual(matches, {f'kkk{i}':i for i in range(10, 20)})
 
             matches = jdb.find('kkk', sort=1)
@@ -3770,7 +3805,7 @@ class TestJDb(unittest.TestCase):
             matches = jdb.find(LT=10)
             self.assertEqual(len(matches), 10)
 
-            matches = jdb.find(LE=10)
+            matches = jdb.find(LTE=10)
             self.assertEqual(len(matches), 11)
 
             matches = jdb.find(GT=10)
@@ -5416,7 +5451,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(info2[-2], str(today))
 
             jdb[1] = lambda k,v : f'{k}_{v}'
-            self.assertTrue(jdb[1].startswith(r'1_'))
+            self.assertTrue(jdb[1].startswith('1_'))
 
             matches = jdb.keys[prev_prev_week:prev_week]
             self.assertTrue(len(matches) == 0)

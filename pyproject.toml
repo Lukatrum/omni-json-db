@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.12.01"
+version = "2.12.02"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -31,16 +31,18 @@ keywords = [
 	"dict",
 	"file-based",
 	"filelock",
+	"locking",
 	"ini",
 	"in-memory",
 	"json",
 	"key-value",
 	"marshal",
 	"messagepack",
+	"mongodb"
 	"mrsw-lock",	
 	"msgpack",
 	"multiprocessing",
-	"multithreading",	
+	"multithreading",
 	"network",
 	"nosql",
 	"persistence",
@@ -48,6 +50,7 @@ keywords = [
 	"restore",
 	"revertable",
 	"search",
+	"serializer",
 	"serialization",
 	"serverless",
 	"sqlite",
@@ -70,12 +73,15 @@ classifiers = [
 	"Programming Language :: Python :: 3.14",
 	"Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",	
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Database",
     "Topic :: Database :: Database Engines/Servers",
     "Topic :: Database :: Front-Ends",
+    "Topic :: File Formats",
     "Topic :: File Formats :: JSON",
     "Topic :: Utilities",
     "Typing :: Typed",

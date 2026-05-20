@@ -60,15 +60,20 @@ _UInt64_x2_pack = Struct("QQ").pack # thread-safe
 _UInt64_x2_unpack = Struct("QQ").unpack
 
 JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_I|re_S).sub
-SET_RE_finditer = re_compile(r'(?<=\")([^\"\n]{1,32})(?=\")', flags=re_I|re_S).finditer
 
 SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
 
-FIND_OPS = {'AND', 'NOT', 'OR', 'ANY',
-            'FUNC', 'RE', 'RE2', 
-            'HAS', 'IN', 'NE', 'EQ',
-            'GE', 'GT', 'LE', 'LT', 'SIZE'}
+FIND_OPS = {
+    # MongoDB syntax
+    'AND', 'NOT', 'OR', 'NOR',
+    'IN', 'NIN', 'EQ', 'NE',
+    'GT', 'LT', 'GTE', 'LTE',
+    'SIZE',
+    # Not official
+    'GE', 'LE','RE', 'RE2',
+    'ANY', 'FUNC', 'HAS'
+}
 
 def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, verbose:int=0) -> TCPServer:
     """
@@ -175,8 +180,8 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
     """
     Evaluate if a value matches a given set of conditions or MongoDB-like operators.
 
-    Supports operations such as `$gt`, `$ge`, `$lt`, `$le`, `$eq`, `$ne`, `$in`, 
-    `$has`, `$re`, `$re2`, `$func`, `$size`, `$not`, `$or`, and `$and`.
+    Supports operations such as `$gt`, `ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
+    `$has`, `$re`, `$re2`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
 
     Args:
         key (str): The key associated with the value being evaluated.
@@ -205,20 +210,16 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 return True
 
     if not isinstance(rules, dict): # pragma: no cover
-        if isinstance(rules, str):
-            rules = {'$re': rules}
-        elif isinstance(rules, int):
-            rules = {'$eq' : rules}
-        elif isinstance(rules, float):
-            rules = {'$eq' : rules}
-        elif isinstance(rules, bool):
-            rules = {'$eq' : rules}
-        elif isinstance(rules, bytes) and isinstance(val, bytes):
+        if isinstance(rules, (str, int, float, bool, str, bytes)):
             rules = {'$eq' : rules}
         elif isinstance(rules, (list, set, tuple, frozenset)):
             rules = {'$in' : rules}
+        elif isinstance(rules, Pattern):
+            rules = {'$re': rules}
         elif callable(rules):
             rules = {'$func' : rules}
+        else:
+            return False
 
     for cmd,rule in rules.items():
         if cmd and cmd[0] == '$':
@@ -233,7 +234,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 except TypeError: # pragma: no cover
                     return False
 
-            elif cmd == '$ge':
+            elif cmd == '$gte' or cmd == '$ge':
                 try:
                     if not is_same_type or not val.__ge__ or not rule.__ge__ or not val >= rule:
                         return False
@@ -247,7 +248,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 except TypeError: # pragma: no cover
                     return False
 
-            elif cmd == '$le':
+            elif cmd == '$lte' or cmd == '$le':
                 try:
                     if not is_same_type or not val.__le__ or not rule.__le__ or not val <= rule:
                         return False
@@ -274,12 +275,29 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
 
                 try:
                     if val.__hash__ and not isinstance(val, tuple):
-                        if not val in rule:
+                        if val not in rule:
                             return False
 
                     elif val.__iter__:
                         for kk in val:
                             if kk not in rule:
+                                return False
+
+                except TypeError: # pragma: no cover
+                    return False
+
+            elif cmd == '$nin':
+                if not hasattr(rule, '__contains__'):
+                    return False
+
+                try:
+                    if val.__hash__ and not isinstance(val, tuple):
+                        if val in rule:
+                            return False
+
+                    elif val.__iter__:
+                        for kk in val:
+                            if kk in rule:
                                 return False
 
                 except TypeError: # pragma: no cover
@@ -295,38 +313,20 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if isinstance(val, str):
                         val_s = val
-
                     elif isinstance(val, (bytes, bytearray)):
-                        if isinstance(rule, bytes):
-                            val_s = val
-                        else:
-                            val_s = val.decode('utf8')
+                        val_s = val if isinstance(rule, bytes) else val.decode('utf8')
                     else:
-                        val_s = json_dumps(val)
-                        if isinstance(val_s, bytes):
-                            val_s = val_s.decode('utf8')
+                        val_s = json_dumps(val) if isinstance(val_s, bytes) else val_s.decode('utf8')
                 except:
                     return False
 
-                if isinstance(val_s, bytes) and isinstance(rule, bytes):
+                if isinstance(val_s, bytes) and isinstance(rule, bytes) \
+                        or isinstance(val_s, str) and isinstance(rule, str):
+
                     if val_s.find(rule) < 0:
                         return False
 
                     continue
-
-                try:
-                    val = {kk.group() for kk in SET_RE_finditer(val_s)}
-                    if rule.__hash__ and not isinstance(rule, tuple):
-                        if rule not in val:
-                            return False
-
-                    elif rule.__iter__:
-                        for kk in rule:
-                            if kk not in val:
-                                return False
-
-                except TypeError: # pragma: no cover
-                    return False
 
             elif cmd in {'$re', '$re2'}:
                 _rules = []
@@ -373,13 +373,17 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                     return False
 
                 arg_cnt = rule.__code__.co_argcount
-                if arg_cnt == 2:
-                    if not rule(key, val):
+                try:
+                    if arg_cnt == 2:
+                        if not rule(key, val):
+                            return False
+                    elif arg_cnt == 1:
+                        if not rule(val):
+                            return False
+                    else:
                         return False
-                elif arg_cnt == 1:
-                    if not rule(val):
-                        return False
-                else:
+
+                except: # pragma: no cover
                     return False
 
             elif cmd == '$size':
@@ -410,6 +414,19 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 for _rule in rule:
                     if _match_rules(key, val, _rule, level=level+1):
                         is_matched = True
+                        break
+
+                if not is_matched:
+                    return False
+
+            elif cmd == '$nor':
+                if not isinstance(rule, (list,tuple)): # pragma: no cover
+                    return False
+
+                is_matched = True
+                for _rule in rule:
+                    if _match_rules(key, val, _rule, level=level+1):
+                        is_matched = False
                         break
 
                 if not is_matched:
@@ -3505,8 +3522,10 @@ class JDbReader:
             vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).                
                 
                 >>> jdb.find(GT=12) == dict(jdb.find_iter(vals={'$gt':12})) # value > 12
+                >>> jdb.find(GTE=12) == dict(jdb.find_iter(vals={'$gte':12})) # value >= 12
                 >>> jdb.find(GE=12) == dict(jdb.find_iter(vals={'$ge':12})) # value >= 12
                 >>> jdb.find(LT=12) == dict(jdb.find_iter(vals={'$lt':12})) # value < 12
+                >>> jdb.find(LTE=12) == dict(jdb.find_iter(vals={'$lte':12})) # value <= 12
                 >>> jdb.find(LE=12) == dict(jdb.find_iter(vals={'$le':12})) # value <= 12
                 >>> jdb.find(EQ=12) == dict(jdb.find_iter(vals={'$eq':12})) # value == 12
                 >>> jdb.find(NE=12) == dict(jdb.find_iter(vals={'$ne':12})) # value != 12
@@ -3515,11 +3534,13 @@ class JDbReader:
                 >>> jdb.find(RE=r'Jo(hn|e)') == dict(jdb.find_iter(vals={'$re':'Jo(hn|e)'})) # re.search(r'Jo(hn|e)', value)
                 >>> jdb.find(HAS=12) == dict(jdb.find_iter(vals={'$has':12})) # 12 in value
                 >>> jdb.find(IN=[1,2]) == dict(jdb.find_iter(vals={'$in':[1,2]})) # value in [1,2]
+                >>> jdb.find(NIN=[1,2]) == dict(jdb.find_iter(vals={'$nin':[1,2]})) # value not in [1,2]
                 >>> jdb.find(FUNC=lambda k,v: v == 1) == dict(jdb.find_iter(vals={'$func':lambda k,v: v == 1}))
-                >>> jdb.find(AND=[{'name':'A'}, {'age':{'$ge':20}}]) # value['name'] == 'A' and value['age'] >= 20
+                >>> jdb.find(AND=[{'name':'A'}, {'age':{'$gte':20}}]) # value['name'] == 'A' and value['age'] >= 20
                 >>> jdb.find(OR=[{'name':'A'}, {'age':{'$ge':20}}]) # value['name'] == 'A' or value['age'] >= 20
+                >>> jdb.find(NOR=[{'name':'A'}, {'age':{'$gte':20}}]) # value['name'] != 'A' and value['age'] < 20
                 >>> jdb.find(NOT={'name':'A'}}]) # not value['name] == 'A'
-                >>> jdb.find(ANY='A')  # any record's value with 'A'
+                >>> jdb.find(ANY='A')  # any record's value equal to  'A'
                 
             date (Union[str, datetime, dt_date, int, None], optional): Timeline constraint for record modifications.
             limit (int, optional): Max results to return. 0 means unlimited. Defaults to 0.
@@ -3535,10 +3556,12 @@ class JDbReader:
             >>> jdb.find_iter(EQ="value")
             >>> jdb.find_iter(vals={'$in': ["value1", "value2"]})
             >>> jdb.find_iter(IN=["value1", "value2"])
+            >>> jdb.find_iter(NIN=["value1", "value2"])
             >>> jdb.find_iter(vals={'$func': lamdba value:value == "any"})
             >>> jdb.find_iter(FUNC=lambda value:value == "any")
             >>> jdb.find_iter(FUNC=lambda key,val:val == "any")
             >>> jdb.find_iter(r'^[Rr].*[Nn]$', IN=[8,27])
+            >>> jdb.find_iter(r'^[Rr].*[Nn]$', NIN=[8,27])
             >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$in' : [8, 27]})
             >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$gt' : 8, '$lt' : 100})
             >>> jdb.find_iter(keys=[r'^[Rr]', r'[Nn]$'], vals={'$or' : {'$eq' : 8, '$lt' : 50}})
@@ -3548,8 +3571,9 @@ class JDbReader:
             >>> jdb.find_iter(vals={'$any' : {'$re' : r'name'}})
             >>> jdb.find_iter(vals={'$or': [{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
             >>> jdb.find_iter(OR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            >>> jdb.find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$le':100}}])
-            >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$le':100}}]) # 100 >= age >= 0
+            >>> jdb.find_iter(NOR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
+            >>> jdb.find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$lte':100}}])
+            >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$lte':100}}]) # 100 >= age >= 0
             >>> jdb.find_iter(vals={'$not: {'$eq':'value1'})
             >>> jdb.find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
         """
@@ -3725,8 +3749,6 @@ class JDbReader:
                                     if _ref in value:
                                         if _match_rules(key, value[_ref], _rules):
                                             _is_matched = True
-                                        else:
-                                            _is_matched = False
                                             break
 
                             is_matched = True if _is_matched else is_matched
@@ -3748,6 +3770,7 @@ class JDbReader:
                             except IndexError:
                                 is_matched = False
                                 break
+
                         else:
                             use_bytes = False
                             if ref in {'$eq', '$ne'}:
@@ -3778,6 +3801,7 @@ class JDbReader:
                             if not _match_rules(key, _value, {ref : rules}):
                                 is_matched = False
                                 break
+
 
                     elif isinstance(value, dict) and ref in value:
                         if not _match_rules(key, value[ref], rules):

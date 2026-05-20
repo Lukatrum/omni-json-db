@@ -22,7 +22,7 @@ Features
 
 * **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint.
 
-* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``NE``, ``GT``, ``GE`` ``LT``, ``LE``, ``IN``, ``HAS``, ``RE``, ``RE2``, ``SIZE``, ``FUNC``, ``ANY``).
+* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``NE``, ``GT``, ``GTE`` ``LT``, ``LTE``, ``IN``, ``HAS``, ``RE``, ``RE2``, ``SIZE``, ``FUNC``, ``ANY``).
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed.
 
