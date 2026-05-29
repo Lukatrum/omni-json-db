@@ -2,7 +2,7 @@
 from __future__ import annotations
 from contextlib import contextmanager
 from datetime import date as dt_date, datetime, timedelta
-from re import compile as re_compile, findall as re_findall, match as re_match, Pattern, I as re_I, S as re_S
+from re import compile as re_compile, search as re_search, findall as re_findall, match as re_match, Pattern, I as re_I, S as re_S
 from os.path import exists as path_exists # basename, dirname, join as path_join
 from threading import RLock, get_ident, Thread
 from socketserver import TCPServer
@@ -69,7 +69,7 @@ FIND_OPS = {
     'AND', 'NOT', 'OR', 'NOR',
     'IN', 'NIN', 'EQ', 'NE',
     'GT', 'LT', 'GTE', 'LTE',
-    'SIZE',
+    'SIZE', 'REGEX',
     # Not official
     'GE', 'LE','RE', 'RE2',
     'ANY', 'FUNC', 'HAS'
@@ -176,12 +176,388 @@ class JFlag(IntFlag):
 
         return ret
 
-def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bool:
+def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
+    """
+    Evaluate if a KEY matches a given set of conditions or MongoDB-like operators.
+
+    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
+    `$has`, `$re`, `$re2`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
+
+    Args:
+        key (str): The key associated with the value being evaluated.
+        rules (Any): The dictionary of rules/operators or a direct match condition.
+        level (int, optional): The current recursion depth. Defaults to 0.
+    
+    Returns:
+        bool: True if the value satisfies all specified rules, False otherwise.
+
+    Example:
+        >>> rules = {'$has': 'ob'}
+        >>> _match_KEY_rules("Bob", rules)
+        True
+        >>> _match_KEY_rules("Alice", {"$re": r"Al.*"})
+        True
+    """
+    if not isinstance(rules, dict): # pragma: no cover
+        if isinstance(rules, str):
+            rules = {'$eq': rules}
+        elif isinstance(rules, Pattern):
+            rules = {'$re': rules}
+        elif callable(rules):
+            rules = {'$func': rules}
+        elif isinstance(rules, (list, set, tuple, frozenset)):
+            rules = {'$in': {str(_key) for _key in rules}}
+        elif isinstance(rules, (int, float, bool, bytes, dt_date, datetime)):
+            rules = {'$eq': str(rules)}
+        else:
+            return False
+
+    for cmd,rule in rules.items():
+        cmd = cmd.lower()
+        if cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+            is_matched = False
+            key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
+            if isinstance(rule, Pattern):
+                is_matched = rule.search(key_s)
+
+            elif isinstance(rule, str):
+                is_matched = re_search(rule, key_s)
+
+            elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
+                # rule0 AND rule1 AND ...
+                for _rule in rule:
+                    if isinstance(_rule, Pattern):
+                        if not _rule.search(key_s):
+                            return False
+
+                        is_matched = True
+
+                    elif isinstance(_rule, str):
+                        if not re_search(rule, key_s):
+                            return False
+
+                        is_matched = True
+
+                    else:
+                        return False
+
+            if is_matched:
+                continue
+
+        elif cmd == '$func':
+            if callable(rule): # pragma: no cover
+                arg_cnt = rule.__code__.co_argcount
+                try:
+                    if arg_cnt == 1 and rule(key):
+                        continue
+
+                except: # pragma: no cover
+                    return False
+
+        else:
+            is_same_type = isinstance(rule, str)
+            if cmd == '$gt':
+                if is_same_type and key > rule:
+                    continue
+
+            elif cmd == '$gte' or cmd == '$ge':
+                if is_same_type and key >= rule:
+                    continue
+
+            elif cmd == '$lt':
+                if is_same_type and key < rule:
+                    continue
+
+            elif cmd == '$lte' or cmd == '$le':
+                if is_same_type and key <= rule:
+                    continue
+
+            elif cmd == '$eq':
+                if is_same_type and key == rule:
+                    continue
+
+            elif cmd == '$ne':
+                if is_same_type and key != rule:
+                    continue
+
+            elif cmd == '$in':
+                try:
+                    if key in rule:
+                        continue
+
+                except TypeError: # pragma: no cover
+                    return False
+
+            elif cmd == '$nin':
+                try:
+                    if not key in rule:
+                        continue
+
+                except TypeError: # pragma: no cover
+                    return False
+
+            elif cmd == '$has':
+                if isinstance(rule, str):
+                    if key.find(rule) >= 0:
+                        continue
+
+            elif cmd == '$size':
+                _len = len(key)
+                if isinstance(rule, (float, int)):
+                    if _len == int(rule):
+                        continue
+
+                elif isinstance(rule, (list, set, frozenset, tuple, range)):
+                    if _len in rule:
+                        continue
+
+            elif cmd == '$not':
+                if not _match_KEY_rules(key, rule, level=level+1):
+                    continue
+
+            elif cmd == '$or':
+                if isinstance(rule, (list,tuple)):
+                    is_matched = False
+                    for _rule in rule:
+                        if _match_KEY_rules(key, _rule, level=level+1):
+                            is_matched = True
+                            break
+
+                    if is_matched:
+                        continue
+
+            elif cmd == '$nor':
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if _match_KEY_rules(key, _rule, level=level+1):
+                            return False
+                    continue
+
+            elif cmd == '$and':
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if not _match_KEY_rules(key, _rule, level=level+1):
+                            return False
+
+                    continue
+
+        return False
+
+    return True
+
+def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bool:
+    """
+    Evaluate if a DATE matches a given set of conditions or MongoDB-like operators.
+
+    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
+    `$has`, `$re`, `$re2`, `$func`, `$not`, `$or`, `$nor` and `$and`.
+
+    Args:
+        cdate (date): KEY created date
+        mdate (date): KEY modified date
+        rules (Any): The dictionary of rules/operators or a direct match condition.
+        level (int, optional): The current recursion depth. Defaults to 0.
+    
+    Returns:
+        bool: True if the value satisfies all specified rules, False otherwise.
+
+    Example:
+        >>> today = dt.date.today()
+        >>> _match_DATE_rules(today, today, rules={'$eq': today})
+        True        
+    """
+    if not isinstance(rules, dict): # pragma: no cover
+        if isinstance(rules, (dt_date, datetime)):
+            rules = {'$eq': rules}
+        elif isinstance(rules, Pattern):
+            rules = {'$re': rules}
+        elif callable(rules):
+            rules = {'$func': rules}
+        elif isinstance(rules, (set, list, tuple)):
+            rules = {'$in': rules}
+        elif isinstance(rules, frozenset):
+            rules = {'$in': set(rules)}
+        elif isinstance(rules, str):
+            matches = re_findall(r'(?<!\d)(\d{1,4})\W([01]?\d)\W([0123]?\d)(?!\d)', rules)
+            if matches:
+                date_list = []
+                for dd in matches:
+                    try:
+                        date_list.append(dt_date(*[int(v) for v in dd]))
+                    except ValueError: # pragma: no cover
+                        return False
+
+                if len(date_list) > 1:
+                    date_list = sorted(date_list)
+                    rules = {'$ge': date_list[0], '$le': date_list[-1]}
+                elif date_list:
+                    rules = {'$eq': date_list[0]}
+                else:
+                    return False
+            else:
+                return False
+        elif isinstance(rules, (int, float)):
+            today = dt_date.today() if isinstance(rules, int) else datetime.now()
+            days = int(rules)
+            if rules == 0:
+                rules = {'$eq': today}
+            elif rules > 0:
+                rules = {'$ge': today, '$le': today + timedelta(days=days)}
+            else:
+                rules = {'$ge': today - timedelta(days=-days), '$le': today}
+        else:
+            return False
+
+    cdate_s = str(cdate)
+    mdate_s = str(mdate)
+    date_s = f'{cdate_s} {mdate_s}'
+    for cmd,rule in rules.items():
+        cmd = cmd.lower()
+        if cmd == '$func':
+            if callable(rule):
+                arg_cnt = rule.__code__.co_argcount
+                try:
+                    if arg_cnt == 2 and rule(cdate, mdate):
+                        continue
+
+                except: # pragma: no cover
+                    return False
+
+        elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+            is_matched = False
+            date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
+            if isinstance(rule, Pattern):
+                is_matched = rule.search(date_s)
+
+            elif isinstance(rule, str):
+                is_matched = re_search(rule, date_s)
+
+            elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
+                # rule0 AND rule1 AND ...
+                for _rule in rule:
+                    if isinstance(_rule, Pattern):
+                        if not _rule.search(date_s):
+                            return False
+
+                        is_matched = True
+
+                    elif isinstance(_rule, str):
+                        if not re_search(rule, date_s):
+                            return False
+
+                        is_matched = True
+
+                    else:
+                        return False
+
+            if is_matched:
+                continue
+
+        else:
+            is_cdate = isinstance(rule, datetime)
+            is_mdate = isinstance(rule, dt_date) and not isinstance(rule, datetime)
+            is_same_type = is_cdate or is_mdate
+            if cmd == '$gt':
+                if is_same_type and (is_cdate and cdate > rule.date() or is_mdate and mdate > rule):
+                    continue
+
+            elif cmd == '$gte' or cmd == '$ge':
+                if is_same_type and (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule):
+                    continue
+
+            elif cmd == '$lt':
+                if is_same_type and (is_cdate and cdate < rule.date() or is_mdate and mdate < rule):
+                    continue
+
+            elif cmd == '$lte' or cmd == '$le':
+                if is_same_type and (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule):
+                    continue
+
+            elif cmd == '$eq':
+                if is_same_type and (is_cdate and cdate == rule.date() or is_mdate and mdate == rule):
+                    continue
+
+            elif cmd == '$ne':
+                if is_same_type and (is_cdate and cdate != rule.date() or is_mdate and mdate != rule):
+                    continue
+
+            elif cmd == '$in':
+                try:
+                    if isinstance(rule, set):
+                        if mdate in rule or mdate_s in rule:
+                            continue
+                    else:
+                        if cdate in rule or cdate_s in rule:
+                            continue
+
+                except TypeError: # pragma: no cover
+                    return False
+
+            elif cmd == '$nin':
+                try:
+                    if isinstance(rule, set):
+                        if not (mdate in rule or mdate_s in rule):
+                            continue
+                    else:
+                        if not (cdate in rule or cdate_s in rule):
+                            continue
+
+                except TypeError: # pragma: no cover
+                    return False
+
+            elif cmd == '$has':
+                if isinstance(rule, str):
+                    if date_s.find(rule) >= 0:
+                        continue
+
+                elif isinstance(rule, datetime):
+                    if date_s.find(str(rule.date())) >= 0:
+                        continue
+
+                elif isinstance(rule, dt_date):
+                    if date_s.find(str(rule)) >= 0:
+                        continue
+
+            elif cmd == '$not':
+                if not _match_DATE_rules(cdate, mdate, rule, level=level+1):
+                    continue
+
+            elif cmd == '$or':
+                if isinstance(rule, (list,tuple)):
+                    is_matched = False
+                    for _rule in rule:
+                        if _match_DATE_rules(cdate, mdate, _rule, level=level+1):
+                            is_matched = True
+                            break
+
+                    if is_matched:
+                        continue
+
+            elif cmd == '$nor':
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if _match_DATE_rules(cdate, mdate, _rule, level=level+1):
+                            return False
+                    continue
+
+            elif cmd == '$and':
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if not _match_DATE_rules(cdate, mdate, _rule, level=level+1):
+                            return False
+
+                    continue
+
+        return False
+
+    return True
+
+def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bool:
     """
     Evaluate if a value matches a given set of conditions or MongoDB-like operators.
 
-    Supports operations such as `$gt`, `ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
-    `$has`, `$re`, `$re2`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
+    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
+    `$has`, `$re`, `$re2`, `$regex`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
 
     Args:
         key (str): The key associated with the value being evaluated.
@@ -195,34 +571,37 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
 
     Example:
         >>> rules = {'$gt': 10, '$lt': 20}
-        >>> _match_rules("age", 15, rules)
+        >>> _match_VAL_rules("age", 15, rules)
         True
-        >>> _match_rules("name", "Alice", {"$re": r"Al.*"})
+        >>> _match_VAL_rules("name", "Alice", {"$re": r"Al.*"})
         True
     """
     if ANY and hasattr(val, '__iter__'): # pragma: no cover
         if isinstance(val, (list, set, frozenset, tuple)):
-            if any(_match_rules(key, vv, rules, level=level+1, ANY=True) for vv in val):
+            if any(_match_VAL_rules(key, _val, rules, level=level+1, ANY=True) for _val in val):
                 return True
 
         elif isinstance(val, dict):
-            if any(_match_rules(key, vv, rules, level=level+1, ANY=True) for vv in val.values()):
+            if any(_match_VAL_rules(key, _val, rules, level=level+1, ANY=True) for _val in val.values()):
                 return True
 
     if not isinstance(rules, dict): # pragma: no cover
-        if isinstance(rules, (str, int, float, bool, str, bytes)):
-            rules = {'$eq' : rules}
-        elif isinstance(rules, (list, set, tuple, frozenset)):
-            rules = {'$in' : rules}
+        if isinstance(rules, (str, int, float, bool, bytes)):
+            rules = {'$eq': rules}
         elif isinstance(rules, Pattern):
             rules = {'$re': rules}
         elif callable(rules):
-            rules = {'$func' : rules}
+            rules = {'$func': rules}
+        elif isinstance(rules, (list, set, tuple, frozenset)):
+            rules = {'$in': set(rules)}
+        elif isinstance(rules, (dt_date, datetime)):
+            rules = {'$eq': rules}
         else:
             return False
 
     for cmd,rule in rules.items():
         if cmd and cmd[0] == '$':
+            cmd = cmd.lower()
             is_same_type = isinstance(val, type(rule)) \
                 or isinstance(val, (int, float, bool)) and isinstance(rules, (int, float, bool)) \
                 or isinstance(val, (bytes, bytearray)) and isinstance(rules, (bytes, bytearray))
@@ -231,6 +610,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__gt__ or not rule.__gt__ or not val > rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
@@ -238,6 +618,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__ge__ or not rule.__ge__ or not val >= rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
@@ -245,6 +626,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__lt__ or not rule.__lt__ or not val < rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
@@ -252,6 +634,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__le__ or not rule.__le__ or not val <= rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
@@ -259,6 +642,7 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__eq__ or not rule.__eq__ or not val == rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
@@ -266,48 +650,48 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                 try:
                     if not is_same_type or not val.__ne__ or not rule.__ne__ or not val != rule:
                         return False
+                    continue
                 except TypeError: # pragma: no cover
                     return False
 
             elif cmd == '$in':
-                if not hasattr(rule, '__contains__'):
-                    return False
-
-                try:
-                    if val.__hash__ and not isinstance(val, tuple):
-                        if val not in rule:
-                            return False
-
-                    elif val.__iter__:
-                        for kk in val:
-                            if kk not in rule:
+                if hasattr(rule, '__contains__'):
+                    try:
+                        if val.__hash__ and not isinstance(val, tuple):
+                            if val not in rule:
                                 return False
+                            continue
 
-                except TypeError: # pragma: no cover
-                    return False
+                        if val.__iter__:
+                            for kk in val:
+                                if kk not in rule:
+                                    return False
+                            continue
+
+                    except TypeError: # pragma: no cover
+                        return False
 
             elif cmd == '$nin':
-                if not hasattr(rule, '__contains__'):
-                    return False
-
-                try:
-                    if val.__hash__ and not isinstance(val, tuple):
-                        if val in rule:
-                            return False
-
-                    elif val.__iter__:
-                        for kk in val:
-                            if kk in rule:
+                if hasattr(rule, '__contains__'):
+                    try:
+                        if val.__hash__ and not isinstance(val, tuple):
+                            if val in rule:
                                 return False
+                            continue
 
-                except TypeError: # pragma: no cover
-                    return False
+                        if val.__iter__:
+                            for kk in val:
+                                if kk in rule:
+                                    return False
+                            continue
+
+                    except TypeError: # pragma: no cover
+                        return False
 
             elif cmd == '$has':
                 if hasattr(val, '__contains__') and not isinstance(val, (str, bytes, bytearray)):
                     if rule not in val:
                         return False
-
                     continue
 
                 try:
@@ -317,18 +701,17 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                         val_s = val if isinstance(rule, bytes) else val.decode('utf8')
                     else:
                         val_s = json_dumps(val) if isinstance(val_s, bytes) else val_s.decode('utf8')
+
                 except:
                     return False
 
                 if isinstance(val_s, bytes) and isinstance(rule, bytes) \
                         or isinstance(val_s, str) and isinstance(rule, str):
 
-                    if val_s.find(rule) < 0:
-                        return False
+                    if val_s.find(rule) >= 0:
+                        continue
 
-                    continue
-
-            elif cmd in {'$re', '$re2'}:
+            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
                 _rules = []
                 if isinstance(rule, Pattern):
                     _rules.append(rule)
@@ -343,131 +726,131 @@ def _match_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bo
                         elif isinstance(_rule, str):
                             _rules.append(re_compile(_rule))
 
-                if not _rules:
-                    return False
+                if _rules:
+                    if not isinstance(val, str):
+                        try:
+                            if isinstance(val, (bytes, bytearray)):
+                                val_s = val.decode('utf8')
+                            else:
+                                val_s = json_dumps(val)
+                                if isinstance(val_s, bytes):
+                                    val_s = val_s.decode('utf8')
 
-                if not isinstance(val, str):
+                        except: # pragma: no cover
+                            return False
+
+                    else: # pragma: no cover
+                        val_s = val
+
+                    val_s = JSON_RE_sub('', val_s) if cmd[-1] == '2' else val_s
+                    for _rule in _rules:
+                        if not _rule.search(val_s):
+                            return False
+                    continue
+
+            elif cmd == '$func':
+                if callable(rule): # pragma: no cover
+                    arg_cnt = rule.__code__.co_argcount
                     try:
-                        if isinstance(val, (bytes, bytearray)):
-                            val_s = val.decode('utf8')
-                        else:
-                            val_s = json_dumps(val)
-                            if isinstance(val_s, bytes):
-                                val_s = val_s.decode('utf8')
+                        if arg_cnt == 2 and rule(key, val):
+                            continue
+
+                        if arg_cnt == 1 and rule(val):
+                            continue
 
                     except: # pragma: no cover
                         return False
 
-                else: # pragma: no cover
-                    val_s = val
-
-                if cmd[-1] != 'e':
-                    val_s = JSON_RE_sub('', val_s)
-
-                for _rule in _rules:
-                    if not _rule.search(val_s):
-                        return False
-
-            elif cmd == '$func':
-                if not callable(rule): # pragma: no cover
-                    return False
-
-                arg_cnt = rule.__code__.co_argcount
-                try:
-                    if arg_cnt == 2:
-                        if not rule(key, val):
-                            return False
-                    elif arg_cnt == 1:
-                        if not rule(val):
-                            return False
-                    else:
-                        return False
-
-                except: # pragma: no cover
-                    return False
-
             elif cmd == '$size':
-                if not hasattr(val, '__iter__'):
-                    return False
+                if hasattr(val, '__iter__'):
+                    _len = len(val)
+                    if isinstance(rule, (float, int)):
+                        if _len == int(rule):
+                            continue
 
-                _len = len(val)
-                if isinstance(rule, (float, int)):
-                    if _len != int(rule):
-                        return False
-
-                elif isinstance(rule, (list, set, frozenset, tuple, range)):
-                    if _len not in rule:
-                        return False
-
-                else: # pragma: no cover
-                    return False
+                    if isinstance(rule, (list, set, frozenset, tuple, range)):
+                        if _len in rule:
+                            continue
 
             elif cmd == '$not':
-                if _match_rules(key, val, rule, level=level+1):
-                    return False
+                if not _match_VAL_rules(key, val, rule, level=level+1):
+                    continue
 
             elif cmd == '$or':
-                if not isinstance(rule, (list,tuple)): # pragma: no cover
-                    return False
+                if isinstance(rule, (list,tuple)):
+                    is_matched = False
+                    for _rule in rule:
+                        if _match_VAL_rules(key, val, _rule, level=level+1):
+                            is_matched = True
+                            break
 
-                is_matched = False
-                for _rule in rule:
-                    if _match_rules(key, val, _rule, level=level+1):
-                        is_matched = True
-                        break
-
-                if not is_matched:
-                    return False
+                    if is_matched:
+                        continue
 
             elif cmd == '$nor':
-                if not isinstance(rule, (list,tuple)): # pragma: no cover
-                    return False
-
-                is_matched = True
-                for _rule in rule:
-                    if _match_rules(key, val, _rule, level=level+1):
-                        is_matched = False
-                        break
-
-                if not is_matched:
-                    return False
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if _match_VAL_rules(key, val, _rule, level=level+1):
+                            return False
+                    continue
 
             elif cmd == '$and':
-                if not isinstance(rule, (list,tuple)): # pragma: no cover
-                    return False
+                if isinstance(rule, (list,tuple)):
+                    for _rule in rule:
+                        if not _match_VAL_rules(key, val, _rule, level=level+1):
+                            return False
+                    continue
 
+            elif cmd == '$any':
                 is_matched = True
-                for _rule in rule:
-                    if not _match_rules(key, val, _rule, level=level+1):
+                if isinstance(val, dict):
+                    if not any(_match_VAL_rules(key, _val, rule, ANY=True, level=level+1) for _val in val.values()):
                         is_matched = False
-                        break
 
-                if not is_matched:
-                    return False
+                elif not hasattr(val, '__iter__'):
+                    if not _match_VAL_rules(key, val, rule, level=level+1):
+                        is_matched = False
+
+                elif isinstance(val, (list, tuple, set, frozenset)):
+                    if not any(_match_VAL_rules(key, _val, rule, ANY=True, level=level+1) for _val in val):
+                        is_matched = False
+
+                else: # pragma: no cover
+                    if not _match_VAL_rules(key, val, rule, level=level+1):
+                        is_matched = False
+
+                if not is_matched and isinstance(rule, dict):
+                    _is_matched = False
+                    if isinstance(val, dict):
+                        for _ref, _rule in rule.items():
+                            if _ref in val:
+                                if _match_VAL_rules(key, val[_ref], _rule, level=level+1):
+                                    _is_matched = True
+                                    break
+
+                    is_matched = True if _is_matched else is_matched
+
+                if is_matched:
+                    continue
 
             elif cmd[1:].isdigit():
-                if not isinstance(val, (list, tuple)): # pragma: no cover
-                    return False
+                if isinstance(val, (list, tuple)):
+                    try:
+                        if _match_VAL_rules(key, val[int(cmd[1:])], rule, level=level+1):
+                            continue
 
-                try:
-                    if not _match_rules(key, val[int(cmd[1:])], rule, level=level+1):
+                    except IndexError: # pragma: no cover
                         return False
 
-                except IndexError: # pragma: no cover
-                    return False
+        elif isinstance(val, dict) and cmd in val:
+            if _match_VAL_rules(key, val[cmd], rule, level=level+1):
+                continue
 
-            else:
-                return False
+        elif cmd == '_id':
+            if _match_KEY_rules(key, rule, level=level):
+                continue
 
-        elif hasattr(val, '__iter__') and cmd in val:
-            if not isinstance(val, dict): # pragma: no cover
-                return False
-
-            if not _match_rules(key, val[cmd], rule, level=level+1):
-                return False
-
-        else:
-            return False
+        return False
 
     return True
 
@@ -542,16 +925,15 @@ class JDbKey:
             Returns:
                 Union[dict, tuple, None]: Metadata tuple if a single string is passed, or a dictionary of matched keys to their metadata.
         """
-        key_type = type(key)
-        if key_type is str:
+        if isinstance(key, str):
             if key.find(SEP_SYM) >= 0 and key not in self.jdb:
                 # pylint: disable=unnecessary-comprehension
                 return {k:v for k,v in self.item_iter(key)}
 
-        elif key_type in {bytes, bytearray}: # pragma: no cover
+        elif isinstance(key, (bytes, bytearray)): # pragma: no cover
             pass
 
-        elif key_type in {int, float, slice, dt_date, datetime, Pattern} \
+        elif isinstance(key, (int, float, slice, dt_date, datetime, Pattern)) \
                 or callable(key) \
                 or hasattr(key, '__iter__'):
             # pylint: disable=unnecessary-comprehension
@@ -560,9 +942,7 @@ class JDbKey:
         jdb = self.jdb
         with jdb.open(read_only=True) as fp:
             io, fp, key_fp = jdb.f_get_fp(fp)
-            if key_type is not str: # pragma: no cover
-                key = str(key)
-
+            key = str(key) if not isinstance(key, str) else key
             row_id = io.key_table[key]
             if io.n_records > row_id >= 0:
                 _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
@@ -603,7 +983,7 @@ class JDbKey:
         """
         return len(self.jdb)
 
-    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, copy:bool=False, **kwargs) -> Generator[Union[str,Tuple[str,tuple]]]:
+    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, **kwargs) -> Generator[str]:
         """
         Execute a search query returning matching keys or key-metadata pairs as a generator.
 
@@ -612,12 +992,10 @@ class JDbKey:
             vals (Optional[Any], optional): Condition for filtering values. Defaults to None.
             date (Optional[Any], optional): Date range filter. Defaults to None.
             limit (int, optional): Maximum number of results to yield. Defaults to 0 (no limit).
-            with_value (bool, optional): Whether to yield the metadata values alongside keys. Defaults to False.
-            copy (bool, optional): Whether to iterate over a copy of the key table. Defaults to False.
             **kwargs: Additional filtering arguments.
 
         Yields:
-            Union[str, Tuple[str, tuple]]: Matched key, or (key, metadata) if `with_value` is True.
+            str: Matched key
 
         Example:
             >>> jdb = JDb()
@@ -628,15 +1006,12 @@ class JDbKey:
             {'key3'}
         """
         jdb = self.jdb
-        if keys or vals or kwargs:
-            for key, _val in jdb.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
+        if keys or vals or date or kwargs:
+            for key, _val in jdb.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=False, **kwargs):
                 yield key
 
         else:
-            with jdb.open(read_only=True):
-                io = jdb.io
-                key_table = io.key_table.copy() if copy else io.key_table
-                yield from key_table
+            yield from self
 
     def __iter__(self) -> Generator[str]:
         """
@@ -1098,8 +1473,7 @@ class JDbKey:
         else:
             is_matched = None
             k_arg_cnt = 0
-            if key is None:
-                key = slice(0,None)
+            key = slice(0,None) if key is None else key
 
         jdb = self.jdb
 
@@ -1117,31 +1491,26 @@ class JDbKey:
                     return
 
                 childs = set(io.groups).union(jdb.childs)
-                if not childs:
-                    return
-
-                jdb_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
-                f_get_child = jdb.f_get_child
-                if not jdb_name:
-                    for jdb_name in childs:
+                if childs:
+                    jdb_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
+                    f_get_child = jdb.f_get_child
+                    if not jdb_name:
+                        for jdb_name in childs:
+                            child = f_get_child(fp, jdb_name)
+                            if isinstance(child, JDbReader):
+                                for _key,_info in child.keys.item_iter(jdb_key):
+                                    yield jdb_name+SEP_SYM+_key, _info
+                    else:
                         child = f_get_child(fp, jdb_name)
                         if isinstance(child, JDbReader):
                             for _key,_info in child.keys.item_iter(jdb_key):
                                 yield jdb_name+SEP_SYM+_key, _info
-                else:
-                    child = f_get_child(fp, jdb_name)
-                    if isinstance(child, JDbReader):
-                        for _key,_info in child.keys.item_iter(jdb_key):
-                            yield jdb_name+SEP_SYM+_key, _info
 
                 return
 
             if isinstance(key, int):
                 n_records = io.n_records
-                row_id = key
-                if row_id < 0:
-                    row_id = n_records + row_id
-
+                row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
                     _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                     old_date, new_date = io.z_conv_date(days)
@@ -1151,22 +1520,16 @@ class JDbKey:
 
             if isinstance(key, float):
                 sync_id = int(key)
-                if sync_id < 0:
-                    sync_id = io.sync_id + sync_id
-
-                if sync_id >= io.sync_id or sync_id < 0:
-                    return
-
-                io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
-                n_records = io.n_records
-                for row_id in range(io.n_records):
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if ver != sync_id:
-                        continue
-
-                    old_date, new_date = io_conv_date(days)
-                    yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+                sync_id = (io.sync_id + sync_id) if sync_id < 0 else sync_id
+                if not (sync_id >= io.sync_id or sync_id < 0):
+                    io_read_key = io.read_key
+                    io_conv_date = io.z_conv_date
+                    n_records = io.n_records
+                    for row_id in range(io.n_records):
+                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                        if ver == sync_id:
+                            old_date, new_date = io_conv_date(days)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
 
                 return
 
@@ -1206,19 +1569,15 @@ class JDbKey:
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         old_date, new_date = io_conv_date(days)
                         val = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
-                        if not is_matched(_key, val):
-                            continue
-
-                        yield _key, val
+                        if is_matched(_key, val):
+                            yield _key, val
 
                 elif k_arg_cnt == 1:
                     for _key,row_id in io.key_table.items():
-                        if not io.n_records > row_id >= 0 or not is_matched(_key):
-                            continue
-
-                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                        old_date, new_date = io_conv_date(days)
-                        yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+                        if io.n_records > row_id >= 0 and is_matched(_key):
+                            _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                            old_date, new_date = io_conv_date(days)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
 
                 return
 
@@ -1245,25 +1604,20 @@ class JDbKey:
                         continue
 
                     _key = str(_key)
-                    if _key in done: # pragma: no cover
-                        continue
+                    if _key not in done: # pragma: no cover
+                        done.add(_key)
+                        row_id = key_table[_key]
+                        if row_id < 0:
+                            if has_childs and _key.find(SEP_SYM) >= 0: # pragma: no cover
+                                for kk,_info in self.item_iter(_key):
+                                    yield kk,_info
 
-                    done.add(_key)
+                            continue
 
-                    row_id = key_table[_key]
-                    if row_id < 0:
-                        if has_childs and _key.find(SEP_SYM) >= 0: # pragma: no cover
-                            for kk,_info in self.item_iter(_key):
-                                yield kk,_info
-
-                        continue
-
-                    if row_id >= io.n_records: # pragma: no cover
-                        continue
-
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    old_date, new_date = io_conv_date(days)
-                    yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+                        if row_id < io.n_records:
+                            _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                            old_date, new_date = io_conv_date(days)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
 
                 return
 
@@ -1557,7 +1911,7 @@ class JDbReader:
             sync_id =io.sync_id
             swap_id =io.swap_id
             remv_id =io.remv_id
-            io.read_header(key_fp, seek=False)
+            io.read_header(key_fp)
             io.sync_id = sync_id
             io.swap_id = swap_id
             io.remv_id = remv_id
@@ -1685,12 +2039,9 @@ class JDbReader:
                     f_read = self.f_read
                     jdb_read = jdb.f_read
                     jdb_key_table = jdb.io.key_table
-                    for key,row in self.io.key_table.items():
+                    for key,row in self.io.sorted_key_table_items():
                         ref_row = jdb_key_table[key]
-                        if ref_row < 0:
-                            return False
-
-                        if f_read(fp, key, row=row, copy=False) != jdb_read(ref_fp, key, row=ref_row, copy=False):
+                        if ref_row < 0 or f_read(fp, key, row=row, copy=False) != jdb_read(ref_fp, key, row=ref_row, copy=False):
                             return False
 
         elif isinstance(jdb, JDbKey):
@@ -1707,10 +2058,7 @@ class JDbReader:
 
                 f_read = self.f_read
                 for key,row in self.io.sorted_key_table_items():
-                    if key not in jdb:
-                        return False
-
-                    if f_read(fp, key, row=row, copy=False) != jdb[key]:
+                    if key not in jdb or f_read(fp, key, row=row, copy=False) != jdb[key]:
                         return False
 
 
@@ -1941,12 +2289,12 @@ class JDbReader:
             tuple: A tuple containing (slice_obj, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date).
         """
         chk_new_date = True
-        if isinstance(key, dt_date):
-            key = slice(key, key+timedelta(days=1))
-
-        elif isinstance(key, datetime):
-            key = slice(key, key+timedelta(days=1))
+        if isinstance(key, datetime):
+            key = slice(key, key+timedelta(days=1)) # created date
             chk_new_date = False
+
+        elif isinstance(key, dt_date):
+            key = slice(key, key+timedelta(days=1)) # modified date
 
         if not isinstance(key, slice):
             raise TypeError
@@ -2126,7 +2474,7 @@ class JDbReader:
                     else:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
-                    io.read_header(key_fp, seek=False) # [1] first time [2] changed by other
+                    io.read_header(key_fp)
                     if not is_latest or not io.is_updated(): # pragma: no cover
                         io.load_keys(key_fp, force=data_type==0)
                         if _cache: _cache.clear()
@@ -2196,7 +2544,7 @@ class JDbReader:
                                     for kk in set(_cache).difference(io.key_table):
                                         _cache.pop(kk, 0)
 
-                            self.fsize = io.write_header(key_fp, seek=False)
+                            self.fsize = io.write_header(key_fp)
 
                         finally:
                             if key_fp is not None:
@@ -2276,7 +2624,7 @@ class JDbReader:
                     else:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
-                    io.read_header(key_fp, seek=False) # [1] first time [2] changed by other
+                    io.read_header(key_fp)
                     if not is_latest or not io.is_updated():
                         io.load_keys(key_fp, force=data_type==0)
                         if _cache: _cache.clear()
@@ -2622,7 +2970,7 @@ class JDbReader:
         key_fp = None
         try:
             key_fp = self.files_obj.KEY_open('rb', buffering=KEY_FILE_BUF_SIZE)
-            io = self.io.read_header(key_fp, seek=False)
+            io = self.io.read_header(key_fp)
             return io.n_records
 
         except FileNotFoundError: # pragma: no cover
@@ -3252,7 +3600,7 @@ class JDbReader:
 
         else:
             with self.KEY_fopen('r') as key_fp:
-                io = self.io.read_header(key_fp, seek=False)
+                io = self.io.read_header(key_fp)
                 api_ver = io.api_ver
                 zip_str = io.zip_type_str
                 type_str = io.data_type_str
@@ -3390,10 +3738,7 @@ class JDbReader:
 
             if isinstance(key, int):
                 n_records = io.n_records
-                row_id = key
-                if row_id < 0:
-                    row_id = n_records + row_id
-
+                row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id > 0:
                     _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                     yield _key, self.f_read(fp, _key, row=row_id, copy=False)
@@ -3403,16 +3748,13 @@ class JDbReader:
             if isinstance(key, float):
                 sync_id = int(key)
                 sync_id = (io.sync_id + sync_id) if sync_id < 0 else sync_id
-                if sync_id >= io.sync_id or sync_id < 0:
-                    return
-
-                io_read_key = io.read_key
-                n_records = io.n_records
-                for row_id in range(n_records):
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if ver != sync_id:
-                        continue
-                    yield _key, self.f_read(fp, _key, row=row_id, copy=False)
+                if not (sync_id >= io.sync_id or sync_id < 0):
+                    io_read_key = io.read_key
+                    n_records = io.n_records
+                    for row_id in range(n_records):
+                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                        if ver == sync_id:
+                            yield _key, self.f_read(fp, _key, row=row_id, copy=False)
 
                 return
 
@@ -3465,21 +3807,17 @@ class JDbReader:
                 if k_arg_cnt == 2:
                     for _key,row_id in io.key_table.items():
                         val = f_read(fp, _key, row=row_id, copy=False)
-                        if not is_matched(_key, val): continue
-                        yield _key, val
+                        if is_matched(_key, val):
+                            yield _key, val
 
                 elif k_arg_cnt == 1:
                     for _key,row_id in io.key_table.items():
-                        if not is_matched(_key): continue
-                        val = f_read(fp, _key, row=row_id, copy=False)
-                        yield _key, val
+                        if is_matched(_key):
+                            yield _key, f_read(fp, _key, row=row_id, copy=False)
 
                 return
 
-            if isinstance(key, (bytes, bytearray)): # pragma: no cover
-                pass
-
-            elif hasattr(key, '__iter__'):
+            if hasattr(key, '__iter__') and not isinstance(key, (bytes, bytearray)):
                 done = set()
                 f_read = self.f_read
                 key_table = io.key_table
@@ -3509,7 +3847,7 @@ class JDbReader:
                 if row_id >= 0:
                     yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Union[str,datetime,dt_date,int,None]=None, limit:int=0, with_value:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3542,7 +3880,7 @@ class JDbReader:
                 >>> jdb.find(NOT={'name':'A'}}]) # not value['name] == 'A'
                 >>> jdb.find(ANY='A')  # any record's value equal to  'A'
                 
-            date (Union[str, datetime, dt_date, int, None], optional): Timeline constraint for record modifications.
+            date (Optional[Any], optional): Timeline constraint for record modifications.
             limit (int, optional): Max results to return. 0 means unlimited. Defaults to 0.
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
             **kwargs: Extra filter configurations (e.g., regex flags).
@@ -3579,8 +3917,7 @@ class JDbReader:
         """
         re_flags = kwargs.get('re_flags', re_I)
 
-        if not vals:
-            vals = {}
+        if not vals: vals = {}
 
         for key,val in kwargs.items():
             if key in FIND_OPS:
@@ -3589,74 +3926,51 @@ class JDbReader:
         if vals:
             with_value = True
 
-        key_rule = None
-        if keys:
-            if isinstance(keys, Pattern):
-                key_rule = keys
+        if not keys: keys = {}
 
-            elif isinstance(keys, str):
-                idx = keys.find(SEP_SYM)
-                if idx >= 0:
-                    # 'jdb_name:::jdb_key'
-                    key_rule = keys[:idx]
-                    key_rule = re_compile(key_rule, flags=re_flags) if key_rule else None
-                    next_keys = keys[idx+SEP_LEN:]
-                    next_idx = next_keys.find(SEP_SYM)
+        if isinstance(keys, dict):
+            pass
 
-                    if next_idx < 0 and not next_keys: # pragma: no cover
-                        next_keys = None
+        elif isinstance(keys, Pattern):
+            keys = {'$re': keys}
 
-                    # pylint: disable=contextmanager-generator-missing-cleanup
-                    with self.open(read_only=True) as fp:
-                        f_get_child = self.f_get_child
-                        for child_name in self.io.key_table:
-                            if not (key_rule and not key_rule.search(child_name)):
-                                child = f_get_child(fp, child_name)
-                                if isinstance(child, JDbReader):
-                                    for kk,vv in child.find_iter(next_keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
-                                        yield child_name+SEP_SYM+kk,vv
-                    return
+        elif isinstance(keys, str):
+            idx = keys.find(SEP_SYM)
+            if idx >= 0:
+                # 'jdb_name:::jdb_key'
+                key_rule = keys[:idx]
+                key_rule = re_compile(key_rule, flags=re_flags) if key_rule else None
+                next_keys = keys[idx+SEP_LEN:]
+                next_idx = next_keys.find(SEP_SYM)
 
-                key_rule = re_compile(keys, flags=re_flags)
+                if next_idx < 0 and not next_keys: # pragma: no cover
+                    next_keys = None
 
-            elif hasattr(keys, '__iter__'):
-                key_rule = {key if isinstance(key, str) else str(key) for key in keys}
+                # pylint: disable=contextmanager-generator-missing-cleanup
+                with self.open(read_only=True) as fp:
+                    io = self.io
+                    key_table = io.key_table
+                    childs = set(self.childs).union(io.groups)
+                    f_get_child = self.f_get_child
+                    for child_name in childs:
+                        if child_name not in key_table: continue
+                        if not (key_rule and not key_rule.search(child_name)):
+                            child = f_get_child(fp, child_name)
+                            if isinstance(child, JDbReader):
+                                for kk,vv in child.find_iter(next_keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
+                                    yield child_name+SEP_SYM+kk,vv
+                return
 
-            elif callable(keys):
-                key_rule = keys
+            keys = {'$re': re_compile(keys, flags=re_flags)}
 
-            else:  # pragma: no cover
-                raise TypeError('invalid type')
+        elif hasattr(keys, '__iter__') and not isinstance(keys, (bytes, bytearray)):
+            keys = {'$in': {key if isinstance(key, str) else str(key) for key in keys}}
 
-        min_date = max_date = None
-        chk_new_date = True
-        if isinstance(date, str):
-            matches = re_findall(r'(?<!\d)(\d{1,4})\W([01]?\d)\W([0123]?\d)(?!\d)', date)
-            if matches:
-                date_list = []
-                for dd in matches:
-                    try:
-                        date_list.append(dt_date(*[int(v) for v in dd]))
-                    except ValueError: # pragma: no cover
-                        pass
+        elif callable(keys):
+            keys = {'$func': keys}
 
-                if len(date_list) > 1:
-                    min_date = date_list[0]
-                    max_date = date_list[-1]
-                elif date_list:
-                    max_date = min_date = date_list[0]
-
-        elif isinstance(date, datetime):
-            chk_new_date = False
-            min_date = max_date =  date.date()
-
-        elif isinstance(date, dt_date):
-            chk_new_date = True
-            min_date = max_date = date
-
-        elif isinstance(date, int):
-            max_date = dt_date.today()
-            min_date = max_date - timedelta(days=abs(date))
+        if not isinstance(keys, dict):  # pragma: no cover
+            raise TypeError('invalid type')
 
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
@@ -3664,53 +3978,27 @@ class JDbReader:
             count = 0
             io_read_key = io.read_key
             io_conv_date = io.z_conv_date
-            n_records = io.n_records
             data_type = io.data_type_str
             cache = self._cache
-            for row in range(n_records):
+            for key,row_id in io.sorted_key_table_items():
                 if count >= limit > 0:
                     break
 
-                key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row)
-                if min_date and max_date:
-                    old_date, new_date = io_conv_date(_days)
-                    if chk_new_date:
-                        if not max_date >= new_date >= min_date:
-                            continue
-                    else:
-                        if not max_date >= old_date >= min_date:
-                            continue
-
-                value = value_b = None
                 is_matched = True
-                if key_rule:
-                    if callable(key_rule):
-                        arg_cnt = key_rule.__code__.co_argcount
-                        if arg_cnt == 2:
-                            if key not in cache:
-                                value, value_b = self.f_read_with_bytes(fp, key)
-                            else:
-                                value = cache.get(key, None)
+                for cmd,rules in keys.items():
+                    if _match_KEY_rules(key, {cmd: rules}):
+                        continue
 
-                            if not key_rule(key, value):
-                                is_matched = False
-                            else:
-                                with_value = True
+                    is_matched = False
+                    break
 
-                        elif arg_cnt == 1:
-                            if not key_rule(key):
-                                is_matched = False
-                        else:
-                            raise TypeError(f'invalid function {arg_cnt} != 1 or 2')
+                if not is_matched:
+                    continue
 
-                    elif isinstance(key_rule, set):
-                        if key not in key_rule:
-                            is_matched = False
-
-                    elif not key_rule.search(key):
-                        is_matched = False
-
-                    if not is_matched:
+                if date is not None:
+                    key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row_id)
+                    cdate, mdate = io_conv_date(_days)
+                    if not _match_DATE_rules(cdate, mdate, date):
                         continue
 
                 if not with_value:
@@ -3718,92 +4006,37 @@ class JDbReader:
                     count += 1
                     continue
 
-                if value is None:
-                    if key not in cache:
-                        value, value_b = self.f_read_with_bytes(fp, key)
-                    else:
-                        value = cache.get(key, None)
+                if key not in cache:
+                    value, value_b = self.f_read_with_bytes(fp, key)
+                else:
+                    value = cache.get(key, None)
+                    value_b = None
 
-                for ref,rules in vals.items():
-                    if ref == '$any':
-                        if isinstance(value, dict):
-                            if not any(_match_rules(key, vv, rules, ANY=True) for vv in value.values()):
-                                is_matched = False
+                for cmd,rules in vals.items():
+                    cmd = cmd.lower()
+                    use_bytes = False
+                    if cmd == '$eq' or cmd == '$ne':
+                        use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
 
-                        elif not hasattr(value, '__iter__'):
-                            if not _match_rules(key, value, rules):
-                                is_matched = False
+                    elif cmd == '$has':
+                        use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
+                                    or isinstance(rules, str) and data_type.endswith('J')
 
-                        elif isinstance(value, (list, tuple, set, frozenset)):
-                            if not any(_match_rules(key, vv, rules, ANY=True) for vv in value):
-                                is_matched = False
+                    elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+                        use_bytes = data_type.endswith('J')
 
-                        else: # pragma: no cover
-                            if not _match_rules(key, value, rules):
-                                is_matched = False
-
-                        if not is_matched and isinstance(rules, dict):
-                            _is_matched = False
-                            if isinstance(value, dict):
-                                for _ref,_rules in rules.items():
-                                    if _ref in value:
-                                        if _match_rules(key, value[_ref], _rules):
-                                            _is_matched = True
-                                            break
-
-                            is_matched = True if _is_matched else is_matched
-
-                        if not is_matched:
-                            break
-
-                    elif ref and ref[0] == '$':
-                        if ref[1:].isdigit(): # eg $1, $2
-                            if not isinstance(value, (list,tuple)): # pragma: no cover
-                                is_matched = False
-                                break
-
+                    if use_bytes:
+                        if value_b is None:
                             try:
-                                if not _match_rules(key, value[int(ref[1:])], rules): # pragma: no cover
-                                    is_matched = False
-                                    break
+                                value_b = io.VAL_dumps(value)
+                            except ValueError: # pragma: no cover
+                                value, value_b = self.f_read_with_bytes(fp, key)
 
-                            except IndexError:
-                                is_matched = False
-                                break
-
-                        else:
-                            use_bytes = False
-                            if ref in {'$eq', '$ne'}:
-                                use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
-
-                            elif ref == '$has':
-                                use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
-                                            or isinstance(rules, str) and data_type.endswith('J')
-
-                            elif ref in {'$re', '$re2'}:
-                                use_bytes = data_type.endswith('J')
-
-                            if use_bytes:
-                                if value_b is None:
-                                    try:
-                                        value_b = io.VAL_dumps(value)
-                                    except ValueError: # pragma: no cover
-                                        value, value_b = self.f_read_with_bytes(fp, key)
-
-                                _value = value_b
-                            else:
-                                _value = value
-
-                            if not _match_rules(key, _value, {ref : rules}):
-                                is_matched = False
-                                break
-
-
-                    elif isinstance(value, dict) and ref in value:
-                        if not _match_rules(key, value[ref], rules):
-                            is_matched = False
-                            break
+                        _value = value_b
                     else:
+                        _value = value
+
+                    if not _match_VAL_rules(key, _value, {cmd: rules}):
                         is_matched = False
                         break
 
@@ -3826,11 +4059,10 @@ class JDbReader:
         Returns:
             list: Transformed list of objects returned by map_func.
         """
-        matches = []
-
         if not callable(map_func):
             raise TypeError('not callable')
 
+        matches = []
         for key,val in self.find_iter(keys=keys, vals=vals, date=date, with_value=True, **kwargs):
             matches.append(map_func(key, val))
 
@@ -3854,18 +4086,8 @@ class JDbReader:
         Returns:
             Dict[str, Any]: The subset of matched data.
         """
-        if not vals:
-            vals = {}
-
-        for key,val in kwargs.items():
-            if key in FIND_OPS:
-                vals[f'${key.lower()}'] = val
-
-        if vals or sort:
-            with_value = True
-
         matches = {}
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value or sort != 0, **kwargs):
             matches[key] = val
 
         if sort:
@@ -4035,14 +4257,13 @@ class JDbReader:
             if cache_only:
                 cache_limit = self._cache_limit
                 _cache = self._cache
-                for key,row in self.io.key_table.items():
+                for key,row in self.io.sorted_key_table_items():
                     if len(_cache) >= cache_limit >= 0:
                         break
 
                     f_read(fp, key, row=row, copy=False)
-
             else:
-                for key,row in self.io.key_table.items():
+                for key,row in self.io.sorted_key_table_items():
                     data[key] = f_read(fp, key, row=row, copy=False)
 
             return data
@@ -4505,7 +4726,7 @@ class JDbReader:
             key_fp.flush()
             key_fp.seek(0)
 
-        io = self.io.read_header(key_fp, seek=False)
+        io = self.io.read_header(key_fp)
         if force or not io.is_updated():
             io.load_keys(key_fp, force=force)
             self._cache.clear()
@@ -4597,7 +4818,7 @@ class JDbReader:
                 is_latest = files_obj.KEY_size() == io.file_size
                 key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
                 data_type = io._data_type
-                io.read_header(key_fp, seek=False)
+                io.read_header(key_fp)
                 if not is_latest or not io.is_updated():
                     io.load_keys(key_fp, force=data_type == 0)
                     self._cache.clear()
@@ -4688,7 +4909,7 @@ class JDbReader:
         key_fp = self.files_obj.KEY_open('wb+', buffering=KEY_FILE_BUF_SIZE)
         io.reset()
         self._cache.clear()
-        self.fsize = io.write_header(key_fp, seek=False)
+        self.fsize = io.write_header(key_fp)
         key_fp.flush()
         key_fp.seek(0)
         return io, key_fp

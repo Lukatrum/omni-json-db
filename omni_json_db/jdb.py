@@ -22,7 +22,7 @@ except ImportError: # pragma: no cover
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK,\
-            g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y
+            g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, NEW_DAY_SHIFT
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style
 # from .utils import debug_break
@@ -51,8 +51,11 @@ class JDbKey2(JDbKey):
         if isinstance(val, str): # pragma: no cover
             val = JIo.z_conv_str_to_days(val)
 
-        elif not isinstance(val, int):
+        elif isinstance(val, datetime):
             val = JIo.z_conv_days(val)
+
+        elif isinstance(val, dt_date):
+            val = JIo.z_conv_days(val) << NEW_DAY_SHIFT
 
         if not isinstance(val, int):
             raise TypeError
@@ -105,10 +108,7 @@ class JDbKey2(JDbKey):
 
             if isinstance(key, int):
                 n_records = io.n_records
-                row_id = key
-                if row_id < 0:
-                    row_id = n_records + row_id
-
+                row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
                     _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                     jdb.f_change_days(fp, _key, val)
@@ -117,22 +117,15 @@ class JDbKey2(JDbKey):
 
             if isinstance(key, float):
                 sync_id = int(key)
-                if sync_id < 0:
-                    sync_id = io.sync_id + sync_id
-
-                if sync_id >= io.sync_id or sync_id < 0:
-                    return
-
-                io, fp, key_fp, _sync_chg = jdb.f_get_write_fp(fp)
-                io_read_key = io.read_key
-                for row_id in range(io.n_records):
-                    if has_SIGINT():
-                        break
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if ver != sync_id:
-                        continue
-                    jdb.f_change_days(fp, _key, val)
-
+                sync_id = (io.sync_id + sync_id) if sync_id < 0 else sync_id
+                if not (sync_id >= io.sync_id or sync_id < 0):
+                    io, fp, key_fp, _sync_chg = jdb.f_get_write_fp(fp)
+                    io_read_key = io.read_key
+                    for row_id in range(io.n_records):
+                        if has_SIGINT(): break
+                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                        if ver == sync_id:
+                            jdb.f_change_days(fp, _key, val)
                 return
 
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
@@ -187,17 +180,15 @@ class JDbKey2(JDbKey):
 
                 elif k_arg_cnt == 1:
                     io_read_key = io.read_key
-                    for _key,row_id in io.key_table.items():
+                    for _key,row_id in io.sorted_key_table_items():
                         if has_SIGINT():
                             break
 
-                        if not is_matched(_key):
-                            continue
-
-                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                        if days != val:
-                            jdb.f_change_days(fp, _key, val)
-                            io, fp, key_fp = jdb.f_get_fp(fp) # key_fp is changed after switch to write mode
+                        if is_matched(_key):
+                            _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                            if days != val:
+                                jdb.f_change_days(fp, _key, val)
+                                io, fp, key_fp = jdb.f_get_fp(fp) # key_fp is changed after switch to write mode
 
                 return
 
@@ -210,9 +201,7 @@ class JDbKey2(JDbKey):
                 for _key in key:
                     if isinstance(_key, (int, float)):
                         row_id = int(_key)
-                        if row_id < 0:
-                            row_id = n_records + row_id
-
+                        row_id = (n_records + row_id) if row_id < 0 else row_id
                         if n_records > row_id >= 0:
                             _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                             jdb.f_change_days(fp, _key, val)
@@ -220,19 +209,16 @@ class JDbKey2(JDbKey):
                         continue
 
                     _key = str(_key)
-                    if _key in done: # pragma: no cover
-                        continue
+                    if _key not in done:
+                        done.add(_key)
+                        row_id = key_table[_key]
+                        if row_id < 0:
+                            if has_childs and _key.find(SEP_SYM) >= 0:
+                                jdb.keys[_key] = val
 
-                    done.add(_key)
+                            continue
 
-                    row_id = key_table[_key]
-                    if row_id < 0:
-                        if has_childs and _key.find(SEP_SYM) >= 0:
-                            jdb.keys[_key] = val
-
-                        continue
-
-                    jdb.f_change_days(fp, _key, val)
+                        jdb.f_change_days(fp, _key, val)
 
                 return
 
@@ -538,7 +524,7 @@ class JDb(JDbReader):
             elif k_arg_cnt > 0:
                 keys = {}
                 f_read = self.f_read
-                for _key,row_id in io.key_table.items():
+                for _key,row_id in io.sorted_key_table_items():
                     if k_arg_cnt == 2:
                         old_val = f_read(fp, _key, row=row_id, copy=False)
                         _is_matched = is_matched(_key, old_val)
@@ -737,19 +723,15 @@ class JDb(JDbReader):
             elif k_arg_cnt > 0:
                 if k_arg_cnt == 2:
                     f_read = self.f_read
-                    for _key,row_id in io.key_table.items():
+                    for _key,row_id in io.sorted_key_table_items():
                         val = f_read(fp, _key, row=row_id, copy=False)
-                        if not is_matched(_key, val):
-                            continue
-
-                        del_keys.add(_key)
+                        if is_matched(_key, val):
+                            del_keys.add(_key)
 
                 elif k_arg_cnt == 1:
-                    for _key,row_id in io.key_table.items():
-                        if not is_matched(_key):
-                            continue
-
-                        del_keys.add(_key)
+                    for _key,row_id in io.sorted_key_table_items():
+                        if is_matched(_key):
+                            del_keys.add(_key)
 
                 if not del_keys:
                     return
@@ -1750,9 +1732,9 @@ class JDb(JDbReader):
                 io.seek(key_fp, 0)
                 # calculate index size
                 for row_id in range(n_lines):
-                    row_info = io.read_key(key_fp, row_id, seek=False)
-                    if not row_info: continue
-                    tmp_io.write_key(tmp_key_fp, 0, *row_info)
+                    row_info = io.read_key(key_fp, row_id)
+                    if row_info:
+                        tmp_io.write_key(tmp_key_fp, 0, *row_info)
 
                 table = {}
                 src_row_id = dst_row_id = 0
@@ -1761,7 +1743,7 @@ class JDb(JDbReader):
                     table_size = min(n_lines, int(n_lines * size_diff / io.index_size) + 8)
                     io.seek(key_fp, 0)
                     while src_row_id < table_size:
-                        row_info = io.read_key(key_fp, src_row_id, seek=False)
+                        row_info = io.read_key(key_fp, src_row_id)
                         if row_info:
                             table[src_row_id] = row_info
 
@@ -1771,7 +1753,7 @@ class JDb(JDbReader):
                 tmp_io.n_lines = n_lines
                 while dst_row_id < n_lines:
                     if src_row_id < n_lines:
-                        row_info = io.read_key(key_fp, src_row_id, seek=True)
+                        row_info = io.read_key(key_fp, src_row_id)
                         if row_info:
                             table[src_row_id] = row_info
 
@@ -2615,10 +2597,8 @@ class JDb(JDbReader):
                 cache_limit = self._cache_limit
                 writer = DictWriter(csv_fp, fieldnames=fields, **kwargs)
                 writer.writeheader()
-                seek = True
                 for row_id in range(n_records):
-                    _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id, seek=seek)
-                    seek = False
+                    _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
                     if _cache and _key in _cache:
                         val = _cache.get(_key, None)
                     else:
@@ -2885,19 +2865,16 @@ class JDb(JDbReader):
 
                     if is_list: # pragma: no cover
                         val = key
-                        key = self.io.n_records
+                        key = str(self.io.sync_id)
                     else:
                         val = records[key]
 
-                    if not isinstance(key, str): # pragma: no cover
-                        key = str(key)
-
-                    f_write(fp, key, val, flags=JFlag(0), max_wsize=0)
+                    f_write(fp, str(key) if not isinstance(key, str) else key, val, flags=JFlag(0), max_wsize=0)
 
             else:
                 with jdb.open(read_only=True) as fp1:
                     jdb_read = jdb.f_read
-                    for key,row in jdb.io.key_table.items():
+                    for key,row in jdb.io.sorted_key_table_items():
                         if has_SIGINT():
                             break
 
@@ -2951,7 +2928,7 @@ class JDb(JDbReader):
                     has_SIGINT = self.file_lock.has_SIGINT
                     if insert and replace:
                         # insert + replace = update
-                        for _key,row_id in jio.key_table.items():
+                        for _key,row_id in jio.sorted_key_table_items():
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
                                 chg_table[_key] = _val
@@ -2959,7 +2936,7 @@ class JDb(JDbReader):
 
                     elif insert:
                         # insert only
-                        for _key,row_id in jio.key_table.items():
+                        for _key,row_id in jio.sorted_key_table_items():
                             if _key in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
@@ -2968,7 +2945,7 @@ class JDb(JDbReader):
 
                     elif replace:
                         # replace only
-                        for _key,row_id in jio.key_table.items():
+                        for _key,row_id in jio.sorted_key_table_items():
                             if _key not in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
@@ -3011,7 +2988,6 @@ class JDb(JDbReader):
                     records = {records : default_val}
 
             # quick replace and insert mode
-            sync_id = io.sync_id
             f_read = self.f_read
             f_write = self.f_write
             _cache = self._cache
@@ -3022,7 +2998,7 @@ class JDb(JDbReader):
 
                 if is_list:
                     val = key
-                    str_key = str(sync_id + len(chg_table))
+                    str_key = str(io.sync_id)
                     func = None
                 else:
                     val = records[key]
@@ -3753,12 +3729,17 @@ class JDb(JDbReader):
                 return False
 
             _key, file_id, offset, row_size, val_size, _ver, old_days = io.read_key(key_fp, row)
-
             _new2, _old2 = old_days & NEW_DAY_MASK, old_days & OLD_DAY_MASK
             if days < 0:
                 _new1, _old1 = 0, io.days
             else:
                 _new1, _old1 = days & NEW_DAY_MASK, days & OLD_DAY_MASK
+                if _old1 == 0 and _new1 > 0:
+                    _new1 >>= NEW_DAY_SHIFT
+                    _new1, _old1 = (0, _new1) if _new1 < _old2 else ((_new1 - _old2), _old2)
+                    _new1 <<= NEW_DAY_SHIFT
+                    days = (_new1 & NEW_DAY_MASK) | (_old1 & OLD_DAY_MASK)
+                    _new1 = 1 if _new1 == 0 else _new1
 
             if _new1 & _new1 != _new2 or _old1 != _old2:
                 io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, days=days if days < 0 or _new1 else days|CHG_DAY_FLAG)
@@ -4747,10 +4728,8 @@ class JDb(JDbReader):
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             io_read_key = io.read_key
             if row is None:
-                seek = True
                 for _row in range(io.n_records, io.n_lines):
-                    _key, file_id, offset, row_size, val_size, _ver, days = io_read_key(key_fp, _row, seek=seek)
-                    seek = False
+                    _key, file_id, offset, row_size, val_size, _ver, days = io_read_key(key_fp, _row)
                     if _key == key:
                         row = _row
                         break
@@ -4845,10 +4824,8 @@ class JDb(JDbReader):
                 return None
 
             if row is None:
-                seek = True
                 for _row in range(io.n_records, io.n_lines):
-                    _key, file_id, offset, row_size, val_size, _ver, days =  io_read_key(key_fp, _row, seek=seek)
-                    seek = False
+                    _key, file_id, offset, row_size, val_size, _ver, days =  io_read_key(key_fp, _row)
                     if _key == key:
                         row = _row
                         break
@@ -4988,7 +4965,7 @@ class JDb(JDbReader):
                 try:
                     key_fp = fp_dict[-1] = self.files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
                     data_type = io._data_type
-                    io.read_header(key_fp, seek=False) # [1] first time [2] changed by other
+                    io.read_header(key_fp)
                     if not is_latest or not io.is_updated():
                         io.load_keys(key_fp, force=data_type==0)
                         self.fsize = io.file_size
@@ -5042,7 +5019,7 @@ class JDb(JDbReader):
         try:
             key_fp = fp_dict[-1] = self.files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
             data_type = io._data_type
-            io.read_header(key_fp, seek=False) # [1] first time [2] changed by other
+            io.read_header(key_fp)
             if not is_latest or not io.is_updated():
                 io.load_keys(key_fp, force=data_type==0)
                 self.fsize = io.file_size

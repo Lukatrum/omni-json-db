@@ -472,11 +472,10 @@ class PartialKeyTable(KeyTable):
         fp = None
         try:
             jio = self.io
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(_key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key == key:
@@ -520,11 +519,10 @@ class PartialKeyTable(KeyTable):
         try:
             jio = self.io
             key_limit = jio._key_limit
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(_key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key != key:
@@ -562,11 +560,10 @@ class PartialKeyTable(KeyTable):
         try:
             jio = self.io
             is_dirty = self.is_dirty
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key, row_id
@@ -605,11 +602,10 @@ class PartialKeyTable(KeyTable):
         try:
             jio = self.io
             is_dirty = self.is_dirty
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+            for _ in range(jio.n_records):
+                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key
@@ -677,11 +673,10 @@ class PartialKeyTable(KeyTable):
         fp = None
         try:
             jio = self.io
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(_key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key == key:
@@ -706,11 +701,10 @@ class PartialKeyTable(KeyTable):
         try:
             jio = self.io
             is_dirty = self.is_dirty
-            read_key = jio.read_key
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+            for _ in range(jio.n_records):
+                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
                 _hash_id = xhash(key)
                 self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key
@@ -1584,7 +1578,7 @@ class JIo:
             '_data_type', '_zip_type', '_key_limit', 'index_size',\
             'max_file_size', 'reserved_rate', 'api_ver', 'file_table',\
             'files_obj', 'key_table', 'window_size', 'min_value_size',\
-            'row_bytes', 'pad_byte', 'pad0_byte',\
+            '_KEY_row0', '_KEY_row1', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0'}
 
@@ -1827,6 +1821,7 @@ class JIo:
         if api_ver is None:
             api_ver = API_LATEST
 
+        self._KEY_row0 = self._KEY_row1 = None
         self._data_type = self._zip_type = self._key_limit = -1
         self.key_table      = DictKeyTable() # must before self.key_limit = key_limit
         self.sync_id        = sync_id
@@ -2078,7 +2073,7 @@ class JIo:
                     value = S_Y_TYPE
                 elif value in {'M+M', 'M:M', 'MARSHAL+MARSHAL'}:
                     value = M_M_TYPE
-                elif value in {'L+J', 'L:J'}:
+                elif value in {'L+J', 'L:J', 'SPLIT+JSON'}:
                     value = L_J_TYPE
                 else:
                     raise ValueError(f'invalid data string {value}')
@@ -2199,6 +2194,7 @@ class JIo:
             self.groups.clear()
             self._swap_id = self._remv_id = -1
             self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
+            self._KEY_row0 =  self._KEY_row1 = None
             self.update_days()
 
         if version is None: # pragma: no cover
@@ -2394,16 +2390,18 @@ class JIo:
             fp = None
             try:
                 files_obj = self.files_obj.copy()
-                read_key = self.read_key
+                KEY_loads = self.KEY_loads
+                index_size = self.index_size
                 fp = files_obj.KEY_open('rb')
                 if reverse:
                     for row_id in range(self.n_records-1, -1, -1):
-                        _key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id)
+                        fp.seek(HEADER_SIZE + row_id * index_size)
+                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                         yield _key, row_id
                 else:
                     fp.seek(HEADER_SIZE)
                     for row_id in range(self.n_records):
-                        _key, _f, _o, _r, _v, _s, _d = read_key(fp, row_id, seek=False)
+                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                         yield _key, row_id
 
             finally:
@@ -2564,30 +2562,43 @@ class JIo:
         if fp.tell() != pos:
             fp.seek(pos)
 
-        if pad_size > 0:
-            return fp.write(data + b' ' * pad_size + b'\n')
+        self._KEY_row1 = self._KEY_row0 if not self._KEY_row0 or self._KEY_row0[0] != row_id else None
+        self._KEY_row0 = (row_id, (key, file_id, offset, row_size, val_size, ver_i, days))
+        return fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
 
-        return fp.write(data + b'\n')
-
-    def read_key(self, fp:IO, row_id:int, seek:bool=True) -> Tuple[str, int, int, int, int, int, int]:
+    def read_key(self, fp:IO, row_id:int) -> Tuple[str, int, int, int, int, int, int]:
         """Extract individual item schema parameters matrices fields reading indices configurations records rows.
 
         Args:
             fp (IO): Open file pointer registration stream controller instance proxy handle.
-            row_id (int): Targeted hardware data space line allocation position slot integer number.
-            seek (bool, optional): Trigger stream pointer repositioning initialization sequences automatically first. Defaults to True.
+            row_id (int): Targeted hardware data space line allocation position slot integer number.            
 
         Returns:
             Tuple[str,int,int,int,int,int,int]: Complete row structural metadata metrics (key, file_id, offset, row_size, val_size, ver, days).
         """
+        if self._KEY_row0:
+            _row_id, _info = self._KEY_row0
+            if _row_id == row_id:
+                return _info
+
+        if self._KEY_row1:
+            _row_id, _info = self._KEY_row1
+            if _row_id == row_id:
+                self._KEY_row1 = self._KEY_row0
+                self._KEY_row0 = (_row_id, _info)
+                return _info
+
         index_size = self.index_size
-        if seek:
-            pos = HEADER_SIZE + row_id * index_size
-            if fp.tell() != pos:
-                fp.seek(pos)
+        pos = HEADER_SIZE + row_id * index_size
+        if fp.tell() != pos:
+            fp.seek(pos)
 
         data = fp.read(index_size)
-        return self.KEY_loads(data)
+        info = self.KEY_loads(data)
+
+        self._KEY_row1 = self._KEY_row0
+        self._KEY_row0 = (row_id, info)
+        return info
 
     def update_days(self) -> int:
         """Query host clock registers re-aligning tracking timestamp offset integer representations variables.
@@ -2605,10 +2616,11 @@ class JIo:
         Returns:
             bool: True if alignment indicators match active storage timeline parameters perfectly, False otherwise.
         """
-        if self.file_size <= 0:
+        if self.file_size <= 0 or self.sync_id != self._sync_id:
+            self._KEY_row0 = self._KEY_row1 = None
             return False
 
-        return self.sync_id == self._sync_id
+        return True
 
     def reset(self, **kwargs):
         """Obliterate runtime trackers dropping state variables clearing memory pools tables configurations allocations fields.
@@ -2626,16 +2638,16 @@ class JIo:
         self.days = self._swap_id = self.min_days = self._remv_id = self._n_records = self._n_lines = -1
         self.key_table.clear()
         self.file_table.clear()
+        self._KEY_row0 = self._KEY_row1 = None
         self.update_days()
         self.row_bytes = self.index_size - self.min_value_size * (1 + self.reserved_rate)
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
 
-    def write_header(self, fp:IO, seek:bool=True, truncate:bool=False) -> int:
+    def write_header(self, fp:IO, truncate:bool=False) -> int:
         """Commit production database status configuration descriptors templates header schemas directly into metadata boundaries fields.
 
         Args:
             fp (IO): Destination active streaming interface pipeline driver handle context.
-            seek (bool, optional): Reset channel pointer to zero origin coordinate baseline path. Defaults to True.
             truncate (bool, optional): Force physical truncation pruning obsolete residual data rows block remnants away. Defaults to False.
 
         Returns:
@@ -2661,7 +2673,7 @@ class JIo:
             data += pad_bytes
         data += b'\n'
         old_file_size = self.file_size
-        if seek: fp.seek(0)
+        if fp.tell() != 0: fp.seek(0)
         fp.write(data)
         if truncate:
             file_size = fp.seek(HEADER_SIZE + n_lines * index_size)
@@ -2685,17 +2697,16 @@ class JIo:
         self.file_size = file_size
         return file_size
 
-    def read_header(self, fp:IO, seek:bool=True) -> JIo:
+    def read_header(self, fp:IO) -> JIo:
         """Parse master configuration descriptor headers grids loading metadata parameters indicators cross-referencing timeline indices numbers.
 
         Args:
             fp (IO): Source active streaming channel file pointer wrapper proxy.
-            seek (bool, optional): Reposition navigation pointer tracking variables back onto origin path bounds. Defaults to True.
 
         Returns:
             JIo: The synchronized processing engine master instance context reference.
         """
-        if seek: fp.seek(0)
+        if fp.tell() != 0: fp.seek(0)
         header = fp.read(HEADER_SIZE)
         _len = len(header)
         if _len == HEADER_SIZE:
@@ -2872,8 +2883,8 @@ class JIo:
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
         self.file_size = records = lines = 0
+        self._KEY_row0 = self._KEY_row1 = None
         self.update_days()
-
         if force or n_lines == 0 or prev_n_lines == 0 or line_diff < 0:
             if key_table: key_table.clear()
             if file_table: file_table.clear()
@@ -3221,6 +3232,7 @@ class JIo:
         Returns:
             Union[bytes, tuple, list]: Copied binary stream metadata chunk array, or unpacked items elements tuple.
         """
+        self._KEY_row0 = self._KEY_row1 = None
         size = self.index_size
         src_pos = HEADER_SIZE + src_row * size
         dst_pos = HEADER_SIZE + dst_row * size
@@ -3245,6 +3257,7 @@ class JIo:
             size (int, optional): Combined length measure tracking total logical rows objects to shift. Defaults to 1.
             block_size (Optional[int], optional): Internal parsing lookahead width constraining buffered file operations rows loops. Defaults to None.
         """
+        self._KEY_row0 = self._KEY_row1 = None
         n_lines = self.n_lines
         index_size = self.index_size
         if block_size is None:
@@ -3309,7 +3322,7 @@ class JIo:
             table_size = min(n_lines, int(n_lines * size_diff / self.index_size) + 8)
             fp.seek(HEADER_SIZE)
             while src_row_id < table_size:
-                row_info = src_read_key(fp, src_row_id, seek=False)
+                row_info = src_read_key(fp, src_row_id)
                 if row_info:
                     table[src_row_id] = row_info
 
@@ -3319,7 +3332,7 @@ class JIo:
         dst_write_key = dst_io.write_key
         while dst_row_id < n_lines:
             if src_row_id < n_lines:
-                row_info = src_read_key(fp, src_row_id, seek=True)
+                row_info = src_read_key(fp, src_row_id)
                 if row_info:
                     table[src_row_id] = row_info
 
