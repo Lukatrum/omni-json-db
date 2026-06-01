@@ -211,7 +211,7 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x8gz.jdb', 'api_ver':1, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l5'},
 
             {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'bt'},
+            {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<8'},
 
             {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x10lz.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<4'},
@@ -267,24 +267,26 @@ class TestJDb(unittest.TestCase):
             jdb.sync()
 
     def tearDown(self):
-        for config in self.jdb_configs:
-            filename = config['KEY_file']
-            jdb = self.jdbs[filename]
-            self.assertIsNotNone(jdb)
-            jdb.remove_fast(jdb)
-            self.assertTrue(len(jdb) == 0)
-            if jdb.n_lines > 0:
-                jdb.recycle(level=4, merge=False, verbose=False)
-                if jdb.n_lines == 0:
-                    self.assertFalse(jdb.file_table)
-                    self.assertTrue(jdb.n_lines == jdb.n_records == 0)
+        try:
+            for config in self.jdb_configs:
+                filename = config['KEY_file']
+                jdb = self.jdbs[filename]
+                self.assertIsNotNone(jdb)
+                jdb.remove_fast(jdb)
+                self.assertEqual(len(jdb), 0)
+                if jdb.n_lines > 0:
+                    jdb.recycle(level=4, merge=False, verbose=False)
+                    if jdb.n_lines == 0:
+                        self.assertFalse(jdb.file_table)
+                        self.assertTrue(jdb.n_lines == jdb.n_records == 0)
 
-            print(Style(f'Down {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}%', blue=1))
+                print(Style(f'Down {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}%', blue=1))
 
-        for server in (self.server1, self.server2):
-            if not server: continue
-            server.shutdown()
-            server.server_close()
+        finally:
+            for server in (self.server1, self.server2):
+                if not server: continue
+                server.shutdown()
+                server.server_close()
 
     def test_import(self):
         ini_data = """
@@ -343,7 +345,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             used_s = time.perf_counter() - st_time
@@ -465,6 +466,18 @@ class TestJDb(unittest.TestCase):
 
             res = jdb.find(date={'$nin': {prev_date3, prev_date1}})
             self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            res2 = jdb.find(date={'$nin': (dt_2005.date(), dt_2015.date())})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(date=re.compile(r'20[01]0-'))
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(date={'$re2': r'20\d0-'})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(date={'$re': [r'20\d[0-4]', r'20\d[6-9]']})
+            self.assertEqual(res, res2)
 
             res2 = jdb.find(date={'$not': {'$in': {prev_date3, prev_date1}}})
             self.assertEqual(res, res2)
@@ -635,6 +648,13 @@ class TestJDb(unittest.TestCase):
 
             res2 = jdb.find(vals={'tags': {'$any': 'python'}})
             self.assertEqual(res, res2)
+
+            res = jdb.find(vals={'tags': {'$in': ['python', 'database']}})
+            self.assertNotEqual(res, res2)
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(vals={'tags': {'$nin': ['python', 'database']}})
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
 
             res = jdb.find(ANY={'$has': 'python'})
             self.assertEqual(set(res), {'user_1', 'user_3'})
@@ -995,7 +1015,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jmem.recycle(level=2)
@@ -1143,7 +1162,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -2204,7 +2222,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -2335,7 +2352,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
             # --------------------------------------------
             if last_jdb is not None:
@@ -2472,7 +2488,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -2715,7 +2730,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -2960,7 +2974,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -3109,7 +3122,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             if not filename.endswith('.jdb'): continue
@@ -3118,8 +3130,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             _ref = jdb.restore('bak_j')
@@ -3127,8 +3137,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             _ref = jdb.restore('bak_m')
@@ -3136,8 +3144,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             _ref = jdb.restore('bak_x')
@@ -3145,8 +3151,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             j_jdb.clone_to(jdb, zip_type='br', data_type='J+J', min_value_size=1)
@@ -3267,7 +3271,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
             jdb['key2'] = _val = '2' * (min_value_size // 2)
             self.assertEqual(jdb.n_lines, 2)
@@ -3278,7 +3281,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             info = jdb.keys['key1']
@@ -3292,7 +3294,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = 'y' * (min_value_size - 3)
@@ -3304,7 +3305,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = 'z' * (min_value_size * 2)
@@ -3313,7 +3313,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table) # {0: 33} != {}
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key3'] = _val = '3' * (min_value_size * 2)
@@ -3324,7 +3323,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key2'] = _val = '2' * (min_value_size * 2)
@@ -3333,7 +3331,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key2'] = _val = '2' * (min_value_size)
@@ -3342,7 +3339,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key1'] = _val = '1' * (min_value_size)
@@ -3351,7 +3347,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key4'] = _val = '4' * (min_value_size // 2)
@@ -3360,7 +3355,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key5'] = _val = '5' * (min_value_size // 2)
@@ -3369,7 +3363,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key6'] = '6' * (min_value_size // 2)
@@ -3377,7 +3370,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key7'] = '7' * (min_value_size // 2)
@@ -3385,7 +3377,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             del jdb['key2']
@@ -3393,7 +3384,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             del jdb['key6']
@@ -3401,7 +3391,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb['key8'] = 'v'+'8' * (min_value_size * 4)
@@ -3452,7 +3441,6 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb[''] = None
@@ -3505,7 +3493,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size // 2))
@@ -3517,7 +3504,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'x' * (min_value_size // 2))
@@ -3529,7 +3515,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'y' * (min_value_size - 3))
@@ -3541,7 +3526,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', 'z' * (min_value_size * 2))
@@ -3550,7 +3534,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key3', '3' * (min_value_size * 2))
@@ -3559,7 +3542,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size * 2))
@@ -3568,7 +3550,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key2', '2' * (min_value_size))
@@ -3577,7 +3558,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key1', '1' * (min_value_size))
@@ -3586,7 +3566,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key4', '4' * (min_value_size // 2))
@@ -3595,7 +3574,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key5', '5' * (min_value_size // 2))
@@ -3604,7 +3582,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key6', '6' * (min_value_size // 2))
@@ -3613,7 +3590,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key7', '7' * (min_value_size // 2))
@@ -3622,7 +3598,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.remove('key2')
@@ -3631,7 +3606,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.remove('key6')
@@ -3640,7 +3614,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key8', '8' * (min_value_size * 4))
@@ -3649,7 +3622,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             jdb.update('key9', '9' * (min_value_size // 2))
@@ -3658,7 +3630,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             keys,_files = jdb.load_table()
@@ -3671,7 +3642,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             self.assertEqual(jdb.index_size, index_size)
@@ -3683,7 +3653,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -3797,7 +3766,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             with jdb.open(read_only=True) as fp:
@@ -3905,7 +3873,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4117,7 +4084,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4215,7 +4181,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4350,7 +4315,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[::3], jdb1.keys[::3])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4394,12 +4358,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             file_table = jdb.file_table
             for file_id in file_table:
                 self.assertTrue(jdb.files_obj.VAL_exist(file_id))
+                self.assertGreaterEqual(jdb.files_obj.VAL_size(file_id), 0)
 
             jdb.clear()
             self.assertEqual(jdb, expect)
@@ -4412,11 +4376,11 @@ class TestJDb(unittest.TestCase):
 
             for file_id in file_table:
                 self.assertFalse(jdb.files_obj.VAL_exist(file_id))
+                self.assertGreaterEqual(jdb.files_obj.VAL_size(file_id), 0)
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             used_s = time.perf_counter() - st_time
@@ -4503,7 +4467,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4588,7 +4551,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             used_s = time.perf_counter() - st_time
@@ -4687,7 +4649,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4749,7 +4710,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -4780,8 +4740,8 @@ class TestJDb(unittest.TestCase):
 
             jdbl = JDbReader(jdb.files_obj)
             self.assertTrue(isinstance(jdbl, JDbReader))
-            self.assertEqual(len(jdbl), len(jdb))
-            self.assertEqual(jdbl.get_n(), jdb.get_all())
+            self.assertEqual(len(jdbl), test_size)
+            self.assertEqual(jdbl.get_n(), expect)
             self.assertTrue(jdbl.is_latest())
             self.assertEqual(jdbl.sync_id, jdb.sync_id)
 
@@ -4829,16 +4789,16 @@ class TestJDb(unittest.TestCase):
             expect2 = {f'aa{i}' : i+456 for i in range(test_size)}
             chg = jdb.update(expect2)
             self.assertEqual(chg, expect2)
+            expect3 = jdb.get_all()
 
             self.assertFalse(jdbl.is_latest())
             self.assertNotEqual(jdbl.sync_id, jdb.sync_id)
-            self.assertEqual(jdbl.get_n(), jdb.get_all())
+            self.assertEqual(jdbl.get_n(), expect3)
             self.assertTrue(jdbl.is_latest())
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -5043,7 +5003,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -5539,7 +5498,7 @@ class TestJDb(unittest.TestCase):
             if jdb.n_lines != jdb2.n_lines:
                 self.assertEqual(jdb['kk3'], jdb2['kk3'])
                 self.assertEqual(jdb.key_table, jdb2.key_table)
-                self.assertEqual(jdb.file_table, jdb2.file_table)
+                self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             info = jdb.keys['kk3']
             self.assertNotEqual(info[-1], ref_days)
@@ -5723,7 +5682,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -5781,7 +5739,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb1.file_table)
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
             error = jdb.check_error()
@@ -5864,7 +5821,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.revert(['A', 'E'])
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A=1] chg N
@@ -5874,7 +5831,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['A'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5883,7 +5840,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['B'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5892,7 +5849,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['C'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A=2] chg N
@@ -5901,7 +5858,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['A'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5911,7 +5868,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['B'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5921,7 +5878,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['C'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A=3] del N + add N (ADD == DEL)
@@ -5932,7 +5889,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5942,7 +5899,7 @@ class TestJDb(unittest.TestCase):
                 jmem.insert(['E', 'F'], val0)
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5953,7 +5910,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('G', 'H')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5962,7 +5919,7 @@ class TestJDb(unittest.TestCase):
                 jmem.insert(['E', 'F'], val0)
                 jmem.remove('E', 'F')
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5972,7 +5929,7 @@ class TestJDb(unittest.TestCase):
                 jmem.insert({'D':val1, 'E':val0})
                 jmem.remove('D', 'E')
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A-1] del N (N > 0)
@@ -5982,7 +5939,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('C')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -5991,7 +5948,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B', 'C')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A-2] del N + add M (DEL > ADD)
@@ -6002,7 +5959,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6012,7 +5969,7 @@ class TestJDb(unittest.TestCase):
                 jmem['B'] = val1
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6023,7 +5980,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6034,7 +5991,7 @@ class TestJDb(unittest.TestCase):
                 jmem.insert(['C', 'D'], val1)
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6045,7 +6002,7 @@ class TestJDb(unittest.TestCase):
                 jmem['C'] = val1
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6059,7 +6016,7 @@ class TestJDb(unittest.TestCase):
                 jmem['C'] = val1_1
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6070,7 +6027,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove(['B', 'C', 'D'])
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6081,7 +6038,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove(['C', 'D'])
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6095,7 +6052,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('C', 'D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A-3] add N + del M (DEL > ADD)
@@ -6106,7 +6063,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('C', 'D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6116,7 +6073,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('D', 'E', 'F')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A+1] add N
@@ -6126,7 +6083,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6136,7 +6093,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val1
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6146,7 +6103,7 @@ class TestJDb(unittest.TestCase):
                 jmem['E'] = val1
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6156,7 +6113,7 @@ class TestJDb(unittest.TestCase):
                 jmem['E'] = val1_0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A+2] add N + chg M
@@ -6166,7 +6123,7 @@ class TestJDb(unittest.TestCase):
                 jmem.update({'A':val0, 'X':val1})
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6176,7 +6133,7 @@ class TestJDb(unittest.TestCase):
                 jmem.update({'A':val0, 'X':val1_0})
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6185,7 +6142,7 @@ class TestJDb(unittest.TestCase):
                 jmem.update({'A':val0, 'B':val0, 'X':val1_0, 'Y':val1_0})
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [A+3] add N + del M  or del M + add N (ADD > DEL)
@@ -6196,7 +6153,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6207,7 +6164,7 @@ class TestJDb(unittest.TestCase):
                 jmem.insert(['C', 'D'], val0)
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6218,7 +6175,7 @@ class TestJDb(unittest.TestCase):
                 jmem['X'] = val0
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6229,7 +6186,7 @@ class TestJDb(unittest.TestCase):
                 jmem.replace(['A', 'B'], val0)
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6242,7 +6199,7 @@ class TestJDb(unittest.TestCase):
                     jmem.f_delete(fp, 'X')
                 jmem['B'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [B1-2]
@@ -6252,7 +6209,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('A')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6261,7 +6218,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6270,7 +6227,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B', 'D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6280,7 +6237,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B', 'D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6290,7 +6247,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('B', 'C')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6299,7 +6256,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('A', 'B', 'C', 'D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [B1=0]
@@ -6308,7 +6265,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['C'] = val1_0
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6316,7 +6273,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['C', 'E'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6324,7 +6281,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['C', 'E', 'A'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6332,7 +6289,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['E','A'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6340,7 +6297,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['A', 'E'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6349,7 +6306,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem['B'] = val1_0
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6357,7 +6314,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['A', 'B', 'C'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6366,7 +6323,7 @@ class TestJDb(unittest.TestCase):
                 jmem1 = JDb(jmem).sync()
                 jmem.update(['A', 'B', 'C'], val1_0)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [B2-0] chg N + del M (DEL > ADD)
@@ -6377,7 +6334,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('C')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6387,7 +6344,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('C')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6397,7 +6354,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('D')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6407,7 +6364,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove('A')
                 self.assertNotEqual(jmem.key_table, jmem1.key_table)
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # [B2=0] ADD == DEL
@@ -6417,7 +6374,7 @@ class TestJDb(unittest.TestCase):
                 jmem.update({'A':val1_0, 'E':val1_1})
                 jmem['E'] = val1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 jmem = JDb(data_type=data_type, zip_type=zip_type, key_limit=key_limit)
@@ -6427,7 +6384,7 @@ class TestJDb(unittest.TestCase):
                 jmem['D'] = val1_1
                 jmem['B'] = val1_1
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 # --
@@ -6441,7 +6398,7 @@ class TestJDb(unittest.TestCase):
                 jmem.remove(list(range(1,32,2)))         # DEL
                 jmem.revert(list(range(32)))             # ADD + CHG
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 #--
@@ -6461,7 +6418,7 @@ class TestJDb(unittest.TestCase):
                     jmem1.f_undelete(fp, 'E')
 
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
                 error = jmem.check_error()
@@ -6481,7 +6438,7 @@ class TestJDb(unittest.TestCase):
 
                 jmem.revert('E')
                 self.assertEqual(jmem, jmem1)
-                self.assertEqual(jmem.file_table, jmem1.file_table)
+                self.assertEqual(jmem.sync_id, jmem1.sync_id)
                 self.assertEqual(jmem.key_table, jmem1.key_table)
 
             #------------------------------
@@ -6655,7 +6612,6 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem, jmem1)
                 self.assertEqual(jmem.get_all(), jmem1.get_all())
                 self.assertEqual(jmem.keys[:], jmem1.keys[:])
-                self.assertEqual(jmem.file_table, jmem1.file_table)
                 self.assertEqual(jmem.sync_id, jmem1.sync_id)
 
             ret = jdb.remove_fast(jdb)
@@ -7170,7 +7126,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb0)
             self.assertEqual(jdb.keys[:], jdb0.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb0.keys[0.:])
-            self.assertEqual(jdb.file_table, jdb0.file_table)
             self.assertEqual(jdb.sync_id, jdb0.sync_id)
 
             jdb.insert('A', '999')
@@ -7218,8 +7173,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(dict(jdb.key_table), dict(jdb1.key_table))
             self.assertEqual(dict(jdb.key_table), dict(jdb2.key_table))
             self.assertEqual(dict(jdb1.key_table), dict(jdb2.key_table))
-            self.assertEqual(jdb.file_table, jdb1.file_table)
-            self.assertEqual(jdb.file_table, jdb2.file_table)
+            self.assertEqual(jdb.sync_id, jdb1.sync_id)
+            self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             jdb['C'] = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' * min_value_size * 2
             del jdb['C']
@@ -7229,8 +7184,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(dict(jdb.key_table), dict(jdb1.key_table))
             self.assertEqual(dict(jdb.key_table), dict(jdb2.key_table))
             self.assertEqual(dict(jdb1.key_table), dict(jdb2.key_table))
-            self.assertEqual(jdb.file_table, jdb1.file_table)
-            self.assertEqual(jdb.file_table, jdb2.file_table)
+            self.assertEqual(jdb.sync_id, jdb1.sync_id)
+            self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             id_list = []
             for i in range(32):
@@ -7591,7 +7546,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(set(_jdb.key_table), set(expect))
                 self.assertEqual(jdb, _jdb)
                 self.assertEqual(jdb.get_all(), _jdb.get_all())
-                self.assertEqual(jdb.file_table, _jdb.file_table)
+                self.assertEqual(jdb.sync_id, _jdb.sync_id)
                 self.assertEqual(jdb.key_table, _jdb.key_table)
 
             steps = [(ii,random.randint(1,8),random.randint(0,len(jdb_list)-1),random.randint(0,6),random.randint(1, 32),random.randint(0,99)) for ii in range(step_size)]
@@ -7628,7 +7583,6 @@ class TestJDb(unittest.TestCase):
                     #     with jdb.open():
                     #         with _jdb.open():
                     #             # safe to check key_table/file_table in multi-thread
-                    #             self.assertEqual(jdb.file_table, _jdb.file_table)
                     #             self.assertEqual(jdb.key_table, _jdb.key_table)
 
             for th in th_list:
@@ -7647,7 +7601,7 @@ class TestJDb(unittest.TestCase):
                 self.assertTrue(not error)
                 self.assertEqual(jdb, _jdb)
                 self.assertEqual(jdb.get_all(), _jdb.get_all())
-                self.assertEqual(jdb.file_table, _jdb.file_table)
+                self.assertEqual(jdb.sync_id, _jdb.sync_id)
                 self.assertEqual(jdb.key_table, _jdb.key_table)
 
             jmem.unsync(with_child=True)

@@ -15,7 +15,7 @@ from typing import Any, Union, Optional, Tuple, Set, Dict, Callable, Generator, 
 from .jdb_io import JIo, json_dumps, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles, ThreadedTCPServer, ServerHandler
-from .utils import FileLock, Style
+from .utils import FileLock, Style, JError, JKeyError, JValueError, JTypeError
 # from .utils import debug_break
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
             rules = {'$re': rules}
         elif callable(rules):
             rules = {'$func': rules}
-        elif isinstance(rules, (list, set, tuple, frozenset)):
+        elif isinstance(rules, (list, set, frozenset, tuple, range)):
             rules = {'$in': {str(_key) for _key in rules}}
         elif isinstance(rules, (int, float, bool, bytes, dt_date, datetime)):
             rules = {'$eq': str(rules)}
@@ -233,7 +233,7 @@ def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                         is_matched = True
 
                     elif isinstance(_rule, str):
-                        if not re_search(rule, key_s):
+                        if not re_search(_rule, key_s):
                             return False
 
                         is_matched = True
@@ -375,7 +375,7 @@ def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bo
             rules = {'$func': rules}
         elif isinstance(rules, (set, list, tuple)):
             rules = {'$in': rules}
-        elif isinstance(rules, frozenset):
+        elif isinstance(rules, (frozenset, range)):
             rules = {'$in': set(rules)}
         elif isinstance(rules, str):
             matches = re_findall(r'(?<!\d)(\d{1,4})\W([01]?\d)\W([0123]?\d)(?!\d)', rules)
@@ -442,7 +442,7 @@ def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bo
                         is_matched = True
 
                     elif isinstance(_rule, str):
-                        if not re_search(rule, date_s):
+                        if not re_search(_rule, date_s):
                             return False
 
                         is_matched = True
@@ -657,16 +657,16 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
             elif cmd == '$in':
                 if hasattr(rule, '__contains__'):
                     try:
-                        if val.__hash__ and not isinstance(val, tuple):
+                        if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
                             if val not in rule:
                                 return False
                             continue
 
                         if val.__iter__:
-                            for kk in val:
-                                if kk not in rule:
-                                    return False
-                            continue
+                            _set_a = set(rule) if not isinstance(rule, (set, frozenset)) else rule
+                            _set_b = set(val) if not isinstance(val, (set, frozenset)) else val
+                            if _set_a.intersection(_set_b) == _set_a:
+                                continue
 
                     except TypeError: # pragma: no cover
                         return False
@@ -674,16 +674,16 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
             elif cmd == '$nin':
                 if hasattr(rule, '__contains__'):
                     try:
-                        if val.__hash__ and not isinstance(val, tuple):
+                        if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
                             if val in rule:
                                 return False
                             continue
 
                         if val.__iter__:
-                            for kk in val:
-                                if kk in rule:
-                                    return False
-                            continue
+                            _set_a = set(rule) if not isinstance(rule, (set, frozenset)) else rule
+                            _set_b = set(val) if not isinstance(val, (set, frozenset)) else val
+                            if _set_a - _set_b:
+                                continue
 
                     except TypeError: # pragma: no cover
                         return False
@@ -811,7 +811,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
                     if not _match_VAL_rules(key, val, rule, level=level+1):
                         is_matched = False
 
-                elif isinstance(val, (list, tuple, set, frozenset)):
+                elif isinstance(val, (list, set, frozenset, tuple, range)):
                     if not any(_match_VAL_rules(key, _val, rule, ANY=True, level=level+1) for _val in val):
                         is_matched = False
 
@@ -2297,7 +2297,7 @@ class JDbReader:
             key = slice(key, key+timedelta(days=1)) # modified date
 
         if not isinstance(key, slice):
-            raise TypeError
+            raise JTypeError
 
         io = self.io
         n_records = io.n_records
@@ -2330,10 +2330,10 @@ class JDbReader:
 
                 _step = 1
             else:
-                raise TypeError(key)
+                raise JTypeError(key)
 
             if _step == 0:
-                raise ValueError('step must not be zero')
+                raise JValueError('step must not be zero')
 
         if _start is None:
             _start = 0
@@ -2360,7 +2360,7 @@ class JDbReader:
                 min_days = _start
 
             else:
-                raise TypeError(key)
+                raise JTypeError(key)
 
         if _stop is None:
             if _step is None or _step > 0:
@@ -2388,7 +2388,7 @@ class JDbReader:
                 max_days = _stop
 
             else:
-                raise TypeError(key)
+                raise JTypeError(key)
 
         if chk_ver:
             _start = 0
@@ -2606,6 +2606,7 @@ class JDbReader:
                         if io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
                                 sync_id = io.sync_id
+                                fsize = io.file_size
                                 self.safe_line = io.n_records
                                 if chg_keys: chg_keys.clear()
                                 yield fp_dict
@@ -2643,6 +2644,22 @@ class JDbReader:
                 if chg_keys: chg_keys.clear()
                 yield fp_dict
 
+            except JKeyError as e: # pragma: no cover
+                if not no_raise:
+                    raise KeyError from e
+
+            except JValueError as e: # pragma: no cover
+                if not no_raise:
+                    raise ValueError from e
+
+            except JTypeError as e: # pragma: no cover
+                if not no_raise:
+                    raise TypeError from e
+
+            except JError as e: # pragma: no cover
+                if not no_raise:
+                    raise RuntimeError from e
+
             except Exception as e:
                 is_error = True
                 io = self.io
@@ -2676,6 +2693,7 @@ class JDbReader:
                     io, key_fp = self._init_KEY()
                     fp_dict[-1] = key_fp
                     sync_id = io.sync_id
+                    fsize = io.file_size
                     if chg_keys: chg_keys.clear()
                     self.safe_line = io.n_records
                     yield fp_dict
@@ -2951,14 +2969,11 @@ class JDbReader:
             if value < 0:
                 self._cache_limit = -1
             elif value > 0:
-                if value < old_value:
+                if value < old_value: # pragma: no cover
                     self._cache.clear()
-
                 self._cache_limit = value
             else:  #value == 0
-                if self._cache:
-                    self._cache.clear()
-
+                self._cache.clear()
                 self._cache_limit = value
 
     def len_(self) -> int:
@@ -4619,7 +4634,7 @@ class JDbReader:
         io = self.io
         row = io.key_table[key]
         if not io.n_records > row >= 0: # pragma: no cover
-            raise KeyError(key)
+            raise JKeyError(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _days = io.read_key(key_fp, row)
@@ -4674,7 +4689,7 @@ class JDbReader:
                 if default_val is not None:
                     return default_val
 
-                raise KeyError(key)
+                raise JKeyError(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         if row >= io.n_records: # pragma: no cover
@@ -4682,7 +4697,7 @@ class JDbReader:
             if default_val is not None:
                 return default_val
 
-            raise KeyError(key)
+            raise JKeyError(key)
 
         _key, file_id, offset, row_size, val_size, _ver, _days = io.read_key(key_fp, row)
         if key != _key:
@@ -4747,7 +4762,7 @@ class JDbReader:
         elif isinstance(pattern, str):
             pattern = re_compile(pattern, **kwargs)
         else:
-            raise TypeError(pattern)
+            raise JTypeError(pattern)
 
         io, fp_dict, _key_fp = self.f_get_fp(fp_dict)
         matches = set()

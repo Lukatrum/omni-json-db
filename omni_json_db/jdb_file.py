@@ -520,6 +520,8 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def VAL_exist(self, file_id:int=0) -> bool: ...
     @abstractmethod
+    def VAL_size(self, file_id:int=0) -> int: ...
+    @abstractmethod
     def KEY_open(self, mode:str='rb', buffering:int=-1, **kwargs) -> IO: ...
     @abstractmethod
     def KEY_size(self) -> int: ...
@@ -723,6 +725,18 @@ class JMemFiles(JFilesBase):
         """
         buffer = self.VAL_table.get(file_id, None)
         return buffer is not None
+
+    def VAL_size(self, file_id:int=0) -> int:
+        """Calculate the VAL file size
+
+        Args:
+            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+        
+        Returns:
+            int: +ve = file size in byte, -ve = not exist
+        """
+        buffer = self.VAL_table.get(file_id, None)
+        return -1 if buffer is None else len(buffer)
 
     def KEY_open(self, mode:str='rb', buffering:int=-1, **kwargs) -> IO:
         """Open raw stream tracking descriptors mapping transient core index allocations.
@@ -1014,6 +1028,22 @@ class JDiskFiles(JFilesBase):
         """
         path = self.VAL_file.format(file_id=file_id)
         return path_exists(path)
+
+    def VAL_size(self, file_id:int=0) -> int:
+        """Calculate the VAL file size
+
+        Args:
+            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+
+        Returns:
+            int: +ve = file size in byte, -ve = not exist
+        """
+        path = self.VAL_file.format(file_id=file_id)
+        if path_exists(path):
+            file_stat = os_stat(path)
+            return int(file_stat.st_size)
+
+        return -1
 
     def KEY_open(self, mode:str='rb', buffering:int=-1, encoding:Optional[str]=None, **kwargs) -> IO:
         """Acquire persistent transactional stream pointers connected straight onto the core master index database keys sheets files records.

@@ -8,9 +8,14 @@ exclude_lines =
     raise AttributeError.*
     raise TypeError.*
     raise ValueError.*
+    raise KeyError.*
     raise RuntimeError.*
     raise IOError.*
     raise BlockingIOError.*
+    raise ModuleNotFoundError.*
+    raise JTypeError.*
+    raise JValueError.*
+    raise JKeyError.*
     except FileNotFoundError.*
     excpet FileLockException.*
     except.*ImportError.*

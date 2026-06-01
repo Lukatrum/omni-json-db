@@ -13,6 +13,19 @@ try:
 
 except ImportError:
     debug_break = breakpoint
+
+class JError(Exception):
+    pass
+
+class JKeyError(JError, KeyError):
+    pass
+
+class JValueError(JError, ValueError):
+    pass
+
+class JTypeError(JError, TypeError):
+    pass
+
 #-----------------------------------------------------------------------------
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):
     """Format and apply ANSI terminal styling codes onto text strings for decorative command-line outputs.

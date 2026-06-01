@@ -12,14 +12,18 @@ from marshal import loads as marshal_loads, dumps as marshal_dumps
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
 try:
-    from gzip import compress as gzip_compress, decompress as gzip_decompress, BadGzipFile as GZ_Error
+    from gzip import compress as _gzip_compress, decompress as gzip_decompress, BadGzipFile as GZ_Error
 
 except ImportError:
-    from gzip import compress as gzip_compress, decompress as gzip_decompress
+    from gzip import compress as _gzip_compress, decompress as gzip_decompress
     GZ_Error = OSError
 
+gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from bitarray import bitarray
+
+from .utils import Style, JTypeError
+#from .utils import debug_break
 
 try:
     import yaml
@@ -62,7 +66,7 @@ def _json_default(obj):
         chk_code = reduce(lambda x,y: (x+y) & 0xff, obj)
         return '\0\1\0\1'+obj.hex()+bytearray([(256-chk_code) & 0xff]).hex()
 
-    raise TypeError(f"Unknown type: {type(obj)}")
+    raise JTypeError(f"Unknown type: {type(obj)}")
 
 try:
     from orjson import loads as _json_loads, dumps as _json_dumps, JSONDecodeError
@@ -143,7 +147,7 @@ def _msg_decode(code:int, data:bytes):
     if code == 123:
         return marshal_loads(data)
 
-    raise TypeError(f'code={code} data={data}')
+    raise JTypeError(f'code={code} data={data}')
 
 msg_dumps = lambda obj : _msg_dumps(obj, default=_msg_encode)
 msg_loads = lambda _bytes : _msg_loads(_bytes, ext_hook=_msg_decode, strict_map_key=False)
@@ -172,8 +176,6 @@ from .jdb_file import JFilesBase
 
 BZ_Error = OSError
 LZ_Error = RuntimeError
-from .utils import Style
-#from .utils import debug_break
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -381,7 +383,8 @@ class PartialKeyTable(KeyTable):
 
     Postpones loading full keys sets from physical devices disks by maintaining localized bloom filter configurations trackers.
     """
-    __slots__ = {'cache', 'io', 'flags', 'is_dirty', 'files_obj'}
+    # __slots__ = {'cache', 'io', 'flags', 'is_dirty', 'files_obj'}
+    __slots__ = {'cache', 'io', 'files_obj'}
 
     def __init__(self, jio:JIo):
         """Initialize partial tracking layers parsing data indices boundaries criteria metrics models.
@@ -392,9 +395,9 @@ class PartialKeyTable(KeyTable):
         self.cache = DictKeyTable()
         self.io = jio
         self.files_obj = jio.files_obj.copy()
-        self.is_dirty = False
-        self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
-        self.flags.setall(0)
+        # self.is_dirty = False
+        # self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
+        # self.flags.setall(0)
 
     def cache_cleanup(self) -> None:
         """Clear memory cache frameworks structures to prevent runtime drift."""
@@ -414,7 +417,8 @@ class PartialKeyTable(KeyTable):
         Returns:
             str: Presentation text log summary details parameters strings.
         """
-        return f'<{type(self).__name__} {"D" if self.is_dirty else "F"} cache:{len(self.cache)} {self.flags.count(1)*100./len(self.flags):.2f}% at {hex(id(self))}>'
+        # return f'<{type(self).__name__} {"D" if self.is_dirty else "F"} cache:{len(self.cache)} {self.flags.count(1)*100./len(self.flags):.2f}% at {hex(id(self))}>'
+        return f'<{type(self).__name__} cache:{len(self.cache)} at {hex(id(self))}>'
 
     def set(self, key:str, row_id:int) -> None:
         """Log key coordinates properties configurations fields matching localized index pools blocks frameworks.
@@ -428,9 +432,9 @@ class PartialKeyTable(KeyTable):
         if jio.n_records <= 0:
             self.clear()
 
-        self.is_dirty = self.is_dirty or row_id+1 >= jio.n_records
-        _hash_id = xhash(key)
-        self.flags[_hash_id & DEF_FLAG_MASK] = 1
+        # self.is_dirty = self.is_dirty or row_id+1 >= jio.n_records
+        # _hash_id = xhash(key)
+        # self.flags[_hash_id & DEF_FLAG_MASK] = 1
         if key in cache:
             cache.pop(key, None)
             cache[key] = row_id
@@ -459,11 +463,11 @@ class PartialKeyTable(KeyTable):
             self.clear()
             return default_row_id
 
-        _hash_id = xhash(key)
-        is_dirty = self.is_dirty
-        if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]: # pragma: no cover
-            self.cache.pop(key, None)
-            return default_row_id
+        # _hash_id = xhash(key)
+        # is_dirty = self.is_dirty
+        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]: # pragma: no cover
+        #     self.cache.pop(key, None)
+        #     return default_row_id
 
         cache = self.cache
         if key in cache:
@@ -476,13 +480,13 @@ class PartialKeyTable(KeyTable):
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(_key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(_key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key == key:
-                    self.is_dirty = is_dirty or row_id+1 >= jio.n_records
+                    # self.is_dirty = is_dirty or row_id+1 >= jio.n_records
                     return row_id
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -505,10 +509,10 @@ class PartialKeyTable(KeyTable):
             self.clear()
             return default_row_id
 
-        _hash_id = xhash(key)
-        is_dirty = self.is_dirty
-        if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
-            return default_row_id
+        # _hash_id = xhash(key)
+        # is_dirty = self.is_dirty
+        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
+        #     return default_row_id
 
         cache = self.cache
         row_id = cache[key]
@@ -523,8 +527,8 @@ class PartialKeyTable(KeyTable):
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(_key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(_key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key != key:
                     continue
 
@@ -534,10 +538,10 @@ class PartialKeyTable(KeyTable):
                     cache.pop(old_key, None)
 
                 cache[key] = row_id
-                self.is_dirty = is_dirty or row_id+1 >= jio.n_records
+                # self.is_dirty = is_dirty or row_id+1 >= jio.n_records
                 return row_id
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -559,16 +563,16 @@ class PartialKeyTable(KeyTable):
         fp = None
         try:
             jio = self.io
-            is_dirty = self.is_dirty
+            # is_dirty = self.is_dirty
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key, row_id
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -601,16 +605,16 @@ class PartialKeyTable(KeyTable):
         fp = None
         try:
             jio = self.io
-            is_dirty = self.is_dirty
+            # is_dirty = self.is_dirty
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for _ in range(jio.n_records):
                 key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -624,8 +628,9 @@ class PartialKeyTable(KeyTable):
         """
         obj = PartialKeyTable(self.io)
         if len(self) > 0:
-            obj.flags.clear()
-            obj.flags.frombytes(self.flags.tobytes())
+            pass
+        #     obj.flags.clear()
+        #     obj.flags.frombytes(self.flags.tobytes())
         else: # pragma: no cover
             self.clear()
 
@@ -633,10 +638,11 @@ class PartialKeyTable(KeyTable):
 
     def clear(self):
         """Purge memory configurations reset trackers parameters indicators initializing bloom filters blocks matrices maps grids back onto zero fields."""
-        if self.is_dirty or self.cache:
-            self.flags.setall(0)
+        # if self.is_dirty or self.cache:
+        if self.cache:
+            # self.flags.setall(0)
             self.cache.clear()
-            self.is_dirty = False
+            # self.is_dirty = False
 
     def __len__(self) -> int:
         """Calculate total registered data rows records numbers.
@@ -661,10 +667,10 @@ class PartialKeyTable(KeyTable):
             self.clear()
             return False
 
-        _hash_id = xhash(key)
-        is_dirty = self.is_dirty
-        if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
-            return False
+        # _hash_id = xhash(key)
+        # is_dirty = self.is_dirty
+        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
+        #     return False
 
         cache = self.cache
         if key in cache:
@@ -675,15 +681,15 @@ class PartialKeyTable(KeyTable):
             jio = self.io
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
+            for _row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(_key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(_key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 if _key == key:
-                    self.is_dirty = is_dirty or row_id+1 >= jio.n_records
+                    # self.is_dirty = is_dirty or _row_id+1 >= jio.n_records
                     return True
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -700,16 +706,16 @@ class PartialKeyTable(KeyTable):
         fp = None
         try:
             jio = self.io
-            is_dirty = self.is_dirty
+            # is_dirty = self.is_dirty
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for _ in range(jio.n_records):
                 key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                _hash_id = xhash(key)
-                self.flags[_hash_id & DEF_FLAG_MASK] = 1
+                # _hash_id = xhash(key)
+                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
                 yield key
 
-            self.is_dirty = is_dirty or jio.n_records > 0
+            # self.is_dirty = is_dirty or jio.n_records > 0
 
         finally:
             if fp is not None:
@@ -733,7 +739,7 @@ class PartialKeyTable(KeyTable):
             if val != obj.get(key, -1):
                 return False
 
-        self.is_dirty = self.is_dirty or self.io.n_records > 0
+        # self.is_dirty = self.is_dirty or self.io.n_records > 0
         return True
 
 #-----------------------------------------------------------------------------
@@ -836,26 +842,16 @@ class LiteKeyTable(KeyTable):
             val_idx_e = val_idx + val_len
             if val_len > 0 and val_idx_e <= n_bytes:
                 if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    if val_type <= 0x7f:
-                        row = val_type
+                    _row_id = val_type if val_type <= 0x7f else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
+                        val_type - 256 if val_type >= 0xe0 else -1
 
-                    else: # pragma: no cover
-                        if 0xcf >= val_type >= 0xcc:
-                            row = int.from_bytes(key_array[val_idx+1:val_idx_e], 'big')
+                    if _row_id >= 0:
+                        if _row_id != row_id:
+                            key_array[idx:val_idx_e] = search_prefix + (_msg_dumps(row_id) or b'')
 
-                        elif 0xd3 >= val_type >= 0xd0:
-                            row =  int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True)
-
-                        elif val_type >= 0xe0:
-                            row = val_type - 256
-
-                        else:
-                            row = -1
-
-                    if row != row_id:
-                        key_array[idx:val_idx_e] = search_prefix + (_msg_dumps(row_id) or b'')
-
-                    return
+                        return
 
             idx = key_array.find(search_prefix, idx+1)
 
@@ -907,25 +903,15 @@ class LiteKeyTable(KeyTable):
             val_idx_e = val_idx + val_len
             if val_len > 0 and val_idx_e <= n_bytes:
                 if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    if val_type <= 0x7f:
-                        row_id = val_type
+                    row_id = val_type if val_type <= 0x7f else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
+                        val_type - 256 if val_type >= 0xe0 else -1
 
-                    else: # pragma: no cover
-                        if 0xcf >= val_type >= 0xcc:
-                            row_id = int.from_bytes(key_array[val_idx+1:val_idx_e], 'big')
-
-                        elif 0xd3 >= val_type >= 0xd0:
-                            row_id =  int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True)
-
-                        elif val_type >= 0xe0:
-                            row_id = val_type - 256
-
-                        else:
-                            return default_row_id
-
-                    del key_array[idx:val_idx_e]
-                    self.size -= 1
-                    return row_id
+                    if row_id >= 0:
+                        del key_array[idx:val_idx_e]
+                        self.size -= 1
+                        return row_id
 
             idx = key_array.find(search_prefix, idx+1)
 
@@ -974,17 +960,13 @@ class LiteKeyTable(KeyTable):
             val_idx_e = val_idx + val_len
             if val_len > 0 and val_idx_e <= n_bytes:
                 if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    if val_type <= 0x7f:
-                        return val_type
+                    row_id = val_type if val_type <= 0x7f else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
+                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
+                        val_type - 256 if val_type >= 0xe0 else -1
 
-                    elif 0xcf >= val_type >= 0xcc:
-                        return int.from_bytes(key_array[val_idx+1:val_idx_e], 'big')
-
-                    elif 0xd3 >= val_type >= 0xd0:
-                        return int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True)
-
-                    elif val_type >= 0xe0:
-                        return val_type - 256
+                    if row_id >= 0:
+                        return row_id
 
             idx = key_array.find(search_prefix, idx+1)
 
@@ -1400,7 +1382,7 @@ class JIoKEY_M(JIoKEY):
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         args = marshal_loads(data)
-        if len(args) != 6:
+        if len(args) != 6: # pragma: no cover
             args.append(0)
 
         key, file_id, offset, row_size, ver, days = args[:6]
@@ -2861,6 +2843,16 @@ class JIo:
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!loads_with_unzip(val_bytes[{len(val_bytes)}]={val_bytes[-512:]}, zip_type={zip_type})\nexception:{e}', red=1))
             raise ValueError from e
 
+    def _update_file_table(self):
+        file_table = self.file_table
+        VAL_size = self.files_obj.VAL_size
+        file_id = 0
+        file_table.clear()
+        for file_id in range(max(self.n_lines, 1)):
+            size = VAL_size(file_id)
+            if size < 0: break
+            file_table[file_id] = size
+
     def load_keys(self, fp:IO, force:bool=False):
         """Synchronize master index tracking datasets maps parsing chronological database operations logs systematically.
 
@@ -2971,19 +2963,22 @@ class JIo:
                         for key in del_keys:
                             key_table.pop(key, 0)
 
-                read_key = self.read_key
-                for row in range(records, lines):
-                    rec = read_key(fp, row)
-                    key,file_id,offset,row_size,_val_size = rec[:5]
-                    if row < n_records:
-                        key_table[key] = row
-                        if row_size > 0:
-                            file_table[file_id] = max(file_table[file_id], offset + row_size)
-                        elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                            self.groups.setdefault(key, None)
+                if key_limit > 0:
+                    self._update_file_table()
+                else:
+                    read_key = self.read_key
+                    for row in range(records, lines):
+                        rec = read_key(fp, row)
+                        key,file_id,offset,row_size,_val_size = rec[:5]
+                        if row < n_records:
+                            key_table[key] = row
+                            if row_size > 0:
+                                file_table[file_id] = max(file_table[file_id], offset + row_size)
+                            elif row_size == 0 and file_id == 0x10: # pragma: no cover
+                                self.groups.setdefault(key, None)
 
-                    elif row_size > 0:
-                        file_table[file_id] = max(file_table[file_id], offset + row_size)
+                        elif row_size > 0:
+                            file_table[file_id] = max(file_table[file_id], offset + row_size)
 
                 self._sync_id   = sync_id
                 self._swap_id   = swap_id
@@ -3110,30 +3105,35 @@ class JIo:
                             return
 
                 # swap_diff > 0 and (sync_diff != remv_diff or sync_diff != line_diff)
-                else: # pragma: no cover
-                    if n_records == 0:
-                        pass
-
-                    elif rec_diff == 0:
-                        pass
-
-                    elif rec_diff > 0:
-                        pass
-
-                    else:
-                        pass
+                # else: # pragma: no cover
+                #     if n_records == 0:
+                #         pass
+                #     elif rec_diff == 0:
+                #         pass
+                #     elif rec_diff > 0:
+                #         pass
+                #     else:
+                #         pass
 
                 # reset
-                if key_table:
-                    key_table.clear()
-                if file_table:
-                    file_table.clear()
+                if key_table: key_table.clear()
+                if file_table: file_table.clear()
 
         if n_lines <= 0:
             self._sync_id   = sync_id
             self._swap_id   = swap_id
             self._remv_id   = remv_id
             self._n_records = self._n_lines = self.n_lines = self.n_records = 0
+            self.file_size  = fp.seek(0, 2)
+            return
+
+        if key_limit > 0:
+            self._update_file_table()
+            self._sync_id   = sync_id
+            self._swap_id   = swap_id
+            self._remv_id   = remv_id
+            self._n_records = n_records
+            self._n_lines   = n_lines
             self.file_size  = fp.seek(0, 2)
             return
 
@@ -3166,12 +3166,18 @@ class JIo:
                         elif row_size == 0 and file_id == 0x10: # pragma: no cover
                             self.groups.setdefault(key, None)
 
-                    elif row_size > 0:
-                        file_table[file_id] = max(file_table[file_id], offset + row_size)
-
-                    lines += 1
-                    if lines >= n_lines:
+                        lines += 1
+                    else:
+                        lines = n_lines
+                        self._update_file_table()
                         break
+
+                    # elif row_size > 0:
+                    #     file_table[file_id] = max(file_table[file_id], offset + row_size)
+
+                    # lines += 1
+                    # if lines >= n_lines:
+                    #     break
 
                 else: # pragma: no cover
                     break
@@ -3200,10 +3206,16 @@ class JIo:
                         elif row_size == 0 and file_id == 0x10: # pragma: no cover
                             self.groups.setdefault(key, None)
 
-                    elif row_size > 0:
-                        file_table[file_id] = max(file_table[file_id], offset + row_size)
+                        lines += 1
+                    else:
+                        lines = n_lines
+                        self._update_file_table()
+                        break
 
-                    lines += 1
+                    # elif row_size > 0:
+                    #     file_table[file_id] = max(file_table[file_id], offset + row_size)
+
+                    # lines += 1
 
         if lines <= 0: # pragma: no cover
             n_records = n_lines = 0

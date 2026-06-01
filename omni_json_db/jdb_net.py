@@ -735,6 +735,27 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
+    def VAL_size(self, file_id:int=0) -> int:
+        """Calculate the VAL file size
+
+        Args:
+            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+        
+        Returns:
+            int: +ve = file size in byte, -ve = not exist
+        """
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (f'VAL.{file_id}', 'size', [], {}))
+                resp = recv_and_load(self.sock)
+
+                if resp.get('ok'):
+                    return resp.get('ret', -1)
+
+                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
+
+            raise IOError
+
     def KEY_size(self) -> int:
         """Query overall allocated width size metrics computing total index byte blocks parameters of the master key file.
 
@@ -1079,6 +1100,9 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                     elif cmd == 'exist':
                         resp['ret'] = files_obj.VAL_exist(file_id)
+
+                    elif cmd == 'size':
+                        resp['ret'] = files_obj.VAL_size(file_id)
 
                     else:
                         is_done = False
