@@ -2804,7 +2804,6 @@ class TestJDb(unittest.TestCase):
                 del jdb['kkk1']
 
             self.assertEqual(sync_id, jdb.sync_id)
-
             self.assertEqual(jdb, expect)
             del jdb['kk1']
             self.assertNotEqual(jdb, expect)
@@ -4456,8 +4455,8 @@ class TestJDb(unittest.TestCase):
 
             ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(test_size)})
             self.assertEqual(len(ret), 3)
-            self.assertEqual(jdb, expect2)
             self.assertEqual(jdb2, expect2)
+            self.assertEqual(jdb, expect2)
 
             ret = jdb.rename({f'xxx{i}' : f'kkkk{i}' for i in range(test_size)})
             self.assertEqual(len(ret), 0)
@@ -4527,6 +4526,32 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual(chg, expect)
             self.assertEqual(jdb.sync_id, sync_id)
+
+            if jdb.io._key_limit <= 0:
+                chg = {}
+                with jdb.open() as fp:
+                    key_table = list(dict(jdb.io.key_table).items())
+                    random.shuffle(key_table)
+                    jdb.io.key_table.clear()
+                    for key,row in key_table:
+                        jdb.io.key_table[key] = row
+
+                    _prev_row = -1
+                    for key,row in jdb.io.sorted_key_table_items():
+                        self.assertGreater(row, _prev_row)
+                        chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                        _prev_row = row
+
+                    self.assertEqual(chg, expect)
+
+                    chg.clear()
+                    _prev_row = jdb.n_lines
+                    for key,row in jdb.io.sorted_key_table_items(reverse=True):
+                        self.assertLess(row, _prev_row)
+                        chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                        _prev_row = row
+
+                    self.assertEqual(chg, expect)
 
             jdb.remove({f'xxx{i}' for i in range(test_size//2,test_size)})
             self.assertNotEqual(jdb, expect)

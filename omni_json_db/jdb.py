@@ -3693,9 +3693,7 @@ class JDb(JDbReader):
             bool: Returns True if the write is successful; returns False if it fails or the Key is not found.
 
         """
-        if not isinstance(key, str): # pragma: no cover
-            key = str(key)
-
+        key = str(key) if not isinstance(key, str) else key
         if isinstance(days, str): # pragma: no cover
             try:
                 days = JIo.z_conv_str_to_days(days)
@@ -3803,9 +3801,6 @@ class JDb(JDbReader):
                                     io.write_key(key_fp, ext_row, '', file_id, new_offset, new_size, 0, 0)
 
                                 io.write_key(key_fp, row, '', file_id, offset, split_size, 0, 0)
-                                if io._key_limit > 0: # pragma: no cover
-                                    self.fsize = io.write_header(key_fp)
-
                                 row_size = split_size
 
                         return start_line, row, dead_key, file_id, offset, row_size
@@ -3925,9 +3920,6 @@ class JDb(JDbReader):
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -3957,9 +3949,6 @@ class JDb(JDbReader):
 
                     _cache.pop(key, None)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4011,9 +4000,6 @@ class JDb(JDbReader):
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
-                if io._key_limit > 0: # pragma: no cover
-                    self.fsize = io.write_header(key_fp)
-
                 return True
 
             # (Not Exist)
@@ -4065,9 +4051,6 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         return True
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> bool:
@@ -4185,9 +4168,6 @@ class JDb(JDbReader):
 
                         # without change key table and file table
                         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                        if io._key_limit > 0: # pragma: no cover
-                            self.fsize = io.write_header(key_fp)
-
                         return True
 
                     # (Exist + Header != CHG + Value) -> use dead/new row
@@ -4243,9 +4223,6 @@ class JDb(JDbReader):
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 new_row_size = row_size
@@ -4289,9 +4266,6 @@ class JDb(JDbReader):
 
                     # without change key table and file table
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -4365,9 +4339,6 @@ class JDb(JDbReader):
                         self._update_cache(key, val, copy=True)
 
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4421,9 +4392,6 @@ class JDb(JDbReader):
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
-                if io._key_limit > 0: # pragma: no cover
-                    self.fsize = io.write_header(key_fp)
-
                 return True
 
             # (Not Exist)
@@ -4507,9 +4475,6 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):
@@ -4527,9 +4492,7 @@ class JDb(JDbReader):
         """
         io = self.io
         if row is None or key:
-            if not isinstance(key, str): # pragma: no cover
-                key = str(key)
-
+            key = str(key) if not isinstance(key, str) else key
             self._cache.pop(key, None)
             row = io.key_table[key]
             if row < 0:
@@ -4559,8 +4522,9 @@ class JDb(JDbReader):
         if row_size == 0:
             if file_id == 0x10:
                 grp_jdb = io.groups.get(key, None)
-                if grp_jdb is None:
-                    grp_jdb = val if isinstance(val, JDbReader) else self._decode_row(file_id, offset, key, 0)
+                grp_jdb = grp_jdb if grp_jdb is not None else \
+                    val if isinstance(val, JDbReader) else \
+                    self._decode_row(file_id, offset, key, 0)
 
                 io.groups.pop(key, None)
                 val = grp_jdb
@@ -4621,9 +4585,6 @@ class JDb(JDbReader):
         io.swap_id = swap_id
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         return val
 
     def f_undelete(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
@@ -4638,9 +4599,7 @@ class JDb(JDbReader):
         Returns:
             Optional[Tuple[int,int,int,int,int]]: Core allocation parameters metadata tuple summarizing recovered slot parameters if successful, None otherwise.
         """
-        if not isinstance(key, str):
-            key = str(key)
-
+        key = str(key) if not isinstance(key, str) else key
         if key == '':
             return None
 
@@ -4716,9 +4675,6 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         self._cache.pop(key, None)
         return safe_h, file_id, offset, row_size, val_size
 
@@ -4734,9 +4690,7 @@ class JDb(JDbReader):
         Returns:
             Optional[Tuple[int,int,int,int,int]]: Execution parameters logging adjusted item metrics parameters integers if successful, None otherwise.
         """
-        if not isinstance(key, str): # pragma: no cover
-            key = str(key)
-
+        key = str(key) if not isinstance(key, str) else key
         if key == '':
             return None
 
@@ -4795,10 +4749,6 @@ class JDb(JDbReader):
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
         io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         self._cache.pop(key, None)
         return old_row, file_id, offset, row_size, val_size
 
@@ -4816,11 +4766,8 @@ class JDb(JDbReader):
         Raises:
             KeyError: If destination identifier string token collides against pre-allocated records fields data layers.
         """
-        if not isinstance(key, str): # pragma: no cover
-            key = str(key)
-
-        if not isinstance(new_key, str): # pragma: no cover
-            new_key = str(new_key)
+        key = str(key) if not isinstance(key, str) else key
+        new_key = str(new_key) if not isinstance(new_key, str) else new_key
 
         if key == new_key:
             return False
@@ -4836,12 +4783,10 @@ class JDb(JDbReader):
                 raise JKeyError(f'{key} not exist')
 
             io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
-            if sync_chg: # pragma: no cover
-                continue
+            if not sync_chg:
+                break
 
-            break
-
-        if key in self._cache:
+        if key in self._cache: # pragma: no cover
             self._cache[new_key] = self._cache.pop(key, None)
 
         _key, file_id, offset, row_size, val_size, _ver, days = io.read_key(key_fp, row)
@@ -4891,7 +4836,7 @@ class JDb(JDbReader):
                     key_fp = fp_dict[-1] = self.files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
                     data_type = io._data_type
                     io.read_header(key_fp)
-                    if not is_latest or not io.is_updated():
+                    if not is_latest or not io.is_updated(): # pragma: no cover
                         io.load_keys(key_fp, force=data_type==0)
                         self.fsize = io.file_size
                         self._cache.clear()

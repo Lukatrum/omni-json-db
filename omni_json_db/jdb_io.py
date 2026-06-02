@@ -145,7 +145,9 @@ def _msg_decode(code:int, data:bytes):
         TypeError: If an unregistered extension type code token encounters parsing streams.
     """
     if code == 123:
-        return marshal_loads(data)
+        obj = marshal_loads(data)
+        if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
+            return obj
 
     raise JTypeError(f'code={code} data={data}')
 
@@ -201,7 +203,6 @@ MAX_RATIO       = 256.
 DEF_KEY_LIMIT   = 0 # 0=DictKeyTable(dict)
 HEADER_SIZE     = 128
 
-#HEADER_STRUCT = Struct('@QQQQQQQQ64x') # only for S+S (MsgpackIo)
 MIN_KEY_STRUCT_V0 = 8 + 8 * 5  # n_pad, (file_id, offset, size, ver, date)
 MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ver, date)
 
@@ -326,7 +327,6 @@ class JDbGroupDict(dict): # pragma: no cover
 class KeyTable: # pragma: no cover
     """Protocol Interface layout contract defining standard indexing schemas for tracking index rows keys mappings."""
     def get_mode(self) -> int: ...
-    def cache_cleanup(self): ...
     def set(self, _key:str, _row_id:int): ...
     def pop(self, _key:str, _default_row_id:int=-1) -> int: ...
     def get(self, _key:str, _default_row_id:int=-1) -> int: ...
@@ -369,10 +369,6 @@ class DictKeyTable(dict): # pragma: no cover
         """
         return -1
 
-    def cache_cleanup(self):
-        """Wipe tracking maps clear re-initializing dictionary structures contexts variables layouts directly."""
-        self.clear()
-
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -383,8 +379,7 @@ class PartialKeyTable(KeyTable):
 
     Postpones loading full keys sets from physical devices disks by maintaining localized bloom filter configurations trackers.
     """
-    # __slots__ = {'cache', 'io', 'flags', 'is_dirty', 'files_obj'}
-    __slots__ = {'cache', 'io', 'files_obj'}
+    __slots__ = {'cache', 'io', 'files_obj', 'flags', 'size', 'key_array'}
 
     def __init__(self, jio:JIo):
         """Initialize partial tracking layers parsing data indices boundaries criteria metrics models.
@@ -395,13 +390,9 @@ class PartialKeyTable(KeyTable):
         self.cache = DictKeyTable()
         self.io = jio
         self.files_obj = jio.files_obj.copy()
-        # self.is_dirty = False
-        # self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
-        # self.flags.setall(0)
-
-    def cache_cleanup(self) -> None:
-        """Clear memory cache frameworks structures to prevent runtime drift."""
-        return self.cache.clear()
+        self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
+        self.key_array = bytearray()
+        self.size = -1
 
     def get_mode(self) -> int:
         """Get the classification mode configuration parameter code.
@@ -417,36 +408,44 @@ class PartialKeyTable(KeyTable):
         Returns:
             str: Presentation text log summary details parameters strings.
         """
-        # return f'<{type(self).__name__} {"D" if self.is_dirty else "F"} cache:{len(self.cache)} {self.flags.count(1)*100./len(self.flags):.2f}% at {hex(id(self))}>'
-        return f'<{type(self).__name__} cache:{len(self.cache)} at {hex(id(self))}>'
+        return f'<{type(self).__name__} cache:{len(self.cache)} {self.flags.count(1)*100./len(self.flags):.2f}% done:{self.size}/{self.io.n_records} at {hex(id(self))}>'
 
-    def set(self, key:str, row_id:int) -> None:
+    def set(self, key:str, row_id:int, update_cache:bool=True) -> None:
         """Log key coordinates properties configurations fields matching localized index pools blocks frameworks.
 
         Args:
             key (str): Query selector name string token descriptor context.
             row_id (int): Hardware data sector row index position coordinate value number integer.
+            update_cache (bool, optional): update key cache (default=True)
         """
         jio = self.io
-        cache = self.cache
-        if jio.n_records <= 0:
+        if self.size < 0 or jio.n_records <= 0: #pragma: no cover
             self.clear()
 
-        # self.is_dirty = self.is_dirty or row_id+1 >= jio.n_records
-        # _hash_id = xhash(key)
-        # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-        if key in cache:
-            cache.pop(key, None)
-            cache[key] = row_id
+        cache = self.cache
+        if cache.get(key, None) == row_id:
+            if update_cache:
+                cache.pop(key, None)
+                cache[key] = row_id
             return
 
-        # clean up extra buffer
-        key_limit = jio._key_limit
-        while len(cache) >= key_limit:
-            old_key = next(iter(cache))
-            cache.pop(old_key, None)
+        old_row_id, s_idx, e_idx = self._find_key(key)
+        if old_row_id >= 0:
+            if old_row_id != row_id:
+                self.key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
+                cache.pop(key, None)
+        else:
+            self.size += 1
+            self.flags[xhash(key) & DEF_FLAG_MASK] = 1
+            self.key_array.extend(_msg_dumps((key, row_id)) or b'')
 
-        cache[key] = row_id
+        if update_cache:
+            key_limit = jio._key_limit
+            while len(cache) >= key_limit:
+                old_key = next(iter(cache))
+                cache.pop(old_key, None)
+
+            cache[key] = row_id
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Erase entry mappings tracking variables unlinking selected items across database layers maps tracks systems.
@@ -458,94 +457,127 @@ class PartialKeyTable(KeyTable):
         Returns:
             int: Numerical measure representing unlinked item row address coordinate positions index numbers parameters logs.
         """
-        size = len(self)
-        if size <= 0: # pragma: no cover
+        if self.size < 0: #pragma: no cover
             self.clear()
+
+        jio = self.io
+        n_records = max(jio.n_records, self.size) # solve order issue
+        is_done = self.size == n_records
+        if n_records <= 0 or is_done and not self.flags[xhash(key) & DEF_FLAG_MASK]:
             return default_row_id
 
-        # _hash_id = xhash(key)
-        # is_dirty = self.is_dirty
-        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]: # pragma: no cover
-        #     self.cache.pop(key, None)
-        #     return default_row_id
+        row_id, s_idx, e_idx = self._find_key(key)
+        if row_id >= 0:
+            del self.key_array[s_idx:e_idx]
+            self.size -= 1
+            self.cache.pop(key, None)
+            return row_id
 
-        cache = self.cache
-        if key in cache:
-            return cache.pop(key, default_row_id)
+        if not is_done:
+            fp = None
+            try:
+                key_array = self.key_array
+                flags = self.flags
+                index_size = jio.index_size
+                KEY_loads = jio.KEY_loads
+                fp = self.files_obj.KEY_open('rb')
+                fp.seek(HEADER_SIZE)
+                for row_id in range(jio.n_records):
+                    _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                    old_row_id, s_idx, e_idx = self._find_key(_key)
+                    if key == _key:
+                        if old_row_id >= 0:
+                            del self.key_array[s_idx:e_idx]
+                            self.size -= 1
+                        self.cache.pop(_key, None)
+                        return row_id
 
-        fp = None
-        try:
-            jio = self.io
-            fp = self.files_obj.KEY_open('rb')
-            fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(_key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                if _key == key:
-                    # self.is_dirty = is_dirty or row_id+1 >= jio.n_records
-                    return row_id
+                    if old_row_id >= 0:
+                        if old_row_id != row_id:
+                            key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                            self.cache.pop(_key, None)
 
-            # self.is_dirty = is_dirty or jio.n_records > 0
-
-        finally:
-            if fp is not None:
-                fp.close()
+                    elif key != _key:
+                        self.size += 1
+                        flags[xhash(key) & DEF_FLAG_MASK] = 1
+                        key_array.extend(_msg_dumps((_key, row_id)) or b'')
+            finally:
+                if fp is not None:
+                    fp.close()
 
         return default_row_id
 
-    def get(self, key:str, default_row_id:int=-1) -> int:
+    def get(self, key:str, default_row_id:int=-1, update_cache:bool=True) -> int:
         """Resolve target data identifiers strings parameters checking active tracking filters registers pools levels maps.
 
         Args:
             key (str): Primary key entry selection string identifier token text layout metrics descriptors properties fields fields.
             default_row_id (int, optional): Target fallbacks options settings values if tracking lookups miss indicators pools context paths. Defaults to -1.
+            update_cache (bool, optional): update key cache (default=True)
 
         Returns:
             int: Target integer tracking indices indicating row alignment positions markers arrays sheets metrics data.
         """
-        size = len(self)
-        if size <= 0: # pragma: no cover
+        if self.size < 0: #pragma: no cover
             self.clear()
-            return default_row_id
 
-        # _hash_id = xhash(key)
-        # is_dirty = self.is_dirty
-        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
-        #     return default_row_id
+        jio = self.io
+        n_records = max(jio.n_records, self.size) # solve order issue
+        is_done = self.size == n_records
+        if is_done and not self.flags[xhash(key) & DEF_FLAG_MASK]:
+            return default_row_id
 
         cache = self.cache
         row_id = cache[key]
-        if row_id != -1:
+        if row_id >= 0:
             return row_id
 
-        fp = None
-        try:
-            jio = self.io
-            key_limit = jio._key_limit
-            fp = self.files_obj.KEY_open('rb')
-            fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(_key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                if _key != key:
-                    continue
-
-                # clean up extra buffer
+        row_id, _s, _e = self._find_key(key)
+        if row_id >= 0:
+            if update_cache:
+                key_limit = self.io._key_limit
                 while len(cache) >= key_limit:
                     old_key = next(iter(cache))
                     cache.pop(old_key, None)
 
                 cache[key] = row_id
-                # self.is_dirty = is_dirty or row_id+1 >= jio.n_records
-                return row_id
+            return row_id
 
-            # self.is_dirty = is_dirty or jio.n_records > 0
+        if not is_done:
+            fp = None
+            try:
+                key_array = self.key_array
+                flags = self.flags
+                index_size = jio.index_size
+                KEY_loads = jio.KEY_loads
+                key_limit = jio._key_limit
+                fp = self.files_obj.KEY_open('rb')
+                fp.seek(HEADER_SIZE)
+                for row_id in range(jio.n_records):
+                    _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                    old_row_id, s_idx, e_idx = self._find_key(_key)
+                    if old_row_id >= 0:
+                        if old_row_id != row_id:
+                            key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                            self.cache.pop(_key, None)
+                    else:
+                        self.size += 1
+                        flags[xhash(_key) & DEF_FLAG_MASK] = 1
+                        key_array.extend(_msg_dumps((_key, row_id)) or b'')
 
-        finally:
-            if fp is not None:
-                fp.close()
+                    if _key == key:
+                        if update_cache:
+                            # clean up extra buffer
+                            while len(cache) >= key_limit:
+                                old_key = next(iter(cache))
+                                cache.pop(old_key, None)
+
+                            cache[key] = row_id
+                        return row_id
+
+            finally:
+                if fp is not None:
+                    fp.close()
 
         return default_row_id
 
@@ -555,24 +587,39 @@ class PartialKeyTable(KeyTable):
         Yields:
             Tuple[str, int]: Associated unique identity string token paired along exact allocation row position line index number value.
         """
-        size = len(self)
-        if size <= 0: # pragma: no cover
+        if self.size < 0: #pragma: no cover
             self.clear()
+
+        jio = self.io
+        n_records = jio.n_records
+        if self.size >= n_records:
+            if self.size > 0:
+                unpacker = Unpacker()
+                unpacker.feed(self.key_array)
+                yield from unpacker
             return
 
         fp = None
         try:
-            jio = self.io
-            # is_dirty = self.is_dirty
+            flags = self.flags
+            key_array = self.key_array
+            index_size = jio.index_size
+            KEY_loads = jio.KEY_loads
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
-            for row_id in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                yield key, row_id
+            for row_id in range(n_records):
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                old_row_id, s_idx, e_idx = self._find_key(_key)
+                if old_row_id >= 0:
+                    if old_row_id != row_id:
+                        key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                        self.cache.pop(_key, None)
+                else:
+                    self.size += 1
+                    flags[xhash(_key) & DEF_FLAG_MASK] = 1
+                    key_array.extend(_msg_dumps((_key, row_id)) or b'')
 
-            # self.is_dirty = is_dirty or jio.n_records > 0
+                yield _key, row_id
 
         finally:
             if fp is not None:
@@ -584,12 +631,44 @@ class PartialKeyTable(KeyTable):
         Yields:
             int: Row position coordinate value number integer slot position.
         """
-        size = len(self)
-        if size <= 0: # pragma: no cover
+        if self.size < 0: #pragma: no cover
             self.clear()
+
+        jio = self.io
+        n_records = jio.n_records
+        if self.size >= n_records:
+            if self.size > 0:
+                unpacker = Unpacker()
+                unpacker.feed(self.key_array)
+                for _key,row in unpacker:
+                    yield row
             return
 
-        yield from range(size)
+        fp = None
+        try:
+            flags = self.flags
+            key_array = self.key_array
+            index_size = jio.index_size
+            KEY_loads = jio.KEY_loads
+            fp = self.files_obj.KEY_open('rb')
+            fp.seek(HEADER_SIZE)
+            for row_id in range(n_records):
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                old_row_id, s_idx, e_idx = self._find_key(_key)
+                if old_row_id >= 0:
+                    if old_row_id != row_id:
+                        key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                        self.cache.pop(_key, None)
+                else:
+                    self.size += 1
+                    flags[xhash(_key) & DEF_FLAG_MASK] = 1
+                    key_array.extend(_msg_dumps((_key, row_id)) or b'')
+
+                yield row_id
+
+        finally:
+            if fp is not None:
+                fp.close()
 
     def keys(self) -> Generator[str]:
         """Iterate over the full layout collection sequence tracking active identifier string tokens from the database file index sheet.
@@ -597,24 +676,40 @@ class PartialKeyTable(KeyTable):
         Yields:
             str: Identity selection descriptor label context text formats string tokens variables.
         """
-        size = len(self)
-        if size <= 0: # pragma: no cover
+        if self.size < 0: #pragma: no cover
             self.clear()
+
+        jio = self.io
+        n_records = jio.n_records
+        if self.size >= n_records:
+            if self.size > 0:
+                unpacker = Unpacker()
+                unpacker.feed(self.key_array)
+                for key,_row in unpacker:
+                    yield key
             return
 
         fp = None
         try:
-            jio = self.io
-            # is_dirty = self.is_dirty
+            flags = self.flags
+            key_array = self.key_array
+            index_size = jio.index_size
+            KEY_loads = jio.KEY_loads
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
-            for _ in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                yield key
+            for row_id in range(n_records):
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                old_row_id, s_idx, e_idx = self._find_key(_key)
+                if old_row_id >= 0:
+                    if old_row_id != row_id:
+                        key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                        self.cache.pop(_key, None)
+                else:
+                    self.size += 1
+                    flags[xhash(_key) & DEF_FLAG_MASK] = 1
+                    key_array.extend(_msg_dumps((_key, row_id)) or b'')
 
-            # self.is_dirty = is_dirty or jio.n_records > 0
+                yield _key
 
         finally:
             if fp is not None:
@@ -627,22 +722,23 @@ class PartialKeyTable(KeyTable):
             PartialKeyTable: Carbon copy replication workspace object context wrapper tracker handle.
         """
         obj = PartialKeyTable(self.io)
-        if len(self) > 0:
-            pass
-        #     obj.flags.clear()
-        #     obj.flags.frombytes(self.flags.tobytes())
-        else: # pragma: no cover
-            self.clear()
+        if self.size > 0:
+            obj.size = self.size
+            obj.key_array.extend(self.key_array)
+            obj.flags.clear()
+            obj.flags.frombytes(self.flags.tobytes())
+        else:
+            obj.flags.setall(0)
 
         return obj
 
     def clear(self):
         """Purge memory configurations reset trackers parameters indicators initializing bloom filters blocks matrices maps grids back onto zero fields."""
-        # if self.is_dirty or self.cache:
-        if self.cache:
-            # self.flags.setall(0)
+        if self.size != 0:
+            self.key_array.clear()
             self.cache.clear()
-            # self.is_dirty = False
+            self.flags.setall(0)
+            self.size = 0
 
     def __len__(self) -> int:
         """Calculate total registered data rows records numbers.
@@ -662,64 +758,10 @@ class PartialKeyTable(KeyTable):
         self.pop(key)
 
     def __contains__(self, key:str) -> bool:
-        size = len(self)
-        if size <= 0: # pragma: no cover
-            self.clear()
-            return False
-
-        # _hash_id = xhash(key)
-        # is_dirty = self.is_dirty
-        # if is_dirty and not self.flags[_hash_id & DEF_FLAG_MASK]:
-        #     return False
-
-        cache = self.cache
-        if key in cache:
-            return True
-
-        fp = None
-        try:
-            jio = self.io
-            fp = self.files_obj.KEY_open('rb')
-            fp.seek(HEADER_SIZE)
-            for _row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(_key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                if _key == key:
-                    # self.is_dirty = is_dirty or _row_id+1 >= jio.n_records
-                    return True
-
-            # self.is_dirty = is_dirty or jio.n_records > 0
-
-        finally:
-            if fp is not None:
-                fp.close()
-
-        return False
+        return self.get(key, -1) != -1
 
     def __iter__(self) -> Generator[str]:
-        size = len(self)
-        if size <= 0: # pragma: no cover
-            self.clear()
-            return
-
-        fp = None
-        try:
-            jio = self.io
-            # is_dirty = self.is_dirty
-            fp = self.files_obj.KEY_open('rb')
-            fp.seek(HEADER_SIZE)
-            for _ in range(jio.n_records):
-                key, _f, _o, _r, _v, _s, _d = jio.KEY_loads(fp.read(jio.index_size))
-                # _hash_id = xhash(key)
-                # self.flags[_hash_id & DEF_FLAG_MASK] = 1
-                yield key
-
-            # self.is_dirty = is_dirty or jio.n_records > 0
-
-        finally:
-            if fp is not None:
-                fp.close()
+        yield from self.keys()
 
     def __eq__(self, obj) -> bool:
         if self is obj:
@@ -739,8 +781,46 @@ class PartialKeyTable(KeyTable):
             if val != obj.get(key, -1):
                 return False
 
-        # self.is_dirty = self.is_dirty or self.io.n_records > 0
         return True
+
+    def _find_key(self, key:str) -> Tuple[int, int, int]:
+        """Find key msgpack pattern in bytearray.
+
+        Args:
+            key (str): key (str): target key in bytearray.
+
+        Returns:
+            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index (not found=(-1, -1, -1))
+        """
+        key_array = self.key_array
+        n_bytes = len(key_array)
+        if self.size > 0 and n_bytes > 0:
+            search_prefix = b'\x92' + (_msg_dumps(key) or b'')
+            prefix_len = len(search_prefix)
+            idx = key_array.find(search_prefix)
+            while idx >= 0:
+                val_idx = idx + prefix_len
+                val_type = key_array[val_idx]
+                val_len = 1 if val_type <= 0x7f or val_type >= 0xe0 else \
+                        2 if val_type == 0xcc or val_type == 0xd0 else \
+                        3 if val_type == 0xcd or val_type == 0xd1 else \
+                        5 if val_type == 0xce or val_type == 0xd2 else \
+                        9 if val_type == 0xcf or val_type == 0xd3 else 0
+
+                val_idx_e = val_idx + val_len
+                if val_len > 0 and val_idx_e <= n_bytes:
+                    if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
+                        row_id = val_type if val_type <= 0x7f else \
+                            int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
+                            int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
+                            val_type - 256 if val_type >= 0xe0 else -1
+
+                        if row_id >= 0:
+                            return row_id, idx, val_idx_e
+
+                idx = key_array.find(search_prefix, idx+1) # pragma: no cover
+
+        return -1, -1, -1
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -796,10 +876,6 @@ class LiteKeyTable(KeyTable):
         """
         return self.mode
 
-    def cache_cleanup(self): # pragma: no cover
-        """Flush transient runtime memory segments resetting index trackers profiles frameworks configurations details."""
-        self.clear()
-
     def set(self, key:str, row_id:int):
         """Inject structured MsgPack compressed signature entries straight into sequential byte arrays regions trackers.
 
@@ -853,7 +929,7 @@ class LiteKeyTable(KeyTable):
 
                         return
 
-            idx = key_array.find(search_prefix, idx+1)
+            idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
         self.size += 1
         self.flags[flag_idx] = 1
@@ -1144,10 +1220,6 @@ try:
             """
             return -1
 
-        def cache_cleanup(self): # pragma: no cover
-            """Clear target registry trees maps templates resetting database parameters indicators back onto zero configurations logs."""
-            self.clear()
-
 except ModuleNotFoundError:
     BTreeKeyTable = None
 
@@ -1212,7 +1284,7 @@ class JIoHEAD:
         """
         if header[0] == 91: # '['
             info = _json_loads(header)
-        else:
+        else: # pragma: no cover
             # deprecated
             info = [int(v) for v in header.decode('utf8').split(',')]
 
@@ -1382,6 +1454,9 @@ class JIoKEY_M(JIoKEY):
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         args = marshal_loads(data)
+        if not isinstance(args, (list, tuple)):
+            raise ValueError
+
         if len(args) != 6: # pragma: no cover
             args.append(0)
 
@@ -1394,7 +1469,11 @@ class JIoKEY_M(JIoKEY):
         return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        return marshal_loads(data)
+        args = marshal_loads(data)
+        if isinstance(args, (list, tuple)):
+            return args
+
+        raise ValueError
 
 class JIoKEY_L(JIoKEY):
     """Legacy text string comma-separated encoder subclass generating human-readable tracking line rows entries records segments maps paths."""
@@ -1495,7 +1574,9 @@ class JIoVAL_M(JIoVAL):
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
             try:
-                return marshal_loads(data)
+                obj = marshal_loads(data)
+                if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
+                    return obj
 
             except (ValueError, EOFError):
                 data = data + b'\n'
@@ -1510,7 +1591,9 @@ class JIoVAL_P(JIoVAL):
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
             try:
-                return pickle_loads(data)
+                obj = pickle_loads(data)
+                if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
+                    return obj
 
             except (ValueError, EOFError, PicklingError): # pragma: no cover
                 data = data + b'\n'
@@ -2095,10 +2178,8 @@ class JIo:
                 value = -(int(value[1:]) + 1)
             elif value in {'tr', 'bt', 'btree', 'tree'}:
                 value = -0x100
-            elif value.startswith('<='):
-                value = max(1, int(value[2:]))
             elif value.startswith('<'):
-                value = max(1, int(value[1:])-1)
+                value = max(1, int(value[2:]) if value[1] == '=' else (int(value[1:])-1))
             else:
                 raise ValueError(f'invalid key limit string {value}')
 
@@ -2368,7 +2449,7 @@ class JIo:
         Yields:
             Tuple[str, int]: Entry identity string descriptor paired along active logical index row line identifier number.
         """
-        if self._key_limit > 0 or copy:
+        if copy:
             fp = None
             try:
                 files_obj = self.files_obj.copy()
@@ -2946,7 +3027,7 @@ class JIo:
                         key_table.clear()
 
                 elif key_limit > 0:
-                    key_table.cache_cleanup()
+                    key_table.clear()
 
                 elif key_table:
                     del_cnt = prev_n_records - records
@@ -3006,7 +3087,7 @@ class JIo:
 
                     # swap_diff > 0 and sync_diff == remv_diff == -rec_diff and line_diff == 0 and n_records > 0
                     if key_limit > 0:
-                        key_table.cache_cleanup()
+                        key_table.clear()
                     else:
                         read_key = self.read_key
                         for row in range(n_records, min(n_lines, n_records+remv_diff)):
@@ -3156,36 +3237,25 @@ class JIo:
                         print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
                     break
 
-                if lines < n_lines:
-                    if records < n_records:
-                        records += 1
-                        key_table[key] = lines
+                if records < n_records:
+                    records += 1
+                    key_table[key] = lines
 
-                        if row_size > 0:
-                            file_table[file_id] = max(file_table[file_id], offset + row_size)
-                        elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                            self.groups.setdefault(key, None)
+                    if row_size > 0:
+                        file_table[file_id] = max(file_table[file_id], offset + row_size)
+                    elif row_size == 0 and file_id == 0x10: # pragma: no cover
+                        self.groups.setdefault(key, None)
 
-                        lines += 1
-                    else:
-                        lines = n_lines
-                        self._update_file_table()
-                        break
-
-                    # elif row_size > 0:
-                    #     file_table[file_id] = max(file_table[file_id], offset + row_size)
-
-                    # lines += 1
-                    # if lines >= n_lines:
-                    #     break
-
-                else: # pragma: no cover
+                    lines += 1
+                else:
+                    lines = n_lines
+                    self._update_file_table()
                     break
 
         else: # M, S
             while lines < n_lines:
                 line = fp.read(index_size)
-                if not line or len(line) != index_size:
+                if not line or len(line) != index_size: # pragma: no cover
                     break
 
                 try:
@@ -3196,26 +3266,20 @@ class JIo:
                         print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
                     break
 
-                if lines < n_lines:
-                    if records < n_records:
-                        records += 1
-                        key_table[key] = lines
+                if records < n_records:
+                    records += 1
+                    key_table[key] = lines
 
-                        if row_size > 0:
-                            file_table[file_id] = max(file_table[file_id], offset + row_size)
-                        elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                            self.groups.setdefault(key, None)
+                    if row_size > 0:
+                        file_table[file_id] = max(file_table[file_id], offset + row_size)
+                    elif row_size == 0 and file_id == 0x10: # pragma: no cover
+                        self.groups.setdefault(key, None)
 
-                        lines += 1
-                    else:
-                        lines = n_lines
-                        self._update_file_table()
-                        break
-
-                    # elif row_size > 0:
-                    #     file_table[file_id] = max(file_table[file_id], offset + row_size)
-
-                    # lines += 1
+                    lines += 1
+                else:
+                    lines = n_lines
+                    self._update_file_table()
+                    break
 
         if lines <= 0: # pragma: no cover
             n_records = n_lines = 0
