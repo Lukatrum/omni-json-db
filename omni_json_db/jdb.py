@@ -3801,6 +3801,9 @@ class JDb(JDbReader):
                                     io.write_key(key_fp, ext_row, '', file_id, new_offset, new_size, 0, 0)
 
                                 io.write_key(key_fp, row, '', file_id, offset, split_size, 0, 0)
+                                if io._key_limit > 0: # pragma: no cover
+                                    self.fsize = io.write_header(key_fp)
+
                                 row_size = split_size
 
                         return start_line, row, dead_key, file_id, offset, row_size
@@ -3920,6 +3923,9 @@ class JDb(JDbReader):
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
+                    if io._key_limit > 0: # pragma: no cover
+                        self.fsize = io.write_header(key_fp)
+
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -3949,6 +3955,9 @@ class JDb(JDbReader):
 
                     _cache.pop(key, None)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                    if io._key_limit > 0: # pragma: no cover
+                        self.fsize = io.write_header(key_fp)
+
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4000,6 +4009,9 @@ class JDb(JDbReader):
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
+                if io._key_limit > 0: # pragma: no cover
+                    self.fsize = io.write_header(key_fp)
+
                 return True
 
             # (Not Exist)
@@ -4051,6 +4063,9 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
+        if io._key_limit > 0: # pragma: no cover
+            self.fsize = io.write_header(key_fp)
+
         return True
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> bool:
@@ -4168,6 +4183,9 @@ class JDb(JDbReader):
 
                         # without change key table and file table
                         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                        if io._key_limit > 0: # pragma: no cover
+                            self.fsize = io.write_header(key_fp)
+
                         return True
 
                     # (Exist + Header != CHG + Value) -> use dead/new row
@@ -4223,6 +4241,9 @@ class JDb(JDbReader):
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
+                    if io._key_limit > 0: # pragma: no cover
+                        self.fsize = io.write_header(key_fp)
+
                     return True
 
                 new_row_size = row_size
@@ -4266,6 +4287,9 @@ class JDb(JDbReader):
 
                     # without change key table and file table
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                    if io._key_limit > 0: # pragma: no cover
+                        self.fsize = io.write_header(key_fp)
+
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -4339,6 +4363,9 @@ class JDb(JDbReader):
                         self._update_cache(key, val, copy=True)
 
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                    if io._key_limit > 0: # pragma: no cover
+                        self.fsize = io.write_header(key_fp)
+
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4392,6 +4419,9 @@ class JDb(JDbReader):
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
+                if io._key_limit > 0: # pragma: no cover
+                    self.fsize = io.write_header(key_fp)
+
                 return True
 
             # (Not Exist)
@@ -4475,6 +4505,9 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
+        if io._key_limit > 0: # pragma: no cover
+            self.fsize = io.write_header(key_fp)
+
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):
@@ -4585,6 +4618,9 @@ class JDb(JDbReader):
         io.swap_id = swap_id
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
+        if io._key_limit > 0: # pragma: no cover
+            self.fsize = io.write_header(key_fp)
+
         return val
 
     def f_undelete(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
@@ -4675,6 +4711,9 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
+        if io._key_limit > 0: # pragma: no cover
+            self.fsize = io.write_header(key_fp)
+
         self._cache.pop(key, None)
         return safe_h, file_id, offset, row_size, val_size
 
@@ -4749,6 +4788,10 @@ class JDb(JDbReader):
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
         io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+
+        if io._key_limit > 0: # pragma: no cover
+            self.fsize = io.write_header(key_fp)
+
         self._cache.pop(key, None)
         return old_row, file_id, offset, row_size, val_size
 

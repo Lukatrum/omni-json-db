@@ -4524,34 +4524,46 @@ class TestJDb(unittest.TestCase):
                     chg[key] = jdb.f_read(fp, key, row=row, copy=False)
                     _prev_row = row
 
+                self.assertEqual(chg, expect)
+
+                chg.clear()
+                _prev_row = jdb.n_lines
+                for key,row in jdb.io.sorted_key_table_items(copy=True, reverse=True):
+                    self.assertLess(row, _prev_row)
+                    chg[key] = jdb.f_read(fp, key, row=row, copy=True)
+                    _prev_row = row
+
             self.assertEqual(chg, expect)
             self.assertEqual(jdb.sync_id, sync_id)
 
-            if jdb.io._key_limit <= 0:
-                chg = {}
-                with jdb.open() as fp:
-                    key_table = list(dict(jdb.io.key_table).items())
-                    random.shuffle(key_table)
-                    jdb.io.key_table.clear()
-                    for key,row in key_table:
-                        jdb.io.key_table[key] = row
+            chg = {}
+            with jdb.open() as fp:
+                key_table = list(dict(jdb.key_table).items())
+                random.shuffle(key_table)
+                jdb.io.key_table.clear()
+                for key,row in key_table:
+                    jdb.io.key_table[key] = row
 
-                    _prev_row = -1
-                    for key,row in jdb.io.sorted_key_table_items():
-                        self.assertGreater(row, _prev_row)
-                        chg[key] = jdb.f_read(fp, key, row=row, copy=False)
-                        _prev_row = row
+                _prev_row = -1
+                for key,row in jdb.io.sorted_key_table_items():
+                    self.assertGreater(row, _prev_row)
+                    chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                    _prev_row = row
 
-                    self.assertEqual(chg, expect)
+                self.assertEqual(chg, expect)
 
-                    chg.clear()
-                    _prev_row = jdb.n_lines
-                    for key,row in jdb.io.sorted_key_table_items(reverse=True):
-                        self.assertLess(row, _prev_row)
-                        chg[key] = jdb.f_read(fp, key, row=row, copy=False)
-                        _prev_row = row
+                chg.clear()
+                _prev_row = jdb.n_lines
+                for key,row in jdb.io.sorted_key_table_items(reverse=True):
+                    self.assertLess(row, _prev_row)
+                    chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                    _prev_row = row
 
-                    self.assertEqual(chg, expect)
+                self.assertEqual(chg, expect)
+                key_table = dict(jdb.key_table)
+                self.assertEqual(key_table, jdb.key_table)
+                self.assertEqual(set(key_table.values()), set(jdb.key_table.values()))
+                self.assertEqual(set(key_table.keys()), set(jdb.key_table.keys()))
 
             jdb.remove({f'xxx{i}' for i in range(test_size//2,test_size)})
             self.assertNotEqual(jdb, expect)
@@ -7556,7 +7568,7 @@ class TestJDb(unittest.TestCase):
             jdb_list = [jdb,
                         JDb(jdb, key_limit='l4', cache_limit=0),
                         JDb(jdb, key_limit='bt', cache_limit=32),
-                        JDb(jdb, key_limit='no', cache_limit=-1)]
+                        JDb(jdb, key_limit='<9', cache_limit=-1)]
 
             expect = {f'k{v}' : [v%10] * (test_size + 1) for v in range(test_size)}
             jmem = JDb()

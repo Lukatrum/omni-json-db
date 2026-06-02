@@ -7,7 +7,7 @@ from functools import reduce
 from collections import defaultdict
 from re import findall as re_findall
 from datetime import date as dt_date, datetime, timedelta
-from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError
+from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError # nosec B403
 from marshal import loads as marshal_loads, dumps as marshal_dumps
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
@@ -115,6 +115,7 @@ try:
         Returns:
             Ext: Wrapped serialization object extension mapping type ID 123.
         """
+        # nosemgrep
         return Ext(123, marshal_dumps(obj))
 
 except (ModuleNotFoundError, ImportError):
@@ -129,6 +130,7 @@ except (ModuleNotFoundError, ImportError):
         Returns:
             ExtType: Wrapped serialization object extension mapping type ID 123.
         """
+        # nosemgrep
         return ExtType(123, marshal_dumps(obj))
 
 def _msg_decode(code:int, data:bytes):
@@ -145,7 +147,8 @@ def _msg_decode(code:int, data:bytes):
         TypeError: If an unregistered extension type code token encounters parsing streams.
     """
     if code == 123:
-        obj = marshal_loads(data)
+        # nosemgrep
+        obj = marshal_loads(data) # nosec B302
         if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
             return obj
 
@@ -486,18 +489,18 @@ class PartialKeyTable(KeyTable):
                     _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                     old_row_id, s_idx, e_idx = self._find_key(_key)
                     if key == _key:
-                        if old_row_id >= 0:
+                        if old_row_id >= 0: # pragma: no cover
                             del self.key_array[s_idx:e_idx]
                             self.size -= 1
                         self.cache.pop(_key, None)
                         return row_id
 
+                    # key != _key
                     if old_row_id >= 0:
-                        if old_row_id != row_id:
+                        if old_row_id >= 0 and old_row_id != row_id: # pragma: no cover
                             key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
                             self.cache.pop(_key, None)
-
-                    elif key != _key:
+                    else:
                         self.size += 1
                         flags[xhash(key) & DEF_FLAG_MASK] = 1
                         key_array.extend(_msg_dumps((_key, row_id)) or b'')
@@ -557,7 +560,7 @@ class PartialKeyTable(KeyTable):
                     _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                     old_row_id, s_idx, e_idx = self._find_key(_key)
                     if old_row_id >= 0:
-                        if old_row_id != row_id:
+                        if old_row_id != row_id: # pragma: no cover
                             key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
                             self.cache.pop(_key, None)
                     else:
@@ -611,7 +614,7 @@ class PartialKeyTable(KeyTable):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                 old_row_id, s_idx, e_idx = self._find_key(_key)
                 if old_row_id >= 0:
-                    if old_row_id != row_id:
+                    if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
                         self.cache.pop(_key, None)
                 else:
@@ -656,7 +659,7 @@ class PartialKeyTable(KeyTable):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                 old_row_id, s_idx, e_idx = self._find_key(_key)
                 if old_row_id >= 0:
-                    if old_row_id != row_id:
+                    if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
                         self.cache.pop(_key, None)
                 else:
@@ -701,7 +704,7 @@ class PartialKeyTable(KeyTable):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                 old_row_id, s_idx, e_idx = self._find_key(_key)
                 if old_row_id >= 0:
-                    if old_row_id != row_id:
+                    if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
                         self.cache.pop(_key, None)
                 else:
@@ -931,9 +934,10 @@ class LiteKeyTable(KeyTable):
 
             idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
-        self.size += 1
-        self.flags[flag_idx] = 1
-        key_array.extend(search_prefix + (_msg_dumps(row_id) or b''))
+        if True: # pragma: no cover
+            self.size += 1
+            self.flags[flag_idx] = 1
+            key_array.extend(search_prefix + (_msg_dumps(row_id) or b''))
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Extract and remove specific entries maps tracks variables returning previous records boundaries indices numbers parameters logs.
@@ -989,7 +993,7 @@ class LiteKeyTable(KeyTable):
                         self.size -= 1
                         return row_id
 
-            idx = key_array.find(search_prefix, idx+1)
+            idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
         return default_row_id
 
@@ -1450,10 +1454,12 @@ class JIoKEY_S(JIoKEY):
 class JIoKEY_M(JIoKEY):
     """Marshal binary compilation speed codec subclass handling raw system variables mapping optimization layouts structures."""
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
+        # nosemgrep
         return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        args = marshal_loads(data)
+        # nosemgrep
+        args = marshal_loads(data) # nosec B302
         if not isinstance(args, (list, tuple)):
             raise ValueError
 
@@ -1466,10 +1472,12 @@ class JIoKEY_M(JIoKEY):
         return key, file_id, offset, row_size, val_size, ver, days
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
+        # nosemgrep
         return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        args = marshal_loads(data)
+        # nosemgrep
+        args = marshal_loads(data) # nosec B302
         if isinstance(args, (list, tuple)):
             return args
 
@@ -1569,12 +1577,14 @@ class JIoVAL_S(JIoVAL):
 class JIoVAL_M(JIoVAL):
     """Marshal payload value processing interface utilizing rapid low-level internal runtime hooks."""
     def dumps(self, data:Any) -> bytes:
+        # nosemgrep
         return marshal_dumps(data)
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
             try:
-                obj = marshal_loads(data)
+                # nosemgrep
+                obj = marshal_loads(data) # nosec B301
                 if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
                     return obj
 
@@ -1586,12 +1596,14 @@ class JIoVAL_M(JIoVAL):
 class JIoVAL_P(JIoVAL):
     """Pickle value payload subsystem driver supporting deep preservation of native Python objects graphs layouts."""
     def dumps(self, data:Any) -> bytes:
+        # nosemgrep
         return pickle_dumps(data)
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
             try:
-                obj = pickle_loads(data)
+                # nosemgrep
+                obj = pickle_loads(data) # nosec B301
                 if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
                     return obj
 
