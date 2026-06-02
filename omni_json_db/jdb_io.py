@@ -148,9 +148,7 @@ def _msg_decode(code:int, data:bytes):
     """
     if code == 123:
         # nosemgrep
-        obj = marshal_loads(data) # nosec B302
-        if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
-            return obj
+        return marshal_loads(data) # nosec B302
 
     raise JTypeError(f'code={code} data={data}')
 
@@ -1584,9 +1582,7 @@ class JIoVAL_M(JIoVAL):
         for _ in range(9):
             try:
                 # nosemgrep
-                obj = marshal_loads(data) # nosec B301
-                if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
-                    return obj
+                return marshal_loads(data) # nosec B302
 
             except (ValueError, EOFError):
                 data = data + b'\n'
@@ -1603,9 +1599,7 @@ class JIoVAL_P(JIoVAL):
         for _ in range(9):
             try:
                 # nosemgrep
-                obj = pickle_loads(data) # nosec B301
-                if obj is None or isinstance(obj, (str, bytes, int, float, bool, list, set, dict, tuple)):
-                    return obj
+                return pickle_loads(data) # nosec B301
 
             except (ValueError, EOFError, PicklingError): # pragma: no cover
                 data = data + b'\n'
