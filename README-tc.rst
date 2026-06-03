@@ -143,8 +143,8 @@ English_ | 中文_
    jdb += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
             {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
    
-   # 獲取所有記錄
-   print(jdb[:])
+   # 顯示表格
+   jdb.show()
 
    # 使用 Lambda 函式搜尋名為 'John' 的記錄
    matches = jdb.find(FUNC=lambda key,val: val['name'] == 'John') 
@@ -264,12 +264,18 @@ CSV 匯入 / 匯出
    # 將JDb的內容匯出至 example.csv
    jdb1.to_csv('example.csv')
 
+   # 顯示表格
+   jdb1.show()
+
    # 建立另一個JDb
    jdb2 = JDb()
    
    # 從CSV檔案匯入至JDb
    jdb2.from_csv('example.csv')
    print(jdb2.find(RE='Bob')) # 輸出: {'name': 'Bob', 'age': 42}
+
+   # 顯示表格
+   jdb2.show(RE='Bob')
 
 INI / TOML 匯入
 -----------------

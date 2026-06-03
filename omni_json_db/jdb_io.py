@@ -22,7 +22,7 @@ gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from bitarray import bitarray
 
-from .utils import Style, JTypeError
+from .utils import Style
 #from .utils import debug_break
 
 try:
@@ -66,7 +66,7 @@ def _json_default(obj):
         chk_code = reduce(lambda x,y: (x+y) & 0xff, obj)
         return '\0\1\0\1'+obj.hex()+bytearray([(256-chk_code) & 0xff]).hex()
 
-    raise JTypeError(f"Unknown type: {type(obj)}")
+    raise TypeError(f"Unknown type: {type(obj)}")
 
 try:
     from orjson import loads as _json_loads, dumps as _json_dumps, JSONDecodeError
@@ -106,32 +106,22 @@ try:
     from ormsgpack import packb as _msg_dumps, Ext
     from msgpack import unpackb as _msg_loads, Unpacker
 
-    def _msg_encode(obj) -> bytes:
-        """Pack non-primitive object structures using marshal codecs into MsgPack Ext objects.
-
-        Args:
-            obj (Any): Non-primitive input object.
-
-        Returns:
-            Ext: Wrapped serialization object extension mapping type ID 123.
-        """
-        # nosemgrep
-        return Ext(123, marshal_dumps(obj))
-
 except (ModuleNotFoundError, ImportError):
-    from msgpack import packb as _msg_dumps, unpackb as _msg_loads, Unpacker, ExtType
+    from msgpack import packb as _msg_dumps, unpackb as _msg_loads, Unpacker, ExtType as Ext
 
-    def _msg_encode(obj) -> bytes:
-        """Pack non-primitive object structures using marshal codecs into legacy MsgPack ExtType objects.
+def _msg_encode(obj) -> bytes:
+    """Pack non-primitive object structures using marshal codecs into legacy MsgPack ExtType objects.
 
-        Args:
-            obj (Any): Non-primitive input object.
+    Args:
+        obj (Any): Non-primitive input object.
 
-        Returns:
-            ExtType: Wrapped serialization object extension mapping type ID 123.
-        """
-        # nosemgrep
-        return ExtType(123, marshal_dumps(obj))
+    Returns:
+        ExtType: Wrapped serialization object extension mapping type ID 123.
+    """
+    if isinstance(obj, set):
+        return Ext(123, _msg_dumps(list(obj)))
+
+    raise TypeError
 
 def _msg_decode(code:int, data:bytes):
     """Decode custom MsgPack extensions utilizing marshal deserialization routines.
@@ -147,10 +137,14 @@ def _msg_decode(code:int, data:bytes):
         TypeError: If an unregistered extension type code token encounters parsing streams.
     """
     if code == 123:
-        # nosemgrep
-        return marshal_loads(data) # nosec B302
+        try:
+            return set(_msg_loads(data))
 
-    raise JTypeError(f'code={code} data={data}')
+        except ValueError: # pragma: no cover
+            # nosemgrep
+            return marshal_loads(data) # nosec B302
+
+    raise TypeError(f'code={code} data={data}')
 
 msg_dumps = lambda obj : _msg_dumps(obj, default=_msg_encode)
 msg_loads = lambda _bytes : _msg_loads(_bytes, ext_hook=_msg_decode, strict_map_key=False)
@@ -430,15 +424,16 @@ class PartialKeyTable(KeyTable):
                 cache[key] = row_id
             return
 
-        old_row_id, s_idx, e_idx = self._find_key(key)
+        key_array = self.key_array
+        old_row_id, s_idx, e_idx = self._find_key(key, key_array)
         if old_row_id >= 0:
             if old_row_id != row_id:
-                self.key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
+                key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
                 cache.pop(key, None)
         else:
             self.size += 1
             self.flags[xhash(key) & DEF_FLAG_MASK] = 1
-            self.key_array.extend(_msg_dumps((key, row_id)) or b'')
+            key_array.extend(_msg_dumps((key, row_id)) or b'')
 
         if update_cache:
             key_limit = jio._key_limit
@@ -467,17 +462,18 @@ class PartialKeyTable(KeyTable):
         if n_records <= 0 or is_done and not self.flags[xhash(key) & DEF_FLAG_MASK]:
             return default_row_id
 
-        row_id, s_idx, e_idx = self._find_key(key)
+        cache = self.cache
+        key_array = self.key_array
+        row_id, s_idx, e_idx = self._find_key(key, key_array)
         if row_id >= 0:
-            del self.key_array[s_idx:e_idx]
+            del key_array[s_idx:e_idx]
             self.size -= 1
-            self.cache.pop(key, None)
+            cache.pop(key, None)
             return row_id
 
         if not is_done:
             fp = None
             try:
-                key_array = self.key_array
                 flags = self.flags
                 index_size = jio.index_size
                 KEY_loads = jio.KEY_loads
@@ -485,19 +481,19 @@ class PartialKeyTable(KeyTable):
                 fp.seek(HEADER_SIZE)
                 for row_id in range(jio.n_records):
                     _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                    old_row_id, s_idx, e_idx = self._find_key(_key)
+                    old_row_id, s_idx, e_idx = self._find_key(_key, key_array)
                     if key == _key:
                         if old_row_id >= 0: # pragma: no cover
-                            del self.key_array[s_idx:e_idx]
+                            del key_array[s_idx:e_idx]
                             self.size -= 1
-                        self.cache.pop(_key, None)
+                        cache.pop(_key, None)
                         return row_id
 
                     # key != _key
                     if old_row_id >= 0:
                         if old_row_id >= 0 and old_row_id != row_id: # pragma: no cover
                             key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                            self.cache.pop(_key, None)
+                            cache.pop(_key, None)
                     else:
                         self.size += 1
                         flags[xhash(key) & DEF_FLAG_MASK] = 1
@@ -533,7 +529,8 @@ class PartialKeyTable(KeyTable):
         if row_id >= 0:
             return row_id
 
-        row_id, _s, _e = self._find_key(key)
+        key_array = self.key_array
+        row_id, _s, _e = self._find_key(key, key_array)
         if row_id >= 0:
             if update_cache:
                 key_limit = self.io._key_limit
@@ -547,7 +544,6 @@ class PartialKeyTable(KeyTable):
         if not is_done:
             fp = None
             try:
-                key_array = self.key_array
                 flags = self.flags
                 index_size = jio.index_size
                 KEY_loads = jio.KEY_loads
@@ -556,11 +552,11 @@ class PartialKeyTable(KeyTable):
                 fp.seek(HEADER_SIZE)
                 for row_id in range(jio.n_records):
                     _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                    old_row_id, s_idx, e_idx = self._find_key(_key)
+                    old_row_id, s_idx, e_idx = self._find_key(_key, self.key_array)
                     if old_row_id >= 0:
                         if old_row_id != row_id: # pragma: no cover
                             key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                            self.cache.pop(_key, None)
+                            cache.pop(_key, None)
                     else:
                         self.size += 1
                         flags[xhash(_key) & DEF_FLAG_MASK] = 1
@@ -593,28 +589,29 @@ class PartialKeyTable(KeyTable):
 
         jio = self.io
         n_records = jio.n_records
+        key_array = self.key_array
         if self.size >= n_records:
             if self.size > 0:
                 unpacker = Unpacker()
-                unpacker.feed(self.key_array)
+                unpacker.feed(key_array)
                 yield from unpacker
             return
 
         fp = None
         try:
+            cache = self.cache
             flags = self.flags
-            key_array = self.key_array
             index_size = jio.index_size
             KEY_loads = jio.KEY_loads
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                old_row_id, s_idx, e_idx = self._find_key(_key)
+                old_row_id, s_idx, e_idx = self._find_key(_key, key_array)
                 if old_row_id >= 0:
                     if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                        self.cache.pop(_key, None)
+                        cache.pop(_key, None)
                 else:
                     self.size += 1
                     flags[xhash(_key) & DEF_FLAG_MASK] = 1
@@ -637,29 +634,30 @@ class PartialKeyTable(KeyTable):
 
         jio = self.io
         n_records = jio.n_records
+        key_array = self.key_array
         if self.size >= n_records:
             if self.size > 0:
                 unpacker = Unpacker()
-                unpacker.feed(self.key_array)
+                unpacker.feed(key_array)
                 for _key,row in unpacker:
                     yield row
             return
 
         fp = None
         try:
+            cache = self.cache
             flags = self.flags
-            key_array = self.key_array
             index_size = jio.index_size
             KEY_loads = jio.KEY_loads
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                old_row_id, s_idx, e_idx = self._find_key(_key)
+                old_row_id, s_idx, e_idx = self._find_key(_key, key_array)
                 if old_row_id >= 0:
                     if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                        self.cache.pop(_key, None)
+                        cache.pop(_key, None)
                 else:
                     self.size += 1
                     flags[xhash(_key) & DEF_FLAG_MASK] = 1
@@ -682,6 +680,7 @@ class PartialKeyTable(KeyTable):
 
         jio = self.io
         n_records = jio.n_records
+        key_array = self.key_array
         if self.size >= n_records:
             if self.size > 0:
                 unpacker = Unpacker()
@@ -692,19 +691,19 @@ class PartialKeyTable(KeyTable):
 
         fp = None
         try:
+            cache = self.cache
             flags = self.flags
-            key_array = self.key_array
             index_size = jio.index_size
             KEY_loads = jio.KEY_loads
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                old_row_id, s_idx, e_idx = self._find_key(_key)
+                old_row_id, s_idx, e_idx = self._find_key(_key, key_array)
                 if old_row_id >= 0:
                     if old_row_id != row_id: # pragma: no cover
                         key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                        self.cache.pop(_key, None)
+                        cache.pop(_key, None)
                 else:
                     self.size += 1
                     flags[xhash(_key) & DEF_FLAG_MASK] = 1
@@ -784,18 +783,18 @@ class PartialKeyTable(KeyTable):
 
         return True
 
-    def _find_key(self, key:str) -> Tuple[int, int, int]:
+    def _find_key(self, key:str, key_array:bytearray) -> Tuple[int, int, int]:
         """Find key msgpack pattern in bytearray.
 
         Args:
-            key (str): key (str): target key in bytearray.
+            key (str): key in bytearray.
+            key_array (bytearray): store all keys in byte
 
         Returns:
             Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index (not found=(-1, -1, -1))
         """
-        key_array = self.key_array
         n_bytes = len(key_array)
-        if self.size > 0 and n_bytes > 0:
+        if n_bytes > 0:
             search_prefix = b'\x92' + (_msg_dumps(key) or b'')
             prefix_len = len(search_prefix)
             idx = key_array.find(search_prefix)
@@ -898,44 +897,17 @@ class LiteKeyTable(KeyTable):
             key_array = self.groups[0]
 
         n_bytes = len(key_array)
-        search_prefix = b'\x92' + (_msg_dumps(key) or b'')
-        if n_bytes <= 0 or not self.flags[flag_idx] or self.mode & 0x1000 and row_id >= self.size:
-            self.size += 1
-            self.flags[flag_idx] = 1
-            key_array.extend(search_prefix + (_msg_dumps(row_id) or b''))
-            return
+        if not (n_bytes <= 0 or not self.flags[flag_idx] or self.mode & 0x1000 and row_id >= self.size):
+            old_row_id, s_idx, e_idx = self._find_key(key, key_array)
+            if old_row_id >= 0:
+                if old_row_id != row_id:
+                    key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
 
-        prefix_len = len(search_prefix)
-        idx = key_array.find(search_prefix)
-        while idx >= 0:
-            val_idx = idx + prefix_len
-            val_type = key_array[val_idx]
-            val_len = 1 if val_type <= 0x7f or val_type >= 0xe0 else \
-                        2 if val_type == 0xcc or val_type == 0xd0 else \
-                        3 if val_type == 0xcd or val_type == 0xd1 else \
-                        5 if val_type == 0xce or val_type == 0xd2 else \
-                        9 if val_type == 0xcf or val_type == 0xd3 else 0
+                return
 
-            val_idx_e = val_idx + val_len
-            if val_len > 0 and val_idx_e <= n_bytes:
-                if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    _row_id = val_type if val_type <= 0x7f else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
-                        val_type - 256 if val_type >= 0xe0 else -1
-
-                    if _row_id >= 0:
-                        if _row_id != row_id:
-                            key_array[idx:val_idx_e] = search_prefix + (_msg_dumps(row_id) or b'')
-
-                        return
-
-            idx = key_array.find(search_prefix, idx+1) # pragma: no cover
-
-        if True: # pragma: no cover
-            self.size += 1
-            self.flags[flag_idx] = 1
-            key_array.extend(search_prefix + (_msg_dumps(row_id) or b''))
+        self.size += 1
+        self.flags[flag_idx] = 1
+        key_array.extend(_msg_dumps((key, row_id)) or b'')
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Extract and remove specific entries maps tracks variables returning previous records boundaries indices numbers parameters logs.
@@ -963,35 +935,12 @@ class LiteKeyTable(KeyTable):
             key_array = self.groups[0]
 
         n_bytes = len(key_array)
-        if n_bytes <= 0 or not self.flags[_hash_id & self.flags_mask]:
-            return default_row_id
-
-        search_prefix = b'\x92' + (_msg_dumps(key) or b'')
-        prefix_len = len(search_prefix)
-        idx = key_array.find(search_prefix)
-        while idx >= 0:
-            val_idx = idx + prefix_len
-            val_type = key_array[val_idx]
-            val_len = 1 if val_type <= 0x7f or val_type >= 0xe0 else \
-                        2 if val_type == 0xcc or val_type == 0xd0 else \
-                        3 if val_type == 0xcd or val_type == 0xd1 else \
-                        5 if val_type == 0xce or val_type == 0xd2 else \
-                        9 if val_type == 0xcf or val_type == 0xd3 else 0
-
-            val_idx_e = val_idx + val_len
-            if val_len > 0 and val_idx_e <= n_bytes:
-                if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    row_id = val_type if val_type <= 0x7f else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
-                        val_type - 256 if val_type >= 0xe0 else -1
-
-                    if row_id >= 0:
-                        del key_array[idx:val_idx_e]
-                        self.size -= 1
-                        return row_id
-
-            idx = key_array.find(search_prefix, idx+1) # pragma: no cover
+        if not (n_bytes <= 0 or not self.flags[_hash_id & self.flags_mask]):
+            row_id, s_idx, e_idx = self._find_key(key, key_array)
+            if row_id >= 0:
+                del key_array[s_idx:e_idx]
+                self.size -= 1
+                return row_id
 
         return default_row_id
 
@@ -1023,32 +972,8 @@ class LiteKeyTable(KeyTable):
         if n_bytes <= 0:
             return default_row_id
 
-        search_prefix = b'\x92' + (_msg_dumps(key) or b'')
-        prefix_len = len(search_prefix)
-        idx = key_array.find(search_prefix)
-        while idx >= 0:
-            val_idx = idx + prefix_len
-            val_type = key_array[val_idx]
-            val_len = 1 if val_type <= 0x7f or val_type >= 0xe0 else \
-                        2 if val_type == 0xcc or val_type == 0xd0 else \
-                        3 if val_type == 0xcd or val_type == 0xd1 else \
-                        5 if val_type == 0xce or val_type == 0xd2 else \
-                        9 if val_type == 0xcf or val_type == 0xd3 else 0
-
-            val_idx_e = val_idx + val_len
-            if val_len > 0 and val_idx_e <= n_bytes:
-                if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
-                    row_id = val_type if val_type <= 0x7f else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
-                        int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
-                        val_type - 256 if val_type >= 0xe0 else -1
-
-                    if row_id >= 0:
-                        return row_id
-
-            idx = key_array.find(search_prefix, idx+1)
-
-        return default_row_id
+        row_id, _s, _e = self._find_key(key, key_array)
+        return row_id if row_id >= 0 else default_row_id
 
     def items(self) -> Generator[str,int]:
         """Generate unpacked data pairs mapping query strings onto row slot integers indices coordinates from binary matrices blocks fields.
@@ -1175,6 +1100,45 @@ class LiteKeyTable(KeyTable):
 
         return True
 
+    def _find_key(self, key:str, key_array:bytearray) -> Tuple[int, int, int]:
+        """Find key msgpack pattern in bytearray.
+
+        Args:
+            key (str): key in bytearray.
+            key_array (bytearray): store all keys in byte
+
+        Returns:
+            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index (not found=(-1, -1, -1))
+        """
+        n_bytes = len(key_array)
+        if n_bytes > 0:
+            search_prefix = b'\x92' + (_msg_dumps(key) or b'')
+            prefix_len = len(search_prefix)
+            idx = key_array.find(search_prefix)
+            while idx >= 0:
+                val_idx = idx + prefix_len
+                val_type = key_array[val_idx]
+                val_len = 1 if val_type <= 0x7f or val_type >= 0xe0 else \
+                        2 if val_type == 0xcc or val_type == 0xd0 else \
+                        3 if val_type == 0xcd or val_type == 0xd1 else \
+                        5 if val_type == 0xce or val_type == 0xd2 else \
+                        9 if val_type == 0xcf or val_type == 0xd3 else 0
+
+                val_idx_e = val_idx + val_len
+                if val_len > 0 and val_idx_e <= n_bytes:
+                    if val_idx_e == n_bytes or key_array[val_idx_e] == 0x92:
+                        row_id = val_type if val_type <= 0x7f else \
+                            int.from_bytes(key_array[val_idx+1:val_idx_e], 'big') if 0xcf >= val_type >= 0xcc else \
+                            int.from_bytes(key_array[val_idx+1:val_idx_e], 'big', signed=True) if 0xd3 >= val_type >= 0xd0 else \
+                            val_type - 256 if val_type >= 0xe0 else -1
+
+                        if row_id >= 0:
+                            return row_id, idx, val_idx_e
+
+                idx = key_array.find(search_prefix, idx+1) # pragma: no cover
+
+        return -1, -1, -1
+
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1284,38 +1248,42 @@ class JIoHEAD:
         Returns:
             Tuple[int,int,int,int,int,int,int,int,int]: Complete state representation parameters tracking database properties registers.
         """
-        if header[0] == 91: # '['
-            info = _json_loads(header)
-        else: # pragma: no cover
-            # deprecated
-            info = [int(v) for v in header.decode('utf8').split(',')]
+        try:
+            if header[0] == 91: # '['
+                info = _json_loads(header)
+            else: # pragma: no cover
+                # deprecated
+                info = [int(v) for v in header.decode('utf8').split(',')]
 
-        nn = len(info)
-        if nn >= 9:
-            sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver = info[:9]
+            nn = len(info)
+            if nn >= 9:
+                sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver = info[:9]
 
-        else: # pragma: no cover
-            if nn >= 8:
-                sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id = info[:8]
-                api_ver = API_V0
+            else: # pragma: no cover
+                if nn >= 8:
+                    sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id = info[:8]
+                    api_ver = API_V0
 
-            elif nn >= 7:
-                sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id = info[:7]
-                remv_id = sync_id % 10
-                api_ver = API_V0
+                elif nn >= 7:
+                    sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id = info[:7]
+                    remv_id = sync_id % 10
+                    api_ver = API_V0
 
-            elif nn >= 4:
-                sync_id, n_records, n_lines, index_size = info[:4]
-                zip_type = info[4] if nn >= 5 else 0
-                data_type = info[5] if nn >= 6 else 1
-                swap_id = info[6] if nn >= 7 else (sync_id % 10)
-                remv_id = info[7] if nn >= 8 else (sync_id % 10)
-                api_ver = API_V0
+                elif nn >= 4:
+                    sync_id, n_records, n_lines, index_size = info[:4]
+                    zip_type = info[4] if nn >= 5 else 0
+                    data_type = info[5] if nn >= 6 else 1
+                    swap_id = info[6] if nn >= 7 else (sync_id % 10)
+                    remv_id = info[7] if nn >= 8 else (sync_id % 10)
+                    api_ver = API_V0
 
-            else:
-                raise ValueError(f'cannot decode header (n={nn})')
+                else:
+                    raise ValueError(f'cannot decode header (n={nn})')
 
-        return sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver
+            return sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e:
+            raise ValueError from e
 
     def dumps_v1(self, sync_id:int, n_records:int, n_lines:int, index_size:int, zip_type:int, data_type:int, swap_id:int, remv_id:int, api_ver:int) -> bytes:
         """Pack production V1 dataset schemas configurations header states definitions straight into compact JSON data payloads arrays.
@@ -1359,7 +1327,11 @@ class JIoHEAD:
         Returns:
             bytes: Encoded JSON sequence representing dataset parameters blocks layouts template.
         """
-        return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver))
+        try:
+            return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e:
+            raise ValueError from e
 
     def loads_v1(self, header:bytes) -> Tuple[int,int,int,int,int,int,int,int,int]:
         """Unpack production V1 data matrices parameters sheets extracting variables settings via core JSON interpretation filters.
@@ -1376,11 +1348,8 @@ class JIoHEAD:
         try:
             return _json_loads(header)
 
-        except (ValueError, JSONDecodeError):
-            try:
-                return self.loads_v0(header)
-            except (ValueError, JSONDecodeError) as e:
-                raise ValueError from e
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError):
+            return self.loads_v0(header)
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1400,129 +1369,193 @@ class JIoKEY(metaclass=ABCMeta): # pragma: no cover
 class JIoKEY_J(JIoKEY):
     """JSON serialization codec subclass managing row metadata translation models arrays fields."""
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
+        try:
+            return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        args = _json_loads(data)
-        if len(args) != 6: # pragma: no cover
-            args.append(0)
+        try:
+            args = _json_loads(data)
+            if len(args) != 6: # pragma: no cover
+                args.append(0)
 
-        key, file_id, offset, row_size, ver, days = args[:6]
-        val_size = row_size >> 32
-        row_size &= 0X_FFFF_FFFF
-        return key, file_id, offset, row_size, val_size, ver, days
+            key, file_id, offset, row_size, ver, days = args[:6]
+            val_size = row_size >> 32
+            row_size &= 0X_FFFF_FFFF
+            return key, file_id, offset, row_size, val_size, ver, days
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise ValueError from e
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
+        try:
+            return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        return _json_loads(data)
+        try:
+            return _json_loads(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise ValueError from e
 
 class JIoKEY_S(JIoKEY):
     """MsgPack compression serialization codec subclass handling high density row index mapping metadata packing rows blocks fields parameters."""
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) or b''
-        info_len = len(info_b)
-        return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+        try:
+            info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) or b''
+            info_len = len(info_b)
+            return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        prefix0, prefix1, prefix2, info0 = data[:4]
-        if prefix0 != 0xcd or info0 != 0x96:
-            raise ValueError
+        try:
+            prefix0, prefix1, prefix2, info0 = data[:4]
+            if prefix0 == 0xcd and info0 == 0x96:
+                info_len = (prefix1 << 8)| prefix2
+                end_idx = info_len + 3
+                key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
+                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
 
-        info_len = (prefix1 << 8)| prefix2
-        end_idx = info_len + 3
-        key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
-        return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
+
+        raise ValueError
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days)) or b''
-        info_len = len(info_b)
-        return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+        try:
+            info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days)) or b''
+            info_len = len(info_b)
+            return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        prefix0, prefix1, prefix2, info0 = data[:4]
-        if prefix0 != 0xcd or info0 != 0x97:
-            raise ValueError
+        try:
+            prefix0, prefix1, prefix2, info0 = data[:4]
+            if prefix0 == 0xcd and info0 == 0x97:
+                info_len = (prefix1 << 8)| prefix2
+                end_idx = info_len + 3
+                return _msg_loads(data[3:end_idx])
 
-        info_len = (prefix1 << 8)| prefix2
-        end_idx = info_len + 3
-        return _msg_loads(data[3:end_idx])
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
+
+        raise ValueError
 
 class JIoKEY_M(JIoKEY):
     """Marshal binary compilation speed codec subclass handling raw system variables mapping optimization layouts structures."""
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        # nosemgrep
-        return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
+        try:
+            # nosemgrep
+            return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        # nosemgrep
-        args = marshal_loads(data) # nosec B302
-        if not isinstance(args, (list, tuple)):
-            raise ValueError
+        try:
+            # nosemgrep
+            args = marshal_loads(data) # nosec B302
+            if isinstance(args, (list, tuple)):
+                if len(args) != 6: # pragma: no cover
+                    args.append(0)
 
-        if len(args) != 6: # pragma: no cover
-            args.append(0)
+                key, file_id, offset, row_size, ver, days = args[:6]
+                val_size = row_size >> 32
+                row_size &= 0X_FFFF_FFFF
+                return key, file_id, offset, row_size, val_size, ver, days
 
-        key, file_id, offset, row_size, ver, days = args[:6]
-        val_size = row_size >> 32
-        row_size &= 0X_FFFF_FFFF
-        return key, file_id, offset, row_size, val_size, ver, days
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
+
+        raise ValueError
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        # nosemgrep
-        return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
+        try:
+            # nosemgrep
+            return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         # nosemgrep
-        args = marshal_loads(data) # nosec B302
-        if isinstance(args, (list, tuple)):
-            return args
+        try:
+            args = marshal_loads(data) # nosec B302
+            if isinstance(args, (list, tuple)):
+                return args
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
         raise ValueError
 
 class JIoKEY_L(JIoKEY):
     """Legacy text string comma-separated encoder subclass generating human-readable tracking line rows entries records segments maps paths."""
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days}'
-        return data.encode('utf8')
+        try:
+            data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days}'
+            return data.encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        data_s = data.decode('utf8').rstrip()
-        fields = data_s.split(',')
-        file_id = int(fields[-3])
-        offset = int(fields[-2])
-        n_fields = len(fields)
-        key = ','.join(fields[:-3]) if n_fields > 4 else fields[0]
-        extra = fields[-1].split('|')
-        n_extra = len(extra)
-        if n_extra > 2:
-            row_size = int(extra[0])
-            ver = int(extra[1])
-            days = int(extra[2])
-        else: # pragma: no cover
-            if n_extra > 1:
+        try:
+            data_s = data.decode('utf8').rstrip()
+            fields = data_s.split(',')
+            file_id = int(fields[-3])
+            offset = int(fields[-2])
+            n_fields = len(fields)
+            key = ','.join(fields[:-3]) if n_fields > 4 else fields[0]
+            extra = fields[-1].split('|')
+            n_extra = len(extra)
+            if n_extra > 2:
                 row_size = int(extra[0])
                 ver = int(extra[1])
-                days = 0
-            else:
-                row_size = int(extra[0])
-                ver = 0
-                days = 0
+                days = int(extra[2])
+            else: # pragma: no cover
+                if n_extra > 1:
+                    row_size = int(extra[0])
+                    ver = int(extra[1])
+                    days = 0
+                else:
+                    row_size = int(extra[0])
+                    ver = 0
+                    days = 0
 
-        return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
+            return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
-        data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days}'
-        return data.encode('utf8')
+        try:
+            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days}'
+            return data.encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        data_s = data.decode('utf8').rstrip()
-        fields = data_s.split(',')
-        n_fields = len(fields)
-        key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
-        file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
-        return key, file_id, offset, row_size, val_size, ver, days
+        try:
+            data_s = data.decode('utf8').rstrip()
+            fields = data_s.split(',')
+            n_fields = len(fields)
+            key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
+            file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
+            return key, file_id, offset, row_size, val_size, ver, days
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
+            raise ValueError from e
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1538,7 +1571,11 @@ class JIoVAL(metaclass=ABCMeta): # pragma: no cover
 class JIoVAL_J(JIoVAL):
     """JSON values payload formatting subsystem driver handling readable text matrices generation."""
     def dumps(self, data:Any) -> bytes:
-        return _json_dumps(data, default=_json_default)
+        try:
+            return _json_dumps(data, default=_json_default)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads(self, data:bytes) -> Any:
         try:
@@ -1554,20 +1591,24 @@ class JIoVAL_J(JIoVAL):
 
             return val
 
-        except Exception as e: # pragma: no cover
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise ValueError from e
 
 class JIoVAL_S(JIoVAL):
     """MsgPack value payload compiler handling high density binary records packaging."""
     def dumps(self, data:Any) -> bytes:
-        return _msg_dumps(data, default=_msg_encode) or b''
+        try:
+            return _msg_dumps(data, default=_msg_encode) or b''
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
             try:
                 return _msg_loads(data, ext_hook=_msg_decode, strict_map_key=False)
 
-            except (ValueError, EOFError):
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
                 data = data + b'\xc1'
 
         raise ValueError
@@ -1575,8 +1616,12 @@ class JIoVAL_S(JIoVAL):
 class JIoVAL_M(JIoVAL):
     """Marshal payload value processing interface utilizing rapid low-level internal runtime hooks."""
     def dumps(self, data:Any) -> bytes:
-        # nosemgrep
-        return marshal_dumps(data)
+        try:
+            # nosemgrep
+            return marshal_dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
@@ -1584,7 +1629,7 @@ class JIoVAL_M(JIoVAL):
                 # nosemgrep
                 return marshal_loads(data) # nosec B302
 
-            except (ValueError, EOFError):
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError):
                 data = data + b'\n'
 
         raise ValueError
@@ -1592,8 +1637,12 @@ class JIoVAL_M(JIoVAL):
 class JIoVAL_P(JIoVAL):
     """Pickle value payload subsystem driver supporting deep preservation of native Python objects graphs layouts."""
     def dumps(self, data:Any) -> bytes:
-        # nosemgrep
-        return pickle_dumps(data)
+        try:
+            # nosemgrep
+            return pickle_dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, PicklingError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
@@ -1601,7 +1650,7 @@ class JIoVAL_P(JIoVAL):
                 # nosemgrep
                 return pickle_loads(data) # nosec B301
 
-            except (ValueError, EOFError, PicklingError): # pragma: no cover
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, PicklingError): # pragma: no cover
                 data = data + b'\n'
 
         raise ValueError
@@ -1612,7 +1661,11 @@ class JIoVAL_Y(JIoVAL):
         if yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
-        return yaml.safe_dump(data, allow_unicode=True).encode('utf8')
+        try:
+            return yaml.safe_dump(data, allow_unicode=True).encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError) as e: # pragma: no cover
+            raise ValueError from e
 
     def loads(self, data:bytes) -> Any:
         if yaml is None: # pragma: no cover
@@ -1621,7 +1674,8 @@ class JIoVAL_Y(JIoVAL):
         for _ in range(9):
             try:
                 return yaml.safe_load(data)
-            except yaml.YAMLError: # pragma: no cover
+
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError): # pragma: no cover
                 data = data + b'\n'
 
         raise ValueError
@@ -2528,10 +2582,12 @@ class JIo:
         zip_type_i = self._zip_type if zip_type is None else zip_type
         if zip_type_i == NO_ZIP:
             return data
+
         try:
             return self.VAL_zip(data)
 
-        except Exception as e: # pragma: no cover
+        except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error, \
+                ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError) as e:
             print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!zip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type_i})\nexception:{e}', red=1))
             raise ValueError from e
 
@@ -2550,28 +2606,25 @@ class JIo:
         """
         zip_type_i = self._zip_type if zip_type is None else zip_type
         try:
-            try:
-                if zip_type_i < 0:
-                    zip_type_i = -zip_type_i-1
-                    return data if zip_type_i == NO_ZIP else self.VAL_unzip0(data)
+            if zip_type_i < 0:
+                zip_type_i = -zip_type_i-1
+                return data if zip_type_i == NO_ZIP else self.VAL_unzip0(data)
 
-                return self.VAL_unzip(self.pad0_byte, data)
+            return self.VAL_unzip(self.pad0_byte, data)
 
-            except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error) as e:
-                pad = self.pad_byte
-                data = data.rstrip(pad) + pad
-                for ii in range(8):
-                    try:
-                        print(Style(f'!!!!!!!!!!! [{ii}|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!unzip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type})', yellow=1))
-                        return self.VAL_unzip0(data)
+        except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error, \
+                ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError) as e:
+            pad = self.pad_byte
+            data = data.rstrip(pad) + pad
+            for ii in range(8):
+                try:
+                    print(Style(f'!!!!!!!!!!! [{ii}|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!unzip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type})', yellow=1))
+                    return self.VAL_unzip0(data)
 
-                    except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error):
-                        data += pad
+                except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error, \
+                        ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError):
+                    data += pad
 
-                raise ValueError from e
-
-        except Exception as e: # pragma: no cover
-            print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!unzip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type_i})\nexception:{e}', red=1))
             raise ValueError from e
 
     def seek(self, fp:IO, row_id:int):
@@ -2664,7 +2717,6 @@ class JIo:
 
         data = fp.read(index_size)
         info = self.KEY_loads(data)
-
         self._KEY_row1 = self._KEY_row0
         self._KEY_row0 = (row_id, info)
         return info
@@ -2908,7 +2960,7 @@ class JIo:
             val_bytes = self.VAL_dumps(data)
             return self.zip(val_bytes, zip_type=zip_type)
 
-        except Exception as e: # pragma: no cover
+        except ValueError as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!dumps_with_zip(data={type(data)}, zip_type={zip_type})\nexception:{e}', red=1))
             raise ValueError from e
 
@@ -2926,7 +2978,7 @@ class JIo:
             unzip_bytes = self.unzip(val_bytes, zip_type=zip_type)
             return self.VAL_loads(unzip_bytes)
 
-        except Exception as e: # pragma: no cover
+        except ValueError as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!loads_with_unzip(val_bytes[{len(val_bytes)}]={val_bytes[-512:]}, zip_type={zip_type})\nexception:{e}', red=1))
             raise ValueError from e
 
@@ -3238,7 +3290,7 @@ class JIo:
                 try:
                     key, file_id, offset, row_size, _val_size, _ver, _days = KEY_loads(line)
 
-                except Exception as e: # pragma: no cover
+                except ValueError as e: # pragma: no cover
                     if lines < n_lines or records < n_records:
                         print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
                     break
@@ -3267,7 +3319,7 @@ class JIo:
                 try:
                     key, file_id, offset, row_size, _val_size, _ver, _days = KEY_loads(line)
 
-                except Exception as e: # pragma: no cover
+                except ValueError as e: # pragma: no cover
                     if lines < n_lines or records < n_records:
                         print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
                     break

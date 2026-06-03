@@ -149,6 +149,9 @@ Query Engine
    # get all records from database
    print(jdb[:]) # print all records from jdb
 
+   # show table
+   jdb.show()
+
    # Use FUNCTION to find record(s) matching the name 'John'
    matches = jdb.find(FUNC=lambda key,val: val['name'] == 'John') 
    print(matches) # Output : {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
@@ -266,12 +269,18 @@ CSV Import / Export
    # export the data to CSV
    jdb1.to_csv('example.csv')
 
+   # show table
+   jdb1.show()
+
    # create another JDb in memory
    jdb2 = JDb()
    
    # import the data from CSV
    jdb2.from_csv('example.csv')
    print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
+
+   # show table
+   jdb2.show(RE='Bob')
 
 INI / TOML Import
 -----------------

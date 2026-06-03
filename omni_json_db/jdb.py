@@ -2510,62 +2510,38 @@ class JDb(JDbReader):
 
                 if isinstance(val, dict):
                     kk = '|'.join(val)
-                    if kk in patterns:
-                        continue
+                    if kk not in patterns:
+                        patterns.add(kk)
+                        for kk in val:
+                            if kk not in fields:
+                                fields.append(kk)
 
-                    patterns.add(kk)
-                    for kk in val:
-                        if kk not in fields:
-                            fields.append(kk)
-                    continue
-
-                if isinstance(val, (str, bytes, bytearray, int, float, bool)):
-                    if 1 in patterns:
-                        continue
-
-                    patterns.add(1)
-                    kk = 'COL1'
-                    while kk in fields and kk != fields[0]: # pragma: no cover
-                        kk += '$'
-
-                    if not fields or kk != fields[0]:
+                elif isinstance(val, (str, bytes, bytearray, int, float, bool)):
+                    kk = '__1__'
+                    if kk not in patterns:
+                        patterns.add(kk)
                         fields.insert(0, kk)
 
-                    continue
-
-                if hasattr(val, '__iter__') and val:
-                    n = len(val)
-                    if n not in patterns:
-                        for ii in range(n):
-                            kk = f'COL{ii+1}'
-                            while kk in fields and kk != fields[ii]: # pragma: no cover
-                                kk += '$'
-
-                            if not fields or len(fields) <= ii or kk != fields[ii]:
-                                fields.insert(ii, kk)
-
-                        patterns.add(n)
-
-                    continue
-
-                #pass;0;assert not hasattr(val, '__len__')
-                if 1 not in patterns: # pragma: no cover
-                    patterns.add(1)
-                    kk = 'COL1'
-                    while kk in fields and kk != fields[0]:
-                        kk += '$'
-
-                    if not fields or kk != fields[0]:
-                        fields.insert(0, kk)
+                elif hasattr(val, '__iter__') and val:
+                    nn = len(val)
+                    kk = f'__V{nn}__'
+                    offset = 2 if '__1__' in patterns else 1
+                    if kk not in patterns:
+                        patterns.add(kk)
+                        for ii in range(nn):
+                            kk = f'__V{ii+1}__'
+                            patterns.add(kk)
+                            if kk not in fields:
+                                fields.insert(ii+offset, kk)
 
             if not fields:
                 return False
 
-            kk = 'ID0' if not key else key
+            kk = '_id' if not key else key
             while kk in fields and kk != fields[0]: # pragma: no cover
                 kk += '$'
 
-            if not fields or  kk != fields[0]:
+            if kk != fields[0]:
                 fields.insert(0, kk)
 
             try:
@@ -2577,7 +2553,6 @@ class JDb(JDbReader):
                 n_records = io.n_records
                 io_read_key = io.read_key
                 io_read_value = io.read_value
-                cache_limit = self._cache_limit
                 writer = DictWriter(csv_fp, fieldnames=fields, **kwargs)
                 writer.writeheader()
                 for row_id in range(n_records):
@@ -2591,25 +2566,22 @@ class JDb(JDbReader):
                             val_fp, __i, __o  = f_get_val_fp(fp, _file_id)
                             val = io_read_value(val_fp, _offset, _size, _vsize)
 
-                        if cache_limit != 0:
-                            _update_cache(_key, val, copy=False)
-
                     csv_row = {field:None for field in fields}
                     csv_row[fields[0]] = _key
 
                     if isinstance(val, dict):
-                        for field in fields[1:]:
+                        for field,vv in val.items():
                             csv_row[field] = val.get(field, None)
 
                     elif isinstance(val, (str, bytes, bytearray, int, float, bool)):
-                        csv_row[fields[1]] = val
+                        csv_row['__1__'] = val
 
                     elif hasattr(val, '__iter__'):
                         for ii,vv in enumerate(val):
-                            csv_row[fields[ii+1]] = vv
+                            csv_row[f'__V{ii+1}__'] = vv
 
                     else:
-                        csv_row[fields[1]] = str(val)
+                        csv_row['__1__'] = str(val)
 
                     writer.writerow(csv_row)
                     if (row_id % 1000) == 0:
@@ -3782,7 +3754,13 @@ class JDb(JDbReader):
                 idx = buffer_size - index_size
                 ext_row = -1
                 while row >= start_row:
-                    dead_key, file_id, offset, row_size, __s, __v, __d = KEY_loads(buffer[idx:idx+index_size])
+                    try:
+                        dead_key, file_id, offset, row_size, __s, __v, __d = KEY_loads(buffer[idx:idx+index_size])
+                    except ValueError: # pragma: no cover
+                        # reset dead row if fail to load
+                        dead_key, file_id, offset, row_size, val_size, ver, days = ('', 0, 0, 0, 0, 0, 0)
+                        io.write_key(key_fp, row, dead_key, file_id, offset, row_size, val_size, ver, days)
+
                     if req_size == 0:
                         if row_size == 0:
                             return start_line, row, dead_key, file_id, offset, row_size
@@ -3909,7 +3887,7 @@ class JDb(JDbReader):
                         #pass;0;assert isinstance(rec_args, (list,tuple))
                         io.key_table[rec_args[0]] = row
                         swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
-                    else:
+                    else: # pragma: no cover
                         pass
 
                     # old value -> DEAD[h]

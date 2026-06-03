@@ -8,6 +8,7 @@ from threading import RLock, get_ident, Thread
 from socketserver import TCPServer
 from struct import Struct
 from enum import IntFlag
+from unicodedata import east_asian_width
 from typing import Any, Union, Optional, Tuple, Set, Dict, Callable, Generator, IO
 # from os import makedirs, stat as os_stat, getcwd
 # from time import time
@@ -4086,14 +4087,14 @@ class JDbReader:
 
         return matches
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Union[str,datetime,dt_date,int,None]=None, limit:int=0, with_value:bool=False, sort:int=0, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, sort:int=0, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
         Args:
             keys (Optional[Any], optional): Condition for key filtering.
             vals (Optional[Dict[str, Any]], optional): Condition for value filtering using operators.
-            date (Union[str, datetime, dt_date, int, None], optional): Date filters.
+            date (Optional[Any], optional): Date filters.
             limit (int, optional): Maximum item cap. Defaults to 0.
             with_value (bool, optional): Whether to decode the real value. Defaults to False.
             sort (int, optional): Sorting direction (1 for ascending, -1 for descending, 0 for unsorted). Defaults to 0.
@@ -4109,6 +4110,126 @@ class JDbReader:
             return dict(sorted(matches.items(), key=lambda v : v[1], reverse=sort<0))
 
         return matches
+
+    def show(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=20, **kwargs) -> None:
+        """
+        show matched key+value in table.
+
+        Args:
+            keys (Optional[Any], optional): Condition for key filtering.
+            vals (Optional[Dict[str, Any]], optional): Condition for value filtering using operators.
+            date (Optional[Any], optional): Date filters.
+            limit (int, optional): +ve matched item. 0=all matched items (default=20)
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'apple': {'color':'red', 'qty':10}, 'banana':{'color':'yellow', 'qty':100, 'from':'Japan'}}
+            >>> jdb.show(limit=0) # show all records
+                +--------+--------+-----+-------+
+                | _id    | color  | qty | from  |
+                +--------+--------+-----+-------+
+                | apple  | red    | 10  |       |
+                | banana | yellow | 100 | Japan |
+                +--------+--------+-----+-------+
+            >>> jdb.show(limit=1)
+                +--------+--------+-----+-------+
+                | _id    | color  | qty | from  |
+                +--------+--------+-----+-------+
+                | apple  | red    | 10  |       |
+                +--------+--------+-----+-------+
+            >>> jdb.show(vals={'qty': {'$gt': 50}})
+                +--------+--------+-----+-------+
+                | _id    | color  | qty | from  |
+                +--------+--------+-----+-------+
+                | banana | yellow | 100 | Japan |
+                +--------+--------+-----+-------+
+        """
+
+        data_rows = []
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=True, **kwargs):
+            data_rows.append((key, val))
+
+        fields = ['_id']
+        patterns = {'_id'}
+        for _key, val in data_rows:
+            if isinstance(val, dict):
+                kk = '|'.join(val)
+                if kk not in patterns:
+                    patterns.add(kk)
+                    for kk in val:
+                        if kk not in fields:
+                            fields.append(kk)
+
+            elif isinstance(val, (str, bytes, bytearray, int, float, bool)) or val is None:
+                kk = '__1__'
+                if kk not in patterns:
+                    patterns.add(kk)
+                    fields.insert(1, kk)
+
+            elif hasattr(val, '__iter__') and val:
+                nn = len(val)
+                kk = f'__V{nn}__'
+                offset = 2 if '__1__' in patterns else 1
+                if kk not in patterns:
+                    patterns.add(kk)
+                    for ii in range(nn):
+                        kk = f'__V{ii+1}__'
+                        patterns.add(kk)
+                        if kk not in fields:
+                            fields.insert(ii+offset, kk)
+
+        def _format_cell(val:Any) -> str:
+            if val is None:
+                return ""
+
+            if isinstance(val, str):
+                return val
+
+            if isinstance(val, (int, float, bool, bytes, bytearray)):
+                return str(val)
+
+            return f"<{type(val).__name__}>"
+
+        def _get_display_width(s_str:str) -> int:
+            width = 0
+            for ch in s_str:
+                width += (2 if east_asian_width(ch) in ('W', 'F', 'A') else 1)
+            return width
+
+        col_widths = {field: _get_display_width(field) for field in fields}
+        matrix = []
+        for key, val in data_rows:
+            row_data = {field:'' for field in fields}
+            row_data['_id'] = key
+            col_widths['_id'] = max(col_widths['_id'], _get_display_width(key))
+            if isinstance(val, dict):
+                for field,vv in val.items():
+                    row_data[field] = vv_s = _format_cell(vv)
+                    col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+
+            elif isinstance(val, (str, bytes, bytearray, int, float, bool)) or val is None:
+                field = '__1__'
+                row_data[field] = vv_s = _format_cell(val)
+                col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+
+            elif hasattr(val, '__iter__'):
+                for ii, vv in enumerate(val):
+                    field = f'__V{ii+1}__'
+                    row_data[field] = vv_s = _format_cell(vv)
+                    col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+
+            matrix.append(row_data)
+
+        def _pad_string(s_str, target_width):
+            return s_str + " " * (target_width - _get_display_width(s_str))
+
+        border = "+" + "+".join("-" * (col_widths[field] + 2) for field in fields) + "+"
+        print(border)
+        print("|" + "|".join(" " + _pad_string(field, col_widths[field]) + " " for field in fields) + "|")
+        print(border)
+        for row_data in matrix:
+            print("|" + "|".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "|")
+        print(border)
 
     def sync(self, force:bool=False) -> JDbReader:
         """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.
@@ -4651,13 +4772,9 @@ class JDbReader:
         if not val_bytes: # pragma: no cover
             raise ValueError
 
-        try:
-            val_bytes = io.unzip(val_bytes, zip_type=zip_type)
-            val = io.VAL_loads(val_bytes)
-            return val, val_bytes
-
-        except Exception as e: # pragma: no cover
-            raise ValueError from e
+        val_bytes = io.unzip(val_bytes, zip_type=zip_type)
+        val = io.VAL_loads(val_bytes)
+        return val, val_bytes
 
     def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True) -> Any:
         """
