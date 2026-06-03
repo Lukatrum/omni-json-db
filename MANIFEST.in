@@ -1,0 +1,5 @@
+# Exclude the entire docs and tests directories from the source distribution (tar.gz)
+prune docs
+prune tests
+prune db
+prune artwork

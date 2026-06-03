@@ -958,6 +958,8 @@ class TestJDb(unittest.TestCase):
             with open(csv_file, 'rt', encoding='utf8') as fp:
                 print(fp.read())
 
+            jdb.show()
+
             jmem2 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem2.from_csv(csv_file)
             self.assertEqual(set(jdb), set(jmem2))
