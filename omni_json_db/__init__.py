@@ -9,14 +9,13 @@ from .jdb_net import JNetFiles
 from .jdb_lite import JDbReader, SEP_SYM, JFlag, run_files_server
 from .jdb import JDb
 from .utils import JError, JKeyError, JValueError, JTypeError
-# from .jdb_io import JIo, LiteKeyTable, BTreeKeyTable
 
 __package_name__    = 'omni_json_db'
 __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful JSON database with compression. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.12.17'
+__version__         = '2.12.18'
 
 __all__ = [
     'JDb',

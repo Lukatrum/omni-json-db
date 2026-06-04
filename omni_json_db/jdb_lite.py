@@ -4540,7 +4540,7 @@ class JDbReader:
             _key, file_id, offset, row_size, val_size, _ver, _old_days = io.read_key(key_fp, row)
             if row_size == 0 and file_id == 0x10:
                 jdb = self._decode_row(file_id, offset, key, val_size)
-                if isinstance(jdb, JDbReader) and self.files_obj.is_group(jdb.files_obj.get_KEY(), key):
+                if isinstance(jdb, JDbReader) and self.files_obj.is_group(jdb.files_obj, key):
                     io.groups[key] = jdb
                     self.childs.pop(key, None)
                     return jdb
@@ -5213,7 +5213,7 @@ class JDbReader:
             # 0x10 ~ 0x1f
             if is_jdb:
                 io = self.io
-                if key not in io.groups and self.files_obj.is_group(val.files_obj.get_KEY(), key):
+                if key not in io.groups and self.files_obj.is_group(val.files_obj, key):
                     io.groups[key] = val
                     self.childs.pop(key, None)
 

@@ -5,7 +5,7 @@ from socketserver import BaseRequestHandler, ThreadingMixIn, TCPServer
 from struct import Struct
 from socket import socket, AF_INET, SOCK_STREAM
 from threading import RLock, get_ident
-from typing import Optional, Tuple, IO
+from typing import Optional, Union, Tuple, IO
 #-----------------------------------------------------------------------------
 from msgpack import packb as msg_dumps, unpackb as msg_loads
 #-----------------------------------------------------------------------------
@@ -621,11 +621,11 @@ class JNetFiles(JFilesBase):
 
         raise IOError
 
-    def is_group(self, KEY_file:str, name:str) -> bool:
+    def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Query if designated partition trees paths match layout guidelines managed on the remote workspace.
 
         Args:
-            KEY_file (str): Identification context key targeting specific files metrics coordinates.
+            KEY_file (Union[str,JFilesBase]): Identification context key targeting specific files metrics coordinates.
             name (str): Label matching targeted group space configuration block entries properties fields.
 
         Returns:
@@ -633,6 +633,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
+                KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
                 dump_and_send(self.sock, ('KEY', 'is_group', [], {'KEY_file':KEY_file, 'name':name}))
                 resp = recv_and_load(self.sock)
 

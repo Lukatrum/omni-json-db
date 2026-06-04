@@ -195,7 +195,7 @@ class FileLockException(Exception):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-DELAY_S = 1
+DELAY_S = 0.05
 
 class FileLock:
     """High-performance thread-safe and process-safe synchronization locking mechanism manager proxy.
@@ -418,8 +418,8 @@ class FileLock:
                     break
 
                 except BlockingIOError as e:
-                    if __debug__:
-                        print(f'\t\t\t[{self.files_obj.get_name()}] {hex(ident)[-8:]} mode:{self._mode} req:{"r" if read_only else "w"} lock:{self._is_locked.is_set()} {e}')
+                    # if __debug__:
+                    #     print(f'\t\t\t[{self.files_obj.get_name()}] {hex(ident)[-8:]} mode:{self._mode} req:{"r" if read_only else "w"} lock:{self._is_locked.is_set()} {e}')
 
                     if timeout == 0: # pragma: no cover
                         raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from e

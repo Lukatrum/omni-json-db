@@ -2,7 +2,7 @@
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from io import RawIOBase
-from typing import Optional, IO
+from typing import Optional, Union, IO
 from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
 from os import remove as os_remove, stat as os_stat
 from os.path import basename, dirname, join as path_join, exists as path_exists
@@ -510,7 +510,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def get_path(self, folder:str='') -> str: ...
     @abstractmethod
-    def is_group(self, KEY_file:str, name:str) -> bool: ...
+    def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool: ...
     @abstractmethod
     def create_group(self, name:str) -> object: ...
     @abstractmethod
@@ -657,16 +657,17 @@ class JMemFiles(JFilesBase):
         """
         return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, timestamp=self.timestamp)
 
-    def is_group(self, KEY_file:str, name:str) -> bool:
+    def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
 
         Args:
-            KEY_file (str): Allocation identifier tracking targeted structural maps files context.
+            KEY_file (Union[str,JFileBase]): Allocation identifier tracking targeted structural maps files context.
             name (str): Label matching targeted workspace cluster boundaries text.
 
         Returns:
             bool: True if key equals default runtime constraints string constants.
         """
+        KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file == '<MEM>'
 
     def create_group(self, name:str) -> JMemFiles:
@@ -953,16 +954,17 @@ class JDiskFiles(JFilesBase):
         """
         return JDiskFiles(self.KEY_file)
 
-    def is_group(self, KEY_file:str, name:str) -> bool:
+    def is_group(self, KEY_file:Union[str, JFilesBase], name:str) -> bool:
         """Cross-verify group naming schema structures ensuring correct cluster namespace allocations alignments.
 
         Args:
-            KEY_file (str): Absolute file node layout address indicator parameter string path.
+            KEY_file (Union[str,JFilesBase]): Absolute file node layout address indicator parameter string path.
             name (str): Selector token text descriptor matching target group workspace boundaries tags context fields.
 
         Returns:
             bool: True if criteria tests locate matching layouts configuration blueprints rules.
         """
+        KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file == '<MEM>' or KEY_file == self.group_KEY_file.format(group_key=name)
 
     def create_group(self, name:str) -> JDiskFiles:

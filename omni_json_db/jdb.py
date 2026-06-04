@@ -745,42 +745,39 @@ class JDb(JDbReader):
             else:
                 key = str(key)
 
-            if del_keys:
+            key_table = io.key_table
+            if not del_keys:
+                # int | float | bool | str | bytes
+                key = str(key) if not isinstance(key, str) else key
+                row_id = key_table[key]
+                if row_id < 0:
+                    raise JKeyError(key)
+
+                del_keys = [(row_id, key)]
                 io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
-                key_table = io.key_table
-                f_delete = self.f_delete
-                files_obj = self.files_obj
-                has_SIGINT = self.file_lock.has_SIGINT
-                has_childs = len(io.groups) > 0 or len(self.childs) > 0
-                del_keys = [(key_table[_key], _key) for _key in del_keys]
-                for row_id,_key in sorted(del_keys, reverse=True):
-                    if has_SIGINT():
-                        break
+            else:
+                io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
+                del_keys = sorted([(key_table[_key], _key) for _key in del_keys], reverse=True)
 
-                    if row_id < 0:
-                        if has_childs and _key.find(SEP_SYM) >= 0: # pylint: disable=R
-                            del self[_key]
+            f_delete = self.f_delete
+            files_obj = self.files_obj
+            has_SIGINT = self.file_lock.has_SIGINT
+            has_childs = len(io.groups) > 0 or len(self.childs) > 0
+            for row_id,_key in del_keys:
+                if has_SIGINT():
+                    break
 
-                        continue
+                if row_id < 0:
+                    if has_childs and _key.find(SEP_SYM) >= 0: # pylint: disable=R
+                        del self[_key]
 
-                    jdb = f_delete(fp, _key, read_value=False, row=row_id)
-                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj.get_KEY(), _key):
-                        with jdb.open(read_only=True) as jdb_fp:
-                            for _row_id in range(jdb.io.n_records-1, -1, -1):
-                                jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
+                    continue
 
-                return
-
-            # int | float | bool | str | bytes
-            if not isinstance(key, str): # pragma: no cover
-                key = str(key)
-
-            jdb = self.f_delete(fp, key, read_value=False)
-            if isinstance(jdb, JDb) and self.files_obj.is_group(jdb.files_obj.get_KEY(), key):
-                with jdb.open(read_only=True) as jdb_fp:
-                    for _row_id in range(jdb.io.n_records-1, -1, -1):
-                        jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
-
+                jdb = f_delete(fp, _key, read_value=False, row=row_id)
+                if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, _key):
+                    with jdb.open(read_only=True) as jdb_fp:
+                        for _row_id in range(jdb.io.n_records-1, -1, -1):
+                            jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
         return
 
     def __isub__(self, keys:Set[str]) -> JDb:
@@ -833,7 +830,7 @@ class JDb(JDbReader):
                         row_id -= 1 # remove last record first LIFO
                         _key, _f, _o, _s, _v, _s, _d = io.read_key(key_fp, row_id)
                         child = _val = f_delete(fp, key=_key, row=row_id, read_value=False)
-                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj.get_KEY(), _key):
+                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj, _key):
                             with child.open(read_only=True) as child_fp:
                                 for _row_id in range(child.io.n_records-1, -1, -1):
                                     child.f_delete(child_fp, key='', row=_row_id, read_value=False)
@@ -865,7 +862,7 @@ class JDb(JDbReader):
                             break
 
                         child = _val = f_delete(fp, key=_key, row=row_id, read_value=False)
-                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj.get_KEY(), _key):
+                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj, _key):
                             with child.open(read_only=True) as child_fp:
                                 for _row_id in range(child.io.n_records-1, -1, -1):
                                     child.f_delete(child_fp, key='', row=_row_id, read_value=False)
@@ -1456,24 +1453,22 @@ class JDb(JDbReader):
                 del_rows = new_del_rows
 
             if not del_rows:
-                io.n_lines = io.n_records
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 if io.n_records == 0:
                     io.key_table.clear()
                     io.file_table.clear()
                     self._cache.clear()
-
+                io.n_lines = io.n_records
+                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 self.fsize = io.write_header(key_fp, truncate=True)
                 print(f'[Done|{"M" if merge else "C"}] recycle ... size:{self.fsize:,} {io.n_records:,}/{io.n_lines:,}(old={old_lines:,}) tb:{len(io.file_table)}')
                 return
 
             if not merge: # pragma: no cover
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 if io.n_lines == 0:
                     io.key_table.clear()
                     io.file_table.clear()
                     self._cache.clear()
-
+                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 self.fsize = io.write_header(key_fp, truncate=True)
                 print(f'[Done|{"M" if merge else "C"}] recycle ... size:{self.fsize:,} {io.n_records:,}/{io.n_lines:,}(old={old_lines:,}) tb:{len(io.file_table)} #{len(del_rows)} ')
                 return
@@ -1582,7 +1577,6 @@ class JDb(JDbReader):
                 io.key_table.clear()
                 io.file_table.clear()
                 self._cache.clear()
-
             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
             self.fsize = io.write_header(key_fp, truncate=True)
             print(f'[Done|{"M" if merge else "C"}] recycle ... size:{self.fsize:,} {io.n_records:,}/{io.n_lines:,}(old={old_lines:,}) tb:{len(io.file_table)}')
@@ -3047,7 +3041,7 @@ class JDb(JDbReader):
 
                 try:
                     jdb = val = f_delete(fp, key, row=row_id)
-                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj.get_KEY(), key):
+                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
                         # cleanup the sub database
                         with jdb.open(read_only=True) as jdb_fp:
                             for _row_id in range(jdb.io.n_records-1, -1, -1):
@@ -3112,7 +3106,7 @@ class JDb(JDbReader):
 
                 try:
                     jdb = _val = f_delete(fp, key, row=row, read_value=False)
-                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj.get_KEY(), key):
+                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
                         with jdb.open(read_only=True) as jdb_fp:
                             for _row_id in range(jdb.io.n_records-1, -1, -1):
                                 jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
@@ -3538,8 +3532,8 @@ class JDb(JDbReader):
                                 io.swap_id = (io.swap_id + 1) & 0X_7FF_FFFF_FFFF
 
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{parent}] DEL row:{row_id}/{record_t+1} @{_file_id}:{_offset}+{_size}', cyan=1, bright=1))
-                            io.n_records = max(io.n_records - 1, 0) # must before write_key
                             io.key_table.pop(_key, 0)
+                            io.n_records = max(io.n_records - 1, 0) # must before write_key, after key_table.pop
                             io.write_key(key_fp, record_t, '', _file_id, _offset, _size, 0)
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                             io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
@@ -3898,6 +3892,7 @@ class JDb(JDbReader):
                     _cache.pop(key, None)
                     io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
                     io.key_table[key] = record_t
+
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
@@ -3924,14 +3919,13 @@ class JDb(JDbReader):
 
                 if row_size >= new_val_size and (not can_revert or key in self.chg_keys):
                     # use same row
+                    _cache.pop(key, None)
                     n_lines = io.n_lines
                     n_records = io.n_records
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
                     val_fp.seek(offset)
                     _write_size = val_fp.write(data)
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
-                    _cache.pop(key, None)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if io._key_limit > 0: # pragma: no cover
                         self.fsize = io.write_header(key_fp)
@@ -4035,12 +4029,12 @@ class JDb(JDbReader):
 
         # new key -> SAFE[h] (= REC[t+1])
         io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
-        io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
 
         _cache.pop(key, None)
+        io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
         io.key_table[key] = safe_h
-        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
+        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         if io._key_limit > 0: # pragma: no cover
             self.fsize = io.write_header(key_fp)
 
@@ -4156,14 +4150,13 @@ class JDb(JDbReader):
                         if _type_id == 0x10 and isinstance(val, JDbReader):
                             self._set_child(key, val)
 
-                        if cache_limit != 0:
-                            self._update_cache(key, val, copy=True)
-
                         # without change key table and file table
                         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                         if io._key_limit > 0: # pragma: no cover
                             self.fsize = io.write_header(key_fp)
 
+                        if cache_limit != 0:
+                            self._update_cache(key, val, copy=True)
                         return True
 
                     # (Exist + Header != CHG + Value) -> use dead/new row
@@ -4211,9 +4204,6 @@ class JDb(JDbReader):
                     io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                     io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
 
-                    if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
-
                     io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
                     io.key_table[key] = record_t
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4222,6 +4212,8 @@ class JDb(JDbReader):
                     if io._key_limit > 0: # pragma: no cover
                         self.fsize = io.write_header(key_fp)
 
+                    if cache_limit != 0:
+                        self._update_cache(key, val, copy=True)
                     return True
 
                 new_row_size = row_size
@@ -4260,14 +4252,13 @@ class JDb(JDbReader):
                     if _type_id == 0x10 and isinstance(val, JDbReader):
                         self._set_child(key, val)
 
-                    if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
-
                     # without change key table and file table
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if io._key_limit > 0: # pragma: no cover
                         self.fsize = io.write_header(key_fp)
 
+                    if cache_limit != 0:
+                        self._update_cache(key, val, copy=True)
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -4336,14 +4327,12 @@ class JDb(JDbReader):
                     val_fp.seek(offset)
                     _write_size = val_fp.write(data)
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
-                    if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
-
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if io._key_limit > 0: # pragma: no cover
                         self.fsize = io.write_header(key_fp)
 
+                    if cache_limit != 0:
+                        self._update_cache(key, val, copy=True)
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4389,9 +4378,6 @@ class JDb(JDbReader):
                 io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                 io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
 
-                if cache_limit != 0:
-                    self._update_cache(key, val, copy=True)
-
                 io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
                 io.key_table[key] = record_t
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4400,6 +4386,8 @@ class JDb(JDbReader):
                 if io._key_limit > 0: # pragma: no cover
                     self.fsize = io.write_header(key_fp)
 
+                if cache_limit != 0:
+                    self._update_cache(key, val, copy=True)
                 return True
 
             # (Not Exist)
@@ -4435,7 +4423,7 @@ class JDb(JDbReader):
             else:
                 pass
 
-            # new key -> SAFE[h] (=REC[t+1])
+            # new key -> SAFE[h] (=REC[t+1]) | may io.resize_keys() -> io.load_keys()
             io.write_key(key_fp, safe_h, key, _type_id, _type_val, 0, _type_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
             if _type_id == 0x10 and isinstance(val, JDbReader):
                 self._set_child(key, val)
@@ -4473,7 +4461,7 @@ class JDb(JDbReader):
             else:
                 pass
 
-            # new key -> SAFE[h] (= REC[t+1])
+            # new key -> SAFE[h] (= REC[t+1]) | may io.resize_keys() -> io.load_keys()
             io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
             io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
 
@@ -4481,8 +4469,8 @@ class JDb(JDbReader):
             self._update_cache(key, val, copy=True)
 
         io.key_table[key] = safe_h
-        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.n_records += 1
+        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         if io._key_limit > 0: # pragma: no cover
             self.fsize = io.write_header(key_fp)
 
@@ -4588,8 +4576,8 @@ class JDb(JDbReader):
                 # del key -> SAFE[t]
                 _safe_bytes = io.copy_key(key_fp, safe_t, record_t)
 
-        io.n_records = max(io.n_records - 1, 0) # must before write_key
         io.key_table.pop(key, 0)
+        io.n_records = max(io.n_records - 1, 0) # must before write_key, after key_table
 
         # del key -> SAFE[t]
         io.write_key(key_fp, safe_t, key, file_id, offset, row_size, val_size, days=days)
@@ -4685,14 +4673,14 @@ class JDb(JDbReader):
                 pass
 
         # del key -> SAFE[h] (=REC[t+1])
-        io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days)
+        self._cache.pop(key, None)
         io.key_table[key] = safe_h
+        io.n_records += 1 # # must before write_key, after key_table
+        io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        io.n_records += 1
         if io._key_limit > 0: # pragma: no cover
             self.fsize = io.write_header(key_fp)
 
-        self._cache.pop(key, None)
         return safe_h, file_id, offset, row_size, val_size
 
     def f_unwrite(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
@@ -4758,19 +4746,17 @@ class JDb(JDbReader):
             return None
 
         io_write_key = io.write_key
-        if key in self.chg_keys:
-            self.chg_keys.remove(key)
-
         # old value: REC[n]-> DEAD[n]
         # new value -> REC[n]
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
         io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-
         if io._key_limit > 0: # pragma: no cover
             self.fsize = io.write_header(key_fp)
 
-        self._cache.pop(key, None)
+        if key in self.chg_keys:
+            self.chg_keys.remove(key)
+
         return old_row, file_id, offset, row_size, val_size
 
     def f_rename(self, fp_dict:Dict[int,IO], key:str, new_key:str) -> bool:
@@ -4816,6 +4802,9 @@ class JDb(JDbReader):
             io.key_table[new_key] = row
             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
             io.swap_id = (io.swap_id + 1) & 0X_7FF_FFFF_FFFF
+            if io._key_limit > 0: # pragma: no cover
+                self.fsize = io.write_header(key_fp)
+
             return True
 
         return False
@@ -4942,7 +4931,7 @@ class JDb(JDbReader):
         elif name in self.childs:
             self.childs[name] = child
 
-        elif self.files_obj.is_group(child.files_obj.get_KEY(), name):
+        elif self.files_obj.is_group(child.files_obj, name):
             jio.groups[name] = child
             self.childs.pop(name, None)
 
