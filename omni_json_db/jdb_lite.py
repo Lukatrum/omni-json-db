@@ -4087,7 +4087,7 @@ class JDbReader:
 
         return matches
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, sort:int=0, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:Optional[bool]=None, sort:int=0, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -4096,22 +4096,25 @@ class JDbReader:
             vals (Optional[Dict[str, Any]], optional): Condition for value filtering using operators.
             date (Optional[Any], optional): Date filters.
             limit (int, optional): Maximum item cap. Defaults to 0.
-            with_value (bool, optional): Whether to decode the real value. Defaults to False.
+            with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.
             sort (int, optional): Sorting direction (1 for ascending, -1 for descending, 0 for unsorted). Defaults to 0.
 
         Returns:
             Dict[str, Any]: The subset of matched data.
         """
+        if with_value is None:
+            with_value = not (not vals and not kwargs and sort == 0)
+
         matches = {}
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value or sort != 0, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
             matches[key] = val
 
-        if sort:
+        if len(matches) > 1 and sort != 0:
             return dict(sorted(matches.items(), key=lambda v : v[1], reverse=sort<0))
 
         return matches
 
-    def show(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=20, **kwargs) -> None:
+    def show(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=20, **kwargs) -> Dict[str,Any]:
         """
         show matched key+value in table.
 
@@ -4124,20 +4127,20 @@ class JDbReader:
         Example:
             >>> jdb = JDb()
             >>> jdb += {'apple': {'color':'red', 'qty':10}, 'banana':{'color':'yellow', 'qty':100, 'from':'Japan'}}
-            >>> jdb.show(limit=0) # show all records
+            >>> matches = jdb.show(limit=0) # show all records
                 +--------+--------+-----+-------+
                 | _id    | color  | qty | from  |
                 +--------+--------+-----+-------+
                 | apple  | red    | 10  |       |
                 | banana | yellow | 100 | Japan |
                 +--------+--------+-----+-------+
-            >>> jdb.show(limit=1)
+            >>> matches = jdb.show(limit=1)
                 +--------+--------+-----+-------+
                 | _id    | color  | qty | from  |
                 +--------+--------+-----+-------+
                 | apple  | red    | 10  |       |
                 +--------+--------+-----+-------+
-            >>> jdb.show(vals={'qty': {'$gt': 50}})
+            >>> matches = jdb.show(vals={'qty': {'$gt': 50}})
                 +--------+--------+-----+-------+
                 | _id    | color  | qty | from  |
                 +--------+--------+-----+-------+
@@ -4230,6 +4233,7 @@ class JDbReader:
         for row_data in matrix:
             print("|" + "|".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "|")
         print(border)
+        return dict(data_rows) if data_rows else {}
 
     def sync(self, force:bool=False) -> JDbReader:
         """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.

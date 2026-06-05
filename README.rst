@@ -270,7 +270,7 @@ CSV Import / Export
    jdb1.to_csv('example.csv')
 
    # show table
-   jdb1.show()
+   jdb1.show();
 
    # create another JDb in memory
    jdb2 = JDb()
@@ -280,7 +280,7 @@ CSV Import / Export
    print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
 
    # show table
-   jdb2.show(RE='Bob')
+   jdb2.show(RE='Bob');
 
 INI / TOML Import
 -----------------

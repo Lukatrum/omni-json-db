@@ -144,7 +144,7 @@ English_ | 中文_
             {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
    
    # 顯示表格
-   jdb.show()
+   jdb.show();
 
    # 使用 Lambda 函式搜尋名為 'John' 的記錄
    matches = jdb.find(FUNC=lambda key,val: val['name'] == 'John') 
@@ -265,7 +265,7 @@ CSV 匯入 / 匯出
    jdb1.to_csv('example.csv')
 
    # 顯示表格
-   jdb1.show()
+   jdb1.show();
 
    # 建立另一個JDb
    jdb2 = JDb()
@@ -275,7 +275,7 @@ CSV 匯入 / 匯出
    print(jdb2.find(RE='Bob')) # 輸出: {'name': 'Bob', 'age': 42}
 
    # 顯示表格
-   jdb2.show(RE='Bob')
+   jdb2.show(RE='Bob');
 
 INI / TOML 匯入
 -----------------

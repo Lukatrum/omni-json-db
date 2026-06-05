@@ -2210,6 +2210,7 @@ class JDb(JDbReader):
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
 
                     dst_io_write_key(key_fp_d, dst_io.n_records, key, file_id_d, offset_d, row_size_d, val_size_d, dst_io.sync_id, days=days)
+                    key_fp_d.flush() # before key_table
                     dst_io.key_table[key] = dst_io.n_records
                     dst_io.sync_id = (dst_io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     dst_io.n_records += 1
@@ -3549,9 +3550,10 @@ class JDb(JDbReader):
                                 io.write_key(key_fp, row_id, *rec_args)
 
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{parent}] REP row:{row_id}/{line_t+1} @{_file_id}:{_offset}+{_size}', cyan=1, bright=1))
-                            io.key_table.pop(_key, 0)
                             io.write_key(key_fp, line_t, '', 0, 0, 0, 0)
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                            key_fp.flush() # before key_table
+                            io.key_table.pop(_key, 0)
 
                     print('\nREP:', rep_parts)
 
@@ -3773,9 +3775,6 @@ class JDb(JDbReader):
                                     io.write_key(key_fp, ext_row, '', file_id, new_offset, new_size, 0, 0)
 
                                 io.write_key(key_fp, row, '', file_id, offset, split_size, 0, 0)
-                                if io._key_limit > 0: # pragma: no cover
-                                    self.fsize = io.write_header(key_fp)
-
                                 row_size = split_size
 
                         return start_line, row, dead_key, file_id, offset, row_size
@@ -3817,7 +3816,7 @@ class JDb(JDbReader):
             flags = self.flags
 
         can_revert = JFlag.REVERT in flags
-
+        set_key_table = []
         _cache = self._cache
         row = self.io.key_table[key]
         while True:
@@ -3878,8 +3877,7 @@ class JDb(JDbReader):
                         # swap+1 or sync the file_table
                         # REC[t] -> REC[n]
                         rec_args = io.copy_key(key_fp, record_t, row, decode=True)
-                        #pass;0;assert isinstance(rec_args, (list,tuple))
-                        io.key_table[rec_args[0]] = row
+                        set_key_table.append((rec_args[0], row))
                         swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
                     else: # pragma: no cover
                         pass
@@ -3888,17 +3886,15 @@ class JDb(JDbReader):
                     # new value -> REC[t]
                     io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                     io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
                     _cache.pop(key, None)
                     io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                    io.key_table[key] = record_t
-
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
+                    key_fp.flush() # before key_table
+                    for _key,_row_id in set_key_table:
+                        io.key_table[_key] = _row_id
+                    io.key_table[key] = record_t
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -3927,9 +3923,6 @@ class JDb(JDbReader):
                     _write_size = val_fp.write(data)
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     return True
 
                 safe_line, dead_row, _dead_key, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -3964,8 +3957,7 @@ class JDb(JDbReader):
                     # swap+1 or sync the file_table
                     # REC[t] -> REC[n]
                     rec_args = io.copy_key(key_fp, record_t, row, decode=True)
-                    #pass;0;assert isinstance(rec_args, (list,tuple))
-                    io.key_table[rec_args[0]] = row
+                    set_key_table.append((rec_args[0], row))
                     swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
                 else: # pragma: no cover
                     pass
@@ -3974,16 +3966,15 @@ class JDb(JDbReader):
                 # new value -> REC[t]
                 io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                 io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
                 _cache.pop(key, None)
                 io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                io.key_table[key] = record_t
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
-                if io._key_limit > 0: # pragma: no cover
-                    self.fsize = io.write_header(key_fp)
-
+                key_fp.flush() # before key_table
+                for _key,_row_id in set_key_table:
+                    io.key_table[_key] = _row_id
+                io.key_table[key] = record_t
                 return True
 
             # (Not Exist)
@@ -4029,15 +4020,12 @@ class JDb(JDbReader):
 
         # new key -> SAFE[h] (= REC[t+1])
         io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
-
         _cache.pop(key, None)
         io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-        io.key_table[key] = safe_h
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
+        key_fp.flush() # before key_table
+        io.key_table[key] = safe_h
         return True
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> bool:
@@ -4073,13 +4061,13 @@ class JDb(JDbReader):
             flags = self.flags
 
         can_revert = JFlag.REVERT in flags
-
         _cache = self._cache
         cache_limit = self._cache_limit
         row = self.io.key_table[key]
         checked = False
         while True:
             if row >= 0:
+                set_key_table = []
                 # (Exist + Value|Header)
                 if not checked and cache_limit != 0 and key in _cache:
                     if _cache[key] == val:
@@ -4152,9 +4140,6 @@ class JDb(JDbReader):
 
                         # without change key table and file table
                         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                        if io._key_limit > 0: # pragma: no cover
-                            self.fsize = io.write_header(key_fp)
-
                         if cache_limit != 0:
                             self._update_cache(key, val, copy=True)
                         return True
@@ -4193,8 +4178,7 @@ class JDb(JDbReader):
                         # swap+1 or sync the file_table
                         # REC[t] -> REC[n]
                         rec_args = io.copy_key(key_fp, record_t, row, decode=True)
-                        #pass;0;assert isinstance(rec_args, (list,tuple))
-                        io.key_table[rec_args[0]] = row
+                        set_key_table.append((rec_args[0], row))
                         swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
                     else:
                         pass
@@ -4203,15 +4187,14 @@ class JDb(JDbReader):
                     # new value -> REC[t]
                     io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                     io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
                     io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                    io.key_table[key] = record_t
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                     io.swap_id = swap_id
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
+                    key_fp.flush() # before key_table
+                    for _key,_row_id in set_key_table:
+                        io.key_table[_key] = _row_id
+                    io.key_table[key] = record_t
                     if cache_limit != 0:
                         self._update_cache(key, val, copy=True)
                     return True
@@ -4254,9 +4237,6 @@ class JDb(JDbReader):
 
                     # without change key table and file table
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     if cache_limit != 0:
                         self._update_cache(key, val, copy=True)
                     return True
@@ -4328,9 +4308,6 @@ class JDb(JDbReader):
                     _write_size = val_fp.write(data)
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    if io._key_limit > 0: # pragma: no cover
-                        self.fsize = io.write_header(key_fp)
-
                     if cache_limit != 0:
                         self._update_cache(key, val, copy=True)
                     return True
@@ -4367,8 +4344,7 @@ class JDb(JDbReader):
                     # swap+1 or sync the file_table
                     # REC[t] -> REC[n]
                     rec_args = io.copy_key(key_fp, record_t, row, decode=True)
-                    #pass;0;assert isinstance(rec_args, (list,tuple))
-                    io.key_table[rec_args[0]] = row
+                    set_key_table.append((rec_args[0], row))
                     swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
                 else:
                     pass
@@ -4377,15 +4353,14 @@ class JDb(JDbReader):
                 # new value -> REC[t]
                 io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
                 io.write_key(key_fp, record_t, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG)
-
                 io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                io.key_table[key] = record_t
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
                 io.swap_id = swap_id
-                if io._key_limit > 0: # pragma: no cover
-                    self.fsize = io.write_header(key_fp)
-
+                key_fp.flush() # before key_table
+                for _key,_row_id in set_key_table:
+                    io.key_table[_key] = _row_id
+                io.key_table[key] = record_t
                 if cache_limit != 0:
                     self._update_cache(key, val, copy=True)
                 return True
@@ -4468,12 +4443,10 @@ class JDb(JDbReader):
         if cache_limit != 0:
             self._update_cache(key, val, copy=True)
 
-        io.key_table[key] = safe_h
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
+        key_fp.flush() # before key_table
+        io.key_table[key] = safe_h
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):
@@ -4489,10 +4462,10 @@ class JDb(JDbReader):
         Returns:
             Any: The unlinked python value payload object, or group workspace if targeted entity maps a nested sub-database.
         """
+        key = str(key) if not isinstance(key, str) else key
+        self._cache.pop(key, None)
         io = self.io
         if row is None or key:
-            key = str(key) if not isinstance(key, str) else key
-            self._cache.pop(key, None)
             row = io.key_table[key]
             if row < 0:
                 raise JKeyError(key)
@@ -4516,7 +4489,7 @@ class JDb(JDbReader):
         elif _key != key: # pragma: no cover
             raise JKeyError(key)
 
-        self._cache.pop(key, None)
+        set_key_table = []
         val = None
         if row_size == 0:
             if file_id == 0x10:
@@ -4535,7 +4508,7 @@ class JDb(JDbReader):
             val_fp, __i, __o  = self.f_get_val_fp(fp_dict, file_id)
             try:
                 val = io.read_value(val_fp, offset, row_size, val_size)
-            except Exception  as e: # pragma: no cover
+            except ValueError as e: # pragma: no cover
                 print(e)
 
         self.childs.pop(key, None)
@@ -4550,8 +4523,7 @@ class JDb(JDbReader):
             # it is not last record, swap it
             # REC[t] -> REC[r]
             rec_args = io.copy_key(key_fp, record_t, row, decode=True)
-            #pass;0;assert isinstance(rec_args, (list,tuple))
-            io.key_table[rec_args[0]] = row
+            set_key_table.append((rec_args[0], row))
             swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
 
         # row == record_t
@@ -4576,17 +4548,17 @@ class JDb(JDbReader):
                 # del key -> SAFE[t]
                 _safe_bytes = io.copy_key(key_fp, safe_t, record_t)
 
-        io.key_table.pop(key, 0)
-        io.n_records = max(io.n_records - 1, 0) # must before write_key, after key_table
+        io.n_records = max(io.n_records - 1, 0) # must before write_key
 
         # del key -> SAFE[t]
         io.write_key(key_fp, safe_t, key, file_id, offset, row_size, val_size, days=days)
         io.swap_id = swap_id
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
+        key_fp.flush() # before key_table
+        for _key,_row_id in set_key_table:
+            io.key_table[_key] = _row_id
+        io.key_table.pop(key, -1)
         return val
 
     def f_undelete(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
@@ -4674,13 +4646,11 @@ class JDb(JDbReader):
 
         # del key -> SAFE[h] (=REC[t+1])
         self._cache.pop(key, None)
-        io.key_table[key] = safe_h
         io.n_records += 1 # # must before write_key, after key_table
         io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
+        key_fp.flush() # before key_table
+        io.key_table[key] = safe_h
         return safe_h, file_id, offset, row_size, val_size
 
     def f_unwrite(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
@@ -4751,9 +4721,6 @@ class JDb(JDbReader):
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
         io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        if io._key_limit > 0: # pragma: no cover
-            self.fsize = io.write_header(key_fp)
-
         if key in self.chg_keys:
             self.chg_keys.remove(key)
 
@@ -4798,13 +4765,11 @@ class JDb(JDbReader):
 
         _key, file_id, offset, row_size, val_size, _ver, days = io.read_key(key_fp, row)
         if io.write_key(key_fp, row, new_key, file_id, offset, row_size, val_size, days=days) > 0:
-            io.key_table.pop(key, 0)
-            io.key_table[new_key] = row
             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
             io.swap_id = (io.swap_id + 1) & 0X_7FF_FFFF_FFFF
-            if io._key_limit > 0: # pragma: no cover
-                self.fsize = io.write_header(key_fp)
-
+            key_fp.flush() # before key_table
+            io.key_table.pop(key, 0)
+            io.key_table[new_key] = row
             return True
 
         return False
