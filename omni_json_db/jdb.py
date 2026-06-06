@@ -830,7 +830,7 @@ class JDb(JDbReader):
                         row_id -= 1 # remove last record first LIFO
                         _key, _f, _o, _s, _v, _s, _d = io.read_key(key_fp, row_id)
                         child = _val = f_delete(fp, key=_key, row=row_id, read_value=False)
-                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj, _key):
+                        if isinstance(child, JDb) and files_obj.is_group(child.files_obj, _key): # pragma: no cover
                             with child.open(read_only=True) as child_fp:
                                 for _row_id in range(child.io.n_records-1, -1, -1):
                                     child.f_delete(child_fp, key='', row=_row_id, read_value=False)
@@ -3721,9 +3721,7 @@ class JDb(JDbReader):
         if max_wsize is None:
             max_wsize = self.max_wsize
 
-        if flags is None: # pragma: no cover
-            flags = self.flags
-
+        flags = self.flags if flags is None else JFlag(flags)
         can_revert = JFlag.REVERT in flags
         can_split = JFlag.SPLIT in flags
 
@@ -3812,9 +3810,7 @@ class JDb(JDbReader):
         if not isinstance(val, bytes): # pragma: no cover
             raise JTypeError('invalid value type')
 
-        if flags is None:
-            flags = self.flags
-
+        flags = self.flags if flags is None else JFlag(flags)
         can_revert = JFlag.REVERT in flags
         set_key_table = []
         _cache = self._cache
@@ -4057,9 +4053,7 @@ class JDb(JDbReader):
         if self.write_hook and not self.write_hook(key, val):
             raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
-        if flags is None:
-            flags = self.flags
-
+        flags = self.flags if flags is None else JFlag(flags)
         can_revert = JFlag.REVERT in flags
         _cache = self._cache
         cache_limit = self._cache_limit
@@ -4088,7 +4082,7 @@ class JDb(JDbReader):
                 if row_size == 0:
                     if _type_id == file_id and _type_val == offset and _type_size == val_size:
                         # (Exist + Header == CHG + Header)
-                        if file_id == 0x10 and isinstance(val, JDbReader):
+                        if file_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
                             self._set_child(key, val)
 
                         if cache_limit != 0:
@@ -4477,9 +4471,7 @@ class JDb(JDbReader):
                 # already deleted
                 return None
 
-        if flags is None:
-            flags = self.flags
-
+        flags = self.flags if flags is None else JFlag(flags)
         can_revert = JFlag.REVERT in flags
 
         _key, file_id, offset, row_size, val_size, _ver, days = io.read_key(key_fp, row)
@@ -4670,7 +4662,7 @@ class JDb(JDbReader):
             return None
 
         self._cache.pop(key, None)
-        flags = self.flags if flags is None else flags
+        flags = self.flags if flags is None else JFlag(flags)
         _can_revert = JFlag.REVERT in flags
         file_id = offset = row_size = val_size = days = 0
         tmp_row = row

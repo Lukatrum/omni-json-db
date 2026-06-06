@@ -117,7 +117,7 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-class INT_Handler: # pragma: no cover
+class INT_Handler:
     """Thread-safe signal execution interceptor routing keyboard interrupt SIGINT behaviors.
 
     Postpones default termination actions during active critical system I/O database transactions.
@@ -165,7 +165,7 @@ class INT_Handler: # pragma: no cover
 
         return False
 
-    def handler(self, signum, frame):
+    def handler(self, signum, frame): #pragma: no cover
         """Callback handler managing operational signal indicators states routing parameters.
 
         Args:

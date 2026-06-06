@@ -2332,7 +2332,7 @@ class JIo:
             self.groups.clear()
             self._swap_id = self._remv_id = -1
             self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
-            self._KEY_row0 =  self._KEY_row1 = None
+            self._KEY_row0 = self._KEY_row1 = None
             self.update_days()
 
         if version is None: # pragma: no cover
@@ -2524,7 +2524,7 @@ class JIo:
         Yields:
             Tuple[str, int]: Entry identity string descriptor paired along active logical index row line identifier number.
         """
-        if copy:
+        if copy or self._key_limit > 0:
             fp = None
             try:
                 files_obj = self.files_obj.copy()
@@ -3003,7 +3003,10 @@ class JIo:
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!loads_with_unzip(val_bytes[{len(val_bytes)}]={val_bytes[-512:]}, zip_type={zip_type})\nexception:{e}', red=1))
             raise ValueError from e
 
-    def _update_file_table(self):
+    def update_file_table(self) -> None:
+        """Scan all VAL files and update the max size for each VAL file.
+
+        """
         file_table = self.file_table
         VAL_size = self.files_obj.VAL_size
         file_id = 0
@@ -3120,7 +3123,7 @@ class JIo:
                             key_table.pop(key, 0)
 
                 if key_limit > 0:
-                    self._update_file_table()
+                    self.update_file_table()
                 else:
                     KEY_loads = self.KEY_loads
                     fp.seek(HEADER_SIZE + records * index_size)
@@ -3288,7 +3291,7 @@ class JIo:
             return
 
         if key_limit > 0:
-            self._update_file_table()
+            self.update_file_table()
             self._sync_id   = sync_id
             self._swap_id   = swap_id
             self._remv_id   = remv_id
@@ -3328,7 +3331,7 @@ class JIo:
                     lines += 1
                 else:
                     lines = n_lines
-                    self._update_file_table()
+                    self.update_file_table()
                     break
 
         else: # M, S
@@ -3357,7 +3360,7 @@ class JIo:
                     lines += 1
                 else:
                     lines = n_lines
-                    self._update_file_table()
+                    self.update_file_table()
                     break
 
         if lines <= 0: # pragma: no cover

@@ -3631,6 +3631,7 @@ class JDbReader:
                     elif size > 0:
                         data_size = f' k:{size/1024:,.1f}KB |'
 
+                io.update_file_table()
                 if io.file_table: # pragma: no cover
                     size = sum(list(io.file_table.values()))
                     if size > 0:
