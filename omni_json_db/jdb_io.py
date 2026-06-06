@@ -2758,8 +2758,8 @@ class JIo:
         Returns:
             bool: True if alignment indicators match active storage timeline parameters perfectly, False otherwise.
         """
+        self._KEY_row0 = self._KEY_row1 = None
         if self.file_size <= 0 or self.sync_id != self._sync_id:
-            self._KEY_row0 = self._KEY_row1 = None
             return False
 
         return True

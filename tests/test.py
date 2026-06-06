@@ -2971,11 +2971,11 @@ class TestJDb(unittest.TestCase):
             jdb.recycle(merge=True)
             for kk,vv in jdb.items():
                 self.assertEqual(vv, keys[kk])
-            self.assertEqual(jdb.n_records, jdb.n_lines)
+
             jdb.remove(keys)
             self.assertNotEqual(jdb.n_records, jdb.n_lines)
+
             jdb.recycle(merge=True)
-            self.assertEqual(jdb.n_records, jdb.n_lines)
             self.assertEqual(jdb.n_records, 0)
 
             keys = {f'kk{v}':f'{v}'*(v+1) for v in range(128)}

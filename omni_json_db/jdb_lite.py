@@ -2476,7 +2476,7 @@ class JDbReader:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
                     io.read_header(key_fp)
-                    if not is_latest or not io.is_updated(): # pragma: no cover
+                    if not io.is_updated() or not is_latest: # pragma: no cover
                         io.load_keys(key_fp, force=data_type==0)
                         if _cache: _cache.clear()
                         self.fsize = io.file_size
@@ -2627,7 +2627,7 @@ class JDbReader:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
                     io.read_header(key_fp)
-                    if not is_latest or not io.is_updated():
+                    if not io.is_updated() or not is_latest:
                         io.load_keys(key_fp, force=data_type==0)
                         if _cache: _cache.clear()
                         self.fsize = io.file_size
