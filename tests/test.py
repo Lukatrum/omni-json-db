@@ -4623,7 +4623,6 @@ class TestJDb(unittest.TestCase):
                     self.assertGreater(row, _prev_row)
                     chg[key] = jdb.f_read(fp, key, row=row, copy=False)
                     _prev_row = row
-
                 self.assertEqual(chg, expect)
 
                 chg.clear()
@@ -4632,8 +4631,24 @@ class TestJDb(unittest.TestCase):
                     self.assertLess(row, _prev_row)
                     chg[key] = jdb.f_read(fp, key, row=row, copy=False)
                     _prev_row = row
-
                 self.assertEqual(chg, expect)
+
+                chg.clear()
+                _prev_row = -1
+                for key,row in jdb.io.sorted_key_table_items(copy=True):
+                    self.assertGreater(row, _prev_row)
+                    chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                    _prev_row = row
+                self.assertEqual(chg, expect)
+
+                chg.clear()
+                _prev_row = jdb.n_lines
+                for key,row in jdb.io.sorted_key_table_items(copy=True, reverse=True):
+                    self.assertLess(row, _prev_row)
+                    chg[key] = jdb.f_read(fp, key, row=row, copy=False)
+                    _prev_row = row
+                self.assertEqual(chg, expect)
+
                 key_table = dict(jdb.key_table)
                 self.assertEqual(key_table, jdb.key_table)
                 self.assertEqual(set(key_table.values()), set(jdb.key_table.values()))
@@ -4658,6 +4673,10 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(kt, _key_table)
                 self.assertTrue(_key_table, _key_table.copy())
                 self.assertTrue(_file_table, _file_table.copy())
+                if _type == '<8':
+                    self.assertEqual(set(jdb), set(_key_table))
+                    row = _key_table.pop('xxx16', -1)
+                    self.assertEqual(row, _key_table.get('xxx16', -1))
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
