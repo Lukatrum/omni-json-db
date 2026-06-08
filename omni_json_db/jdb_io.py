@@ -23,7 +23,7 @@ gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 from bitarray import bitarray
 
 from .utils import Style
-#from .utils import debug_break
+# from .utils import debug_break
 
 try:
     import yaml
@@ -464,9 +464,28 @@ class PartialKeyTable(KeyTable):
         key_array = self.key_array
         row_id, s_idx, e_idx = self._find_key(key, key_array)
         if row_id >= 0:
-            del key_array[s_idx:e_idx]
-            self.size -= 1
-            return row_id
+            fp = None
+            try:
+                KEY_loads = jio.KEY_loads
+                index_size = jio.index_size
+                fp = self.files_obj.KEY_open('rb')
+                fp.seek(HEADER_SIZE + row_id * index_size)
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                if _key == key:
+                    del key_array[s_idx:e_idx]
+                    self.size -= 1
+                    return row_id
+
+                is_sync = False
+                del key_array[s_idx:e_idx]
+                self.size -= 1
+
+            except FileNotFoundError: # pragma: no cover
+                self.clear()
+
+            finally:
+                if fp is not None:
+                    fp.close()
 
         if not is_sync:
             fp = None
@@ -531,15 +550,42 @@ class PartialKeyTable(KeyTable):
             return row_id
 
         key_array = self.key_array
-        row_id, _s, _e = self._find_key(key, key_array)
+        row_id, _s_idx, _e_idx = self._find_key(key, key_array)
         if row_id >= 0:
-            key_limit = self.io._key_limit
-            while len(cache) >= key_limit:
-                old_key = next(iter(cache))
-                cache.pop(old_key, None)
+            fp = None
+            try:
+                KEY_loads = jio.KEY_loads
+                index_size = jio.index_size
+                fp = self.files_obj.KEY_open('rb')
+                fp.seek(HEADER_SIZE + row_id * index_size)
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                if _key == key:
+                    key_limit = self.io._key_limit
+                    while len(cache) >= key_limit:
+                        old_key = next(iter(cache))
+                        cache.pop(old_key, None)
 
-            cache[key] = row_id
-            return row_id
+                    cache[key] = row_id
+                    return row_id
+
+                is_sync = False
+                del key_array[_s_idx:_e_idx]
+                self.size -= 1
+
+            except FileNotFoundError: # pragma: no cover
+                self.clear()
+
+            finally:
+                if fp is not None:
+                    fp.close()
+
+            # key_limit = self.io._key_limit
+            # while len(cache) >= key_limit:
+            #     old_key = next(iter(cache))
+            #     cache.pop(old_key, None)
+
+            # cache[key] = row_id
+            # return row_id
 
         if not is_sync:
             fp = None

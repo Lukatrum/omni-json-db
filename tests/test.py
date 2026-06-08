@@ -3068,13 +3068,14 @@ class TestJDb(unittest.TestCase):
             sync_id = jdb.sync_id
 
             test_size = 100
-            expect = {f'kkk{i}' : list(range(i+1)) for i in range(test_size)}
-            chg = jdb.insert(expect)
-            self.assertEqual(chg, expect)
-            self.assertEqual(jdb, expect)
+            expect0 = {f'kkk{i}' : list(range(i+1)) for i in range(test_size)}
+            chg = jdb.insert(expect0)
+            self.assertEqual(chg, expect0)
+            self.assertEqual(jdb, expect0)
             self.assertEqual(id(jdb._cache), cache_id)
             self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(len(jdb), len(chg))
+            self.assertEqual(jdb, jdb1)
 
             sync_id = jdb.sync_id
             val = jdb['kkk10']
@@ -3083,7 +3084,10 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb.sync_id, sync_id)
             jdb._cache.clear()
             self.assertEqual(val, jdb['kkk10'])
-            self.assertNotEqual(val, expect['kkk10'])
+            self.assertNotEqual(val, expect0['kkk10'])
+            expect0['kkk10'] = val
+            self.assertEqual(jdb[expect0], expect0)
+            self.assertEqual(jdb, jdb1)
 
             sync_id = jdb.sync_id
             expect = {f'ddd{i}' : {str(v):i for v in range(i+1)} for i in range(test_size)}
@@ -3091,6 +3095,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(chg, expect)
             self.assertNotEqual(sync_id, jdb.sync_id)
             self.assertEqual(id(jdb._cache), cache_id)
+            self.assertEqual(jdb[expect], expect)
+            self.assertEqual(jdb[expect0], expect0)
+            self.assertEqual(jdb, jdb1)
 
             sync_id = jdb.sync_id
             val = jdb['ddd20']
@@ -3100,6 +3107,9 @@ class TestJDb(unittest.TestCase):
             jdb._cache.clear()
             self.assertEqual(val, jdb['ddd20'])
             self.assertNotEqual(val, expect['ddd20'])
+            expect['ddd20'] = val
+            self.assertEqual(jdb[expect], expect)
+            self.assertEqual(jdb[expect0], expect0)
             self.assertEqual(jdb, jdb1)
 
             if jdb.cache_limit > 0:
@@ -3107,8 +3117,10 @@ class TestJDb(unittest.TestCase):
                 val = jdb['ddd30']
                 self.assertEqual(val, expect['ddd30'])
 
-            del jdb[jdb - expect]
-            jdb += expect
+            del_keys = jdb - expect
+            self.assertEqual(del_keys, set(expect0))
+            self.assertEqual(jdb[del_keys], expect0)
+            del jdb[del_keys]
             self.assertEqual(jdb, expect)
             for limit in (-1, 0, 1):
                 jdb.key_limit = limit
@@ -3116,6 +3128,7 @@ class TestJDb(unittest.TestCase):
                 jdb.get_all(cache_only=True)
                 self.assertEqual(jdb, expect)
 
+            self.assertEqual(jdb, jdb1)
             used_s = time.perf_counter() - st_time
             self.assertEqual(id(jdb._cache), cache_id)
 
@@ -7578,10 +7591,13 @@ class TestJDb(unittest.TestCase):
                             pass
 
                     for key in [f'n{key_id+vv}' for vv in range(n_keys)]:
-                        if key in key_table:
-                            worker.f_delete(fp, key)
-                        else:
-                            worker.f_write(fp, key, new_val)
+                        try:
+                            if key in key_table:
+                                worker.f_delete(fp, key)
+                            else:
+                                worker.f_write(fp, key, new_val)
+                        except KeyError:
+                            pass
 
             elif op == 5:
                 with worker.open() as fp:
@@ -7718,7 +7734,7 @@ class TestJDb(unittest.TestCase):
 
             jmem.unsync(with_child=True)
             error = jmem.check_error(level=2)
-            self.assertTrue(not error)
+            self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0

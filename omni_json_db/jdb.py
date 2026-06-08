@@ -3531,13 +3531,12 @@ class JDb(JDbReader):
                                 continue
 
                             if row_id < record_t:
+                                io.key_table.pop(_key, 0)
                                 rec_args = io.copy_key(key_fp, record_t, row_id, decode=True)
-                                #pass;0;assert isinstance(rec_args, (list,tuple))
                                 io.key_table[rec_args[0]] = row_id
                                 io.swap_id = (io.swap_id + 1) & 0X_7FF_FFFF_FFFF
 
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{parent}] DEL row:{row_id}/{record_t+1} @{_file_id}:{_offset}+{_size}', cyan=1, bright=1))
-                            io.key_table.pop(_key, 0)
                             io.n_records = max(io.n_records - 1, 0) # must before write_key, after key_table.pop
                             io.write_key(key_fp, record_t, '', _file_id, _offset, _size, 0)
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -3876,6 +3875,7 @@ class JDb(JDbReader):
                         # make sure the changed row is the tail record
                         # swap+1 or sync the file_table
                         # REC[t] -> REC[n]
+                        io.key_table.pop(key, -1)
                         rec_args = io.copy_key(key_fp, record_t, row, decode=True)
                         set_key_table.append((rec_args[0], row))
                         swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
@@ -3956,6 +3956,7 @@ class JDb(JDbReader):
                     # make sure the changed row is the last record
                     # swap+1 or sync the file_table
                     # REC[t] -> REC[n]
+                    io.key_table.pop(key, -1)
                     rec_args = io.copy_key(key_fp, record_t, row, decode=True)
                     set_key_table.append((rec_args[0], row))
                     swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4175,6 +4176,7 @@ class JDb(JDbReader):
                         # make sure the changed row is the tail record
                         # swap+1 or sync the file_table
                         # REC[t] -> REC[n]
+                        io.key_table.pop(key, -1)
                         rec_args = io.copy_key(key_fp, record_t, row, decode=True)
                         set_key_table.append((rec_args[0], row))
                         swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4341,6 +4343,7 @@ class JDb(JDbReader):
                     # make sure the changed row is the last record
                     # swap+1 or sync the file_table
                     # REC[t] -> REC[n]
+                    io.key_table.pop(key, -1)
                     rec_args = io.copy_key(key_fp, record_t, row, decode=True)
                     set_key_table.append((rec_args[0], row))
                     swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4514,16 +4517,17 @@ class JDb(JDbReader):
         _safe_h = n_records = io.n_records
         dead_h = min(max(self.safe_line, n_records), n_lines)
         safe_t = dead_h - 1
-        record_t = n_records - 1
+        record_t = io.n_records = max(io.n_records - 1, 0) # must before write_key
         if row  < record_t:
             # it is not last record, swap it
             # REC[t] -> REC[r]
+            io.key_table.pop(key, -1)
             rec_args = io.copy_key(key_fp, record_t, row, decode=True)
             set_key_table.append((rec_args[0], row))
             swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
 
         # row == record_t
-        else:
+        else: # pragma: no cover
             pass
 
         if safe_t == record_t:
@@ -4543,8 +4547,6 @@ class JDb(JDbReader):
                 # SAFE[t] -> REC[t]
                 # del key -> SAFE[t]
                 _safe_bytes = io.copy_key(key_fp, safe_t, record_t)
-
-        io.n_records = max(io.n_records - 1, 0) # must before write_key
 
         # del key -> SAFE[t]
         io.write_key(key_fp, safe_t, key, file_id, offset, row_size, val_size, days=days)
