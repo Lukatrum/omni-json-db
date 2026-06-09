@@ -374,7 +374,7 @@ class PartialKeyTable(KeyTable):
 
     Postpones loading full keys sets from physical devices disks by maintaining localized bloom filter configurations trackers.
     """
-    __slots__ = {'cache', 'io', 'files_obj', 'flags', 'size', 'groups'}
+    __slots__ = {'cache', 'io', 'files_obj', 'flags', 'size', 'groups', 'found_flags'}
 
     def __init__(self, jio:JIo):
         """Initialize partial tracking layers parsing data indices boundaries criteria metrics models.
@@ -388,6 +388,7 @@ class PartialKeyTable(KeyTable):
         self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
         self.groups = [bytearray() for _ in range(0xFFFF+1)]
         self.size = -1
+        self.found_flags = bitarray()
 
     def get_mode(self) -> int:
         """Get the classification mode configuration parameter code.
@@ -403,7 +404,11 @@ class PartialKeyTable(KeyTable):
         Returns:
             str: Presentation text log summary details parameters strings.
         """
-        return f'<{type(self).__name__} cache:{len(self.cache)} {self.flags.count(1)*100./len(self.flags):.2f}% done:{self.size}/{self.io.n_records} at {hex(id(self))}>'
+        return f'<{type(self).__name__} '\
+            f'cache:{len(self.cache)} '\
+            f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
+            f'done:{self.size}/{self.io.n_records}({self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}%) '\
+            f'at {hex(id(self))}>'
 
     def set(self, key:str, row_id:int) -> None:
         """Log key coordinates properties configurations fields matching localized index pools blocks frameworks.
@@ -431,6 +436,8 @@ class PartialKeyTable(KeyTable):
             self.size += 1
             self.flags[_flag_idx] = 1
             key_array.extend(_msg_dumps((key, row_id)) or b'')
+
+        self.__set_found_flag(row_id)
 
         while len(cache) >= self.io._key_limit:
             old_key = next(iter(cache))
@@ -472,6 +479,7 @@ class PartialKeyTable(KeyTable):
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
+                    self.__set_found_flag(row_id)
                     return row_id
 
                 is_sync = False
@@ -631,6 +639,7 @@ class PartialKeyTable(KeyTable):
             for key_array in self.groups:
                 key_array.clear()
             self.cache.clear()
+            self.found_flags.clear()
             self.flags.setall(0)
             self.size = 0
 
@@ -691,15 +700,19 @@ class PartialKeyTable(KeyTable):
         flags = self.flags
         _add_key = self._add_key
         _find_key = self._find_key
+        __get_found_flag = self.__get_found_flag
+        __set_found_flag = self.__set_found_flag
         index_size = jio.index_size
         KEY_loads = jio.KEY_loads
+        is_found = __get_found_flag(jio.n_records-1)
         fp = None
         try:
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                if is_empty:
+                is_found = __get_found_flag(row_id)
+                if is_empty or not is_found:
                     _add_key(_key, row_id)
                 else:
                     key_array, flag_idx, old_row_id, s_idx, e_idx = _find_key(_key)
@@ -713,6 +726,7 @@ class PartialKeyTable(KeyTable):
                         flags[flag_idx] = 1
                         key_array.extend(_msg_dumps((_key, row_id)) or b'')
 
+                __set_found_flag(row_id)
                 yield _key, row_id
 
         except FileNotFoundError: # pragma: no cover
@@ -775,6 +789,24 @@ class PartialKeyTable(KeyTable):
                 idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
         return key_array, flag_idx, -1, -1, -1
+
+    def __set_found_flag(self, row_id:int):
+        found_flags = self.found_flags
+        blk_id = row_id // 32
+        ext_size = blk_id + 1 - len(found_flags)
+        if ext_size > 0:
+            found_flags.extend('0' * ext_size)
+        found_flags[blk_id] = True
+
+    def __get_found_flag(self, row_id:int) -> bool:
+        found_flags = self.found_flags
+        blk_id = row_id // 32
+        ext_size = blk_id + 1 - len(found_flags)
+        if ext_size > 0:
+            found_flags.extend('0' * ext_size)
+            return False
+
+        return found_flags[blk_id]
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -2465,7 +2497,7 @@ class JIo:
         Yields:
             Tuple[str, int]: Entry identity string descriptor paired along active logical index row line identifier number.
         """
-        if copy or self._key_limit > 0:
+        if copy:
             fp = None
             try:
                 files_obj = self.files_obj.copy()
@@ -3002,7 +3034,7 @@ class JIo:
             if swap_diff == 0:
                 # swap_diff == rec_diff == remv_diff == 0
                 if rec_diff == remv_diff == 0:
-                    if n_records <= 0 and key_table: # pragma: no cover
+                    if n_records <= 0: # pragma: no cover
                         key_table.clear()
 
                     # swap_diff == rec_diff == remv_diff == line_diff == 0
@@ -3016,6 +3048,7 @@ class JIo:
 
                     # swap_diff == rec_diff == remv_diff == 0 and line_diff > 0
                     else:
+                        self.update_file_table()
                         self._sync_id   = sync_id
                         self._swap_id   = swap_id
                         self._remv_id   = remv_id
@@ -3063,22 +3096,17 @@ class JIo:
                         for key in del_keys:
                             key_table.pop(key, 0)
 
-                if key_limit > 0:
-                    self.update_file_table()
-                else:
+                self.update_file_table()
+                if records < n_records:
                     KEY_loads = self.KEY_loads
                     fp.seek(HEADER_SIZE + records * index_size)
-                    for row in range(records, lines):
+                    for row in range(records, n_records):
                         key,file_id,offset,row_size,_val_size = KEY_loads(fp.read(index_size))[:5]
-                        if row < n_records:
-                            key_table[key] = row
-                            if row_size > 0:
-                                file_table[file_id] = max(file_table[file_id], offset + row_size)
-                            elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                                self.groups.setdefault(key, None)
-
-                        elif row_size > 0:
+                        key_table[key] = row
+                        if row_size > 0:
                             file_table[file_id] = max(file_table[file_id], offset + row_size)
+                        elif row_size == 0 and file_id == 0x10: # pragma: no cover
+                            self.groups.setdefault(key, None)
 
                 self._sync_id   = sync_id
                 self._swap_id   = swap_id
