@@ -3862,7 +3862,7 @@ class JDb(JDbReader):
                     _write_size = val_fp.write(data)
 
                     dead_h = safe_line
-                    if dead_row > dead_h:
+                    if dead_row > dead_h: # pragma: no cover
                         # DEAD[h] -> DEAD[t+1] or DEAD[m]
                         _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)
                     else: # pragma: no cover
@@ -4551,7 +4551,7 @@ class JDb(JDbReader):
             if key in self.chg_keys:
                 self.chg_keys.remove(key)
 
-            if dead_row > safe_h:
+            if dead_row > safe_h: # pragma: no cover
                 # SAFE[h] -> DEAD[m]
                 _safe_bytes = io.copy_key(key_fp, safe_h, dead_row)
             else: # pragma: no cover

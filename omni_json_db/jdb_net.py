@@ -473,6 +473,16 @@ class JNetIO(RawIOBase):
 
         return resp.get('ret', 0)
 
+    def flush(self):
+        """Flush the write buffers of the stream if applicable. This does nothing for read-only and non-blocking streams.
+        """
+        with self.lock:
+            if not self.closed: # pragma: no cover
+                return
+
+            dump_and_send(self.sock, (self.file, 'flush', [], {}))
+            _resp = recv_and_load(self.sock)
+
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -1132,6 +1142,10 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                                 fp_table.pop(file, None)
 
+                            elif cmd == 'flush':
+                                if fp is not None:
+                                    fp.flush()
+
                             elif cmd == 'seek':
                                 resp['ret'] = fp.seek(*_args, **_kwargs)
 
@@ -1143,9 +1157,11 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                             elif cmd == 'write':
                                 resp['ret'] = fp.write(*_args, **_kwargs)
+                                fp.flush()
 
                             elif cmd == 'truncate':
                                 resp['ret'] = fp.truncate(*_args, **_kwargs)
+                                fp.flush()
 
                             elif cmd == 'readall':
                                 resp['ret'] = fp.readall(*_args, **_kwargs)
@@ -1161,6 +1177,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                             elif cmd == 'writelines':
                                 resp['ret'] = fp.writelines(*_args, **_kwargs)
+                                fp.flush()
 
                             else:
                                 if verbose >= 1:

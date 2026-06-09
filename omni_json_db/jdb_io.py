@@ -407,7 +407,7 @@ class PartialKeyTable(KeyTable):
         return f'<{type(self).__name__} '\
             f'cache:{len(self.cache)} '\
             f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
-            f'done:{self.size}/{self.io.n_records}({self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}%) '\
+            f'done:{self.size}/{self.io.n_records}+{self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}% '\
             f'at {hex(id(self))}>'
 
     def set(self, key:str, row_id:int) -> None:
@@ -469,10 +469,10 @@ class PartialKeyTable(KeyTable):
 
         key_array, _flag_idx, row_id, s_idx, e_idx = self._find_key(key)
         if row_id >= 0:
+            KEY_loads = jio.KEY_loads
+            index_size = jio.index_size
             fp = None
             try:
-                KEY_loads = jio.KEY_loads
-                index_size = jio.index_size
                 fp = self.files_obj.KEY_open('rb')
                 fp.seek(HEADER_SIZE + row_id * index_size)
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
@@ -531,8 +531,7 @@ class PartialKeyTable(KeyTable):
 
         _key_array, _flag_idx, row_id, _s_idx, _e_idx = self._find_key(key)
         if row_id >= 0:
-            key_limit = self.io._key_limit
-            while len(cache) >= key_limit:
+            while len(cache) >= jio._key_limit:
                 old_key = next(iter(cache))
                 cache.pop(old_key, None)
 
@@ -658,8 +657,7 @@ class PartialKeyTable(KeyTable):
         return self.get(key, -1)
 
     def __delitem__(self, key:str): # pragma: no cover
-        row_id = self.pop(key, -1)
-        if row_id < 0:
+        if self.pop(key, -1) < 0:
             raise KeyError(f'{key}')
 
     def __contains__(self, key:str) -> bool:
@@ -675,7 +673,7 @@ class PartialKeyTable(KeyTable):
         if len(self) != len(obj):
             return False
 
-        if isinstance(obj, PartialKeyTable):
+        if isinstance(obj, (PartialKeyTable, LiteKeyTable)):
             if self.files_obj == obj.files_obj:
                 return True
 
@@ -711,7 +709,8 @@ class PartialKeyTable(KeyTable):
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                is_found = __get_found_flag(row_id)
+                if row_id % 32 == 0:
+                    is_found = __get_found_flag(row_id)
                 if is_empty or not is_found:
                     _add_key(_key, row_id)
                 else:
@@ -817,11 +816,12 @@ class LiteKeyTable(KeyTable):
 
     Saves device runtime environments storage footprints overhead inside system execution memory layers grids.
     """
-    __slots__ = {'groups', 'size', 'mask', 'mode', 'flags', 'flags_mask'}
-    def __init__(self, mode:int=0):
+    __slots__ = {'io', 'files_obj', 'groups', 'size', 'mask', 'mode', 'flags', 'flags_mask', 'found_flags'}
+    def __init__(self, jio:JIo, mode:int=0):
         """Initialize compact storage partitions maps arrays based on specialized mask profiling parameters rules.
 
         Args:
+            jio (JIo): Active pipeline transaction driver routing local configuration properties.
             mode (int, optional): Sizing constraints profile configuration indicator value. Defaults to 0.
 
         Raises:
@@ -849,10 +849,13 @@ class LiteKeyTable(KeyTable):
         else:
             raise ValueError(f'invalid mode {mode}!')
 
+        self.io = jio
+        self.files_obj = jio.files_obj.copy()
         self.groups = [bytearray() for _ in range(self.mask+1)]
         self.flags = bitarray(self.flags_mask+1)
         self.mode = mode
         self.size = -1
+        self.found_flags = bitarray()
 
     def get_mode(self) -> int:
         """Extract the exact active masking operational mode code index number integer.
@@ -873,27 +876,17 @@ class LiteKeyTable(KeyTable):
             self.clear()
 
         # self.size must >= 0
-        _hash_id = xhash(key)
-        flag_idx = _hash_id & self.flags_mask
-        mask = self.mask
-        if mask:
-            hash_id = (_hash_id & mask) if key else 0
-            key_array = self.groups[hash_id]
-        else:
-            key_array = self.groups[0]
+        key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+        if old_row_id >= 0: # old key
+            if old_row_id != row_id:
+                key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
 
-        n_bytes = len(key_array)
-        if not (n_bytes <= 0 or not self.flags[flag_idx] or self.mode & 0x1000 and row_id >= self.size):
-            old_row_id, s_idx, e_idx = self._find_key(key, key_array)
-            if old_row_id >= 0:
-                if old_row_id != row_id:
-                    key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
+        else: # new key
+            self.size += 1
+            self.flags[_flag_idx] = 1
+            key_array.extend(_msg_dumps((key, row_id)) or b'')
 
-                return
-
-        self.size += 1
-        self.flags[flag_idx] = 1
-        key_array.extend(_msg_dumps((key, row_id)) or b'')
+        self.__set_found_flag(row_id)
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Extract and remove specific entries maps tracks variables returning previous records boundaries indices numbers parameters logs.
@@ -905,27 +898,48 @@ class LiteKeyTable(KeyTable):
         Returns:
             int: The previously allocated index row integer target value number.
         """
-        if self.size == 0:
-            return default_row_id
-
         if self.size < 0: # pragma: no cover
             self.clear()
+
+        jio = self.io
+        n_records = len(self)
+        is_sync = self.size == n_records
+        if is_sync and not self.flags[xhash(key) & DEF_FLAG_MASK]:
             return default_row_id
 
-        _hash_id = xhash(key)
-        mask = self.mask
-        if mask:
-            hash_id = (_hash_id & mask) if key else 0
-            key_array = self.groups[hash_id]
-        else:
-            key_array = self.groups[0]
+        key_array, _flag_idx, row_id, s_idx, e_idx = self._find_key(key)
+        if row_id >= 0:
+            KEY_loads = jio.KEY_loads
+            index_size = jio.index_size
+            fp = None
+            try:
+                fp = self.files_obj.KEY_open('rb')
+                fp.seek(HEADER_SIZE + row_id * index_size)
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                if _key == key:
+                    del key_array[s_idx:e_idx]
+                    self.size -= 1
+                    self.__set_found_flag(row_id)
+                    return row_id
 
-        n_bytes = len(key_array)
-        if not (n_bytes <= 0 or not self.flags[_hash_id & self.flags_mask]):
-            row_id, s_idx, e_idx = self._find_key(key, key_array)
-            if row_id >= 0:
+                is_sync = False
                 del key_array[s_idx:e_idx]
                 self.size -= 1
+
+            except FileNotFoundError: # pragma: no cover
+                self.clear()
+
+            finally:
+                if fp is not None:
+                    fp.close()
+
+        if not is_sync:
+            for _key, row_id in self._item_iter():
+                if key != _key: continue
+                key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+                if old_row_id == row_id:
+                    del key_array[s_idx:e_idx]
+                    self.size -= 1
                 return row_id
 
         return default_row_id
@@ -940,26 +954,24 @@ class LiteKeyTable(KeyTable):
         Returns:
             int: The numerical tracking address index mapping current data rows slots.
         """
-        if self.size <= 0:
+        if self.size < 0: #pragma: no cover
+            self.clear()
+
+        n_records = len(self)
+        is_sync = self.size == n_records
+        if is_sync and not self.flags[xhash(key) & self.flags_mask]:
             return default_row_id
 
-        _hash_id = xhash(key)
-        if not self.flags[_hash_id & self.flags_mask]:
-            return default_row_id
+        _key_array, _flag_idx, row_id, _s_idx, _e_idx = self._find_key(key)
+        if row_id >= 0:
+            return row_id
 
-        mask = self.mask
-        if mask:
-            hash_id = (_hash_id & mask) if key else 0
-            key_array = self.groups[hash_id]
-        else:
-            key_array = self.groups[0]
+        if not is_sync:
+            for _key, row_id in self._item_iter():
+                if _key == key:
+                    return row_id
 
-        n_bytes = len(key_array)
-        if n_bytes <= 0:
-            return default_row_id
-
-        row_id, _s, _e = self._find_key(key, key_array)
-        return row_id if row_id >= 0 else default_row_id
+        return default_row_id
 
     def items(self) -> Generator[str,int]:
         """Generate unpacked data pairs mapping query strings onto row slot integers indices coordinates from binary matrices blocks fields.
@@ -967,14 +979,22 @@ class LiteKeyTable(KeyTable):
         Yields:
             Tuple[str, int]: Identity selection descriptor token string coupled along row integer reference value number.
         """
-        if self.size <= 0:
+        if self.size < 0: #pragma: no cover
+            self.clear()
+
+        n_records = len(self)
+        is_sync = self.size == n_records
+        if is_sync:
+            if self.size > 0:
+                unpacker = Unpacker()
+                for key_array in self.groups:
+                    if not key_array: continue
+                    unpacker.feed(key_array)
+                    yield from unpacker
             return
 
-        unpacker = Unpacker()
-        for key_array in self.groups:
-            if not key_array: continue
-            unpacker.feed(key_array)
-            yield from unpacker
+        # not sync
+        yield from self._item_iter()
 
     def values(self) -> Generator[int]:
         """Generate isolated numerical index row coordinate integers tracking database items locations markers arrays.
@@ -982,15 +1002,24 @@ class LiteKeyTable(KeyTable):
         Yields:
             int: Target row allocation block number integer value.
         """
-        if self.size <= 0:
+        if self.size < 0: #pragma: no cover
+            self.clear()
+
+        n_records = len(self)
+        is_sync = self.size == n_records
+        if is_sync:
+            if self.size > 0:
+                unpacker = Unpacker()
+                for key_array in self.groups:
+                    if not key_array: continue
+                    unpacker.feed(key_array)
+                    for _key,row in unpacker:
+                        yield row
             return
 
-        unpacker = Unpacker()
-        for key_array in self.groups:
-            if not key_array: continue
-            unpacker.feed(key_array)
-            for _key,row in unpacker:
-                yield row
+        # not sync
+        for _key,row_id in self._item_iter():
+            yield row_id
 
     def keys(self) -> Generator[str]:
         """Generate unique query strings identifiers extracted directly across data bytes blocks structures arrays sheets.
@@ -998,15 +1027,24 @@ class LiteKeyTable(KeyTable):
         Yields:
             str: Identity selection descriptive token string code layout text.
         """
-        if self.size <= 0:
+        if self.size < 0: #pragma: no cover
+            self.clear()
+
+        n_records = len(self)
+        is_sync = n_records == self.size
+        if is_sync:
+            if self.size > 0:
+                unpacker = Unpacker()
+                for key_array in self.groups:
+                    if not key_array: continue
+                    unpacker.feed(key_array)
+                    for key,_row in unpacker:
+                        yield key
             return
 
-        unpacker = Unpacker()
-        for key_array in self.groups:
-            if not key_array: continue
-            unpacker.feed(key_array)
-            for key,_row in unpacker:
-                yield key
+        # not sync
+        for key,_row_id in self._item_iter():
+            yield key
 
     def copy(self) -> LiteKeyTable:
         """Construct replica instances duplication frameworks copying binary data tracking targets indicators context.
@@ -1014,25 +1052,14 @@ class LiteKeyTable(KeyTable):
         Returns:
             LiteKeyTable: Cloned alternative index workspace data object manager framework handle.
         """
-        obj = LiteKeyTable(self.mode)
-        if self.size > 0:
-            for dst_array,src_array in zip(obj.groups, self.groups):
-                dst_array.extend(src_array)
-
-            obj.flags.clear()
-            obj.flags.frombytes(self.flags.tobytes())
-            obj.size = self.size
-        else: # pragma: no cover
-            obj.flags.setall(0)
-
-        return obj
+        return LiteKeyTable(self.io, self.mode)
 
     def clear(self):
         """Reset internal arrays flushing structural block parameters indicators clearing memory footprints metrics completely back onto zero limits layers."""
         if self.size != 0:
             for key_array in self.groups:
                 key_array.clear()
-
+            self.found_flags.clear()
             self.flags.setall(0)
             self.size = 0
 
@@ -1042,14 +1069,19 @@ class LiteKeyTable(KeyTable):
         Returns:
             str: Telemetry presentation tracking pointer variables parameters configurations layout string text context fields logs.
         """
-        _bytes = len(self.flags) // 8
-        for key_array in self.groups:
-            _bytes += len(key_array)
-
-        return f'<{type(self).__name__} mode:{self.mode:x} #{self.size:,}({_bytes/1024/1024:,.2f}MB)+{self.flags.count(1)*100./len(self.flags):.2f}% at {hex(id(self))}>'
+        return f'<{type(self).__name__} '\
+            f'mask:{self.mask:x} '\
+            f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
+            f'done:{self.size}/{self.io.n_records}+{self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}% '\
+            f'at {hex(id(self))}>'
 
     def __len__(self) -> int:
-        return max(self.size, 0)
+        """Calculate total registered data rows records numbers.
+
+        Returns:
+            int: Element measure count value.
+        """
+        return self.io.n_records
 
     def __setitem__(self, key:str, row_id:int):
         self.set(key, row_id)
@@ -1058,8 +1090,7 @@ class LiteKeyTable(KeyTable):
         return self.get(key, -1)
 
     def __delitem__(self, key:str): # pragma: no cover
-        row_id = self.pop(key, -1)
-        if row_id < 0:
+        if self.pop(key, -1) < 0:
             raise KeyError(f'{key}')
 
     def __contains__(self, key:str) -> bool:
@@ -1075,8 +1106,8 @@ class LiteKeyTable(KeyTable):
         if len(self) != len(obj):
             return False
 
-        if isinstance(obj, LiteKeyTable):
-            if self.groups == obj.groups:
+        if isinstance(obj, (PartialKeyTable, LiteKeyTable)):
+            if self.files_obj == obj.files_obj:
                 return True
 
         for key,val in self.items():
@@ -1088,16 +1119,77 @@ class LiteKeyTable(KeyTable):
 
         return True
 
-    def _find_key(self, key:str, key_array:bytearray) -> Tuple[int, int, int]:
+    def _item_iter(self) -> Generator[str,int]:
+        """Iterate pairs matching target identifiers text tokens straight onto physical rows blocks integers coordinates indices trackers sequences.
+
+        Yields:
+            Tuple[str, int]: Associated unique identity string token paired along exact allocation row position line index number value.
+        """
+        jio = self.io
+        is_empty = self.size == 0
+        flags = self.flags
+        _add_key = self._add_key
+        _find_key = self._find_key
+        __get_found_flag = self.__get_found_flag
+        __set_found_flag = self.__set_found_flag
+        index_size = jio.index_size
+        KEY_loads = jio.KEY_loads
+        is_found = __get_found_flag(jio.n_records-1)
+        fp = None
+        try:
+            fp = self.files_obj.KEY_open('rb')
+            fp.seek(HEADER_SIZE)
+            for row_id in range(jio.n_records):
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                is_found = __get_found_flag(row_id)
+                if is_empty or not is_found:
+                    _add_key(_key, row_id)
+                else:
+                    key_array, flag_idx, old_row_id, s_idx, e_idx = _find_key(_key)
+                    if old_row_id >= 0: # old key
+                        if old_row_id != row_id: # pragma: no cover
+                            key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+
+                    else: # new key
+                        self.size += 1
+                        flags[flag_idx] = 1
+                        key_array.extend(_msg_dumps((_key, row_id)) or b'')
+
+                __set_found_flag(row_id)
+                yield _key, row_id
+
+        except FileNotFoundError: # pragma: no cover
+            self.clear()
+
+        finally:
+            if fp is not None:
+                fp.close()
+
+    def _add_key(self, key:str, row_id:int):
+        """Add new key to corresponding key array
+
+        Args:
+            key (str): new_key.
+            row_id (int): row number for the new key
+
+        """
+        _hash_id = xhash(key)
+        self.size += 1
+        self.flags[_hash_id & self.flags_mask] = 1
+        self.groups[_hash_id & self.mask].extend(_msg_dumps((key, row_id)) or b'')
+
+    def _find_key(self, key:str) -> Tuple[bytearray, int, int, int, int]:
         """Find key msgpack pattern in bytearray.
 
         Args:
             key (str): key in bytearray.
-            key_array (bytearray): store all keys in byte
 
         Returns:
-            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index (not found=(-1, -1, -1))
+            Tuple[bytearray, int, int, int, int]: key_array, flag_idx, key's row ID, bytearray start index, bytearry end index
         """
+        _hash_id = xhash(key)
+        flag_idx = _hash_id & self.flags_mask
+        key_array = self.groups[_hash_id & self.mask]
         n_bytes = len(key_array)
         if n_bytes > 0:
             search_prefix = b'\x92' + (_msg_dumps(key) or b'')
@@ -1121,11 +1213,27 @@ class LiteKeyTable(KeyTable):
                             val_type - 256 if val_type >= 0xe0 else -1
 
                         if row_id >= 0:
-                            return row_id, idx, val_idx_e
+                            return key_array, flag_idx, row_id, idx, val_idx_e
 
                 idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
-        return -1, -1, -1
+        return key_array, flag_idx, -1, -1, -1
+
+    def __set_found_flag(self, row_id:int):
+        found_flags = self.found_flags
+        ext_size = row_id + 1 - len(found_flags)
+        if ext_size > 0:
+            found_flags.extend('0' * ext_size)
+        found_flags[row_id] = True
+
+    def __get_found_flag(self, row_id:int) -> bool:
+        found_flags = self.found_flags
+        ext_size = row_id + 1 - len(found_flags)
+        if ext_size > 0:
+            found_flags.extend('0' * ext_size)
+            return False
+
+        return found_flags[row_id]
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1270,7 +1378,7 @@ class JIoHEAD:
 
             return sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver
 
-        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise ValueError from e
 
     def dumps_v1(self, sync_id:int, n_records:int, n_lines:int, index_size:int, zip_type:int, data_type:int, swap_id:int, remv_id:int, api_ver:int) -> bytes:
@@ -1318,7 +1426,7 @@ class JIoHEAD:
         try:
             return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver))
 
-        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e:
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise ValueError from e
 
     def loads_v1(self, header:bytes) -> Tuple[int,int,int,int,int,int,int,int,int]:
@@ -1336,7 +1444,7 @@ class JIoHEAD:
         try:
             return _json_loads(header)
 
-        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError):
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError): # pragma: no cover
             return self.loads_v0(header)
 
 #-----------------------------------------------------------------------------
@@ -1617,7 +1725,7 @@ class JIoVAL_M(JIoVAL):
                 # nosemgrep
                 return marshal_loads(data) # nosec B302
 
-            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError):
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
                 data = data + b'\n'
 
         raise ValueError
@@ -1954,7 +2062,7 @@ class JIo:
         self.key_table      = PartialKeyTable(self) if self._key_limit > 0 else \
                                 DictKeyTable() if self._key_limit == 0 else \
                                 BTreeKeyTable() if self._key_limit == -0x100 else \
-                                LiteKeyTable((-self._key_limit-1) | 0x1000)
+                                LiteKeyTable(self, (-self._key_limit-1) | 0x1000)
 
         self.days = self.min_days = self._swap_id = self._remv_id = -1
         self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
@@ -2029,7 +2137,7 @@ class JIo:
             if len(header) == HEADER_SIZE:
                 if header[0] == 91: # = '['
                     info = json_loads(header)
-                else:
+                else: # pragma: no cover
                     # deprecated
                     info = [int(v) for v in header.decode('utf8').split(',')]
                 nn = len(info)
@@ -2254,7 +2362,7 @@ class JIo:
                 _mode = (-value-1) | 0x1000
                 if self._key_limit >= 0 or -self._key_limit >= 0x10 or self.key_table.get_mode() != _mode:
                     self.key_table.clear()
-                    self.key_table = LiteKeyTable(_mode)
+                    self.key_table = LiteKeyTable(self, _mode)
                     self._n_records = self._n_lines = self.file_size = 0
 
             elif value > 0:
@@ -2534,9 +2642,8 @@ class JIo:
                 else:
                     lut[_row] = key
 
-            if lut:
-                for row in sorted(lut, reverse=True):
-                    yield lut.pop(row, ''), row
+            for row in sorted(lut, reverse=True): # pragma: no cover
+                yield lut.pop(row, ''), row
 
         else:
             row = 0
@@ -2550,9 +2657,8 @@ class JIo:
                 else:
                     lut[_row] = key
 
-            if lut:
-                for row in sorted(lut):
-                    yield lut.pop(row, ''), row
+            for row in sorted(lut): # pragma: no cover
+                yield lut.pop(row, ''), row
 
     def zip(self, data:bytes, zip_type:Optional[int]=None) -> bytes:
         """Compress raw binary block sequence elements utilizing active chosen format algorithms drivers factories.
@@ -3001,13 +3107,12 @@ class JIo:
         prev_n_records  = self._n_records
         prev_n_lines    = self._n_lines
         index_size      = self.index_size
-        key_limit       = self._key_limit
         file_table      = self.file_table
         key_table       = self.key_table
         swap_id         = self.swap_id
         remv_id         = self.remv_id
         sync_id         = self.sync_id
-
+        fast_mode       = isinstance(key_table, (LiteKeyTable, PartialKeyTable))
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
         self.file_size = records = lines = 0
@@ -3078,7 +3183,7 @@ class JIo:
                     records = max(0, n_records-remv_diff)
                     lines = min(n_lines, n_records+remv_diff) if line_diff == 0 else n_lines
 
-                if n_records <= 0 or records == 0 or key_limit > 0:
+                if n_records <= 0 or records == 0 or fast_mode:
                     key_table.clear()
 
                 elif key_table:
@@ -3133,7 +3238,7 @@ class JIo:
                         return
 
                     # swap_diff > 0 and sync_diff == remv_diff == -rec_diff and line_diff == 0 and n_records > 0
-                    if key_limit > 0:
+                    if fast_mode:
                         key_table.clear()
                     else:
                         KEY_loads = self.KEY_loads
@@ -3156,98 +3261,6 @@ class JIo:
                     self.file_size  = fp.seek(0, 2)
                     return
 
-                # swap_diff > 0 and key_limit > 0
-                if key_limit > 0:
-                    pass
-
-                # swap_diff > 0 and sync_diff == remv_diff == line_diff (rec_diff == 0)
-                elif sync_diff == remv_diff == line_diff:
-                    chg_keys = {}
-                    chk_rows = []
-                    KEY_loads = self.KEY_loads
-                    fp.seek(HEADER_SIZE + n_records * index_size)
-                    for row in range(n_records, n_lines):
-                        del_rec = KEY_loads(fp.read(index_size))
-                        old_row = key_table[del_rec[0]]
-                        if n_records > old_row >= 0:
-                            cur_pos = fp.tell()
-                            fp.seek(HEADER_SIZE + old_row * index_size)
-                            new_key,file_id,offset,row_size,_val_size = KEY_loads(fp.read(index_size))[:5]
-                            if row_size > 0:
-                                file_table[file_id] = max(file_table[file_id], offset + row_size)
-                            elif row_size == 0 and file_id == 0x10:
-                                self.groups.setdefault(new_key, None)
-
-                            chg_keys[new_key] = old_row
-                            old_row = key_table[new_key]
-                            if n_records > old_row >= 0:
-                                chk_rows.append(old_row)
-
-                            fp.seek(cur_pos)
-
-                    for key,row in chg_keys.items():
-                        key_table[key] = row
-
-                    for row in chk_rows:
-                        fp.seek(HEADER_SIZE + row * index_size)
-                        chg_key,file_id,offset,row_size,_val_size = KEY_loads(fp.read(index_size))[:5]
-                        key_table[chg_key] = row
-                        if row_size > 0:
-                            file_table[file_id] = max(file_table[file_id], offset + row_size)
-                        elif row_size == 0 and file_id == 0x10:
-                            self.groups.setdefault(chg_key, None)
-
-                    self._sync_id   = sync_id
-                    self._swap_id   = swap_id
-                    self._remv_id   = remv_id
-                    self._n_records = n_records
-                    self._n_lines   = n_lines
-                    self.file_size  = fp.seek(0, 2)
-                    return
-
-                # swap_diff == sync_diff == 1 and (sync_diff != remv_diff or sync_diff != line_diff)
-                elif sync_diff == 1:
-                    t_record = n_records-1
-                    fp.seek(HEADER_SIZE + t_record * index_size)
-                    key1,file_id1,offset1,row_size1,_val_size1 = self.KEY_loads(fp.read(index_size))[:5]
-                    chg_row1 = key_table[key1]
-                    if n_records > chg_row1 >= 0:
-                        fp.seek(HEADER_SIZE + chg_row1 * index_size)
-                        key2,file_id2,offset2,row_size2,_val_size2 = self.KEY_loads(fp.read(index_size))[:5]
-                        chg_row2 = key_table[key2]
-                        if n_records > chg_row2 >= 0:
-                            key_table[key1] = t_record
-                            key_table[key2] = chg_row1
-                            if row_size1 > 0:
-                                file_table[file_id1] = max(file_table[file_id1], offset1 + row_size1)
-                            elif row_size1 == 0 and file_id1 == 0x10:
-                                self.groups.setdefault(key1, None)
-
-                            if row_size2 > 0:
-                                file_table[file_id2] = max(file_table[file_id2], offset2 + row_size2)
-                            elif row_size2 == 0 and file_id2 == 0x10:
-                                self.groups.setdefault(key2, None)
-
-                            self._sync_id   = sync_id
-                            self._swap_id   = swap_id
-                            self._remv_id   = remv_id
-                            self._n_records = n_records
-                            self._n_lines   = n_lines
-                            self.file_size  = fp.seek(0, 2)
-                            return
-
-                # swap_diff > 0 and (sync_diff != remv_diff or sync_diff != line_diff)
-                # else: # pragma: no cover
-                #     if n_records == 0:
-                #         pass
-                #     elif rec_diff == 0:
-                #         pass
-                #     elif rec_diff > 0:
-                #         pass
-                #     else:
-                #         pass
-
-                # reset
                 key_table.clear()
                 file_table.clear()
 
@@ -3259,7 +3272,7 @@ class JIo:
             self.file_size  = fp.seek(0, 2)
             return
 
-        if key_limit > 0:
+        if fast_mode:
             self.update_file_table()
             self._sync_id   = sync_id
             self._swap_id   = swap_id

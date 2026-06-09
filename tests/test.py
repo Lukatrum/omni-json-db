@@ -119,7 +119,7 @@ class TestJDb(unittest.TestCase):
 
             {'KEY_file':'db/test_1lz_v0.jdb', 'api_ver':0, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'no'},
             {'KEY_file':'db/test_2br_v0.jdb', 'api_ver':0, 'data_type':'M+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
-            {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'<16'},
             {'KEY_file':'db/test_6lz_v0.jdb', 'api_ver':0, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l5'},
                 # {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
 
@@ -4570,6 +4570,9 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb.is_latest())
             self.assertEqual(jdb.n_lines, jdb.n_records)
             self.assertEqual(len(expect), jdb.n_lines)
+
+            row_id = jdb.key_table['xxx10']
+            self.assertEqual(jdb.key_table['xxx10'], row_id)
 
             kt = list(jdb.key_table.items())
             random.shuffle(kt)
