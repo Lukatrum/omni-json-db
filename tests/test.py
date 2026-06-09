@@ -4676,10 +4676,10 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(kt, _key_table)
                 self.assertTrue(_key_table, _key_table.copy())
                 self.assertTrue(_file_table, _file_table.copy())
-                if _type == '<8':
+                if hasattr(_key_table, 'files_obj'):
                     self.assertEqual(set(jdb), set(_key_table))
                     row = _key_table.pop('xxx16', -1)
-                    self.assertEqual(row, _key_table.get('xxx16', -1))
+                    self.assertEqual(row, _key_table.get('xxx16', -1), _key_table)
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -5395,6 +5395,8 @@ class TestJDb(unittest.TestCase):
                         jdb.f_delete(fp, key)
                     else:
                         jdb.f_write(fp, key, val) # change
+
+                    _key_fp.flush()
 
             self.assertNotEqual(jdb, expect)
             ret = jdb.revert(expect)

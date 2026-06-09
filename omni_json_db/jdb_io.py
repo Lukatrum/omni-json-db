@@ -421,7 +421,7 @@ class PartialKeyTable(KeyTable):
             self.clear()
 
         cache = self.cache
-        if cache.get(key, None) == row_id:
+        if cache.get(key, None) == row_id: # pragma: no cover
             cache.pop(key, None)
             cache[key] = row_id
             return
@@ -904,7 +904,7 @@ class LiteKeyTable(KeyTable):
         jio = self.io
         n_records = len(self)
         is_sync = self.size == n_records
-        if is_sync and not self.flags[xhash(key) & DEF_FLAG_MASK]:
+        if is_sync and not self.flags[xhash(key) & self.flags_mask]:
             return default_row_id
 
         key_array, _flag_idx, row_id, s_idx, e_idx = self._find_key(key)
