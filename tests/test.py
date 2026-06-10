@@ -1083,6 +1083,9 @@ class TestJDb(unittest.TestCase):
                     gp_a = jdb.add_group('group_a')
                 continue
 
+            jdb['group_a'] = list(range(128))
+            jdb['group_b'] = None
+
             gp_a = jdb.add_group('group_a')
             self.assertIsNotNone(gp_a)
             self.assertIsInstance(gp_a, JDb)
@@ -1226,6 +1229,24 @@ class TestJDb(unittest.TestCase):
             jdb -= {'group_a', 'group_b'}
             self.assertEqual(len(gp_a), 0)
             self.assertEqual(len(gp_b), 0)
+
+            jdb.restore('bak')
+            self.assertNotEqual(len(gp_a), 0)
+            self.assertEqual(jdb['group_a'], gp_a)
+
+            jmem1 = JDb()
+            jmem1['group_a', 'group_b'] = 0
+            jdb -= jmem1
+            self.assertEqual(len(gp_a), 0)
+
+            jdb.restore('bak')
+            self.assertNotEqual(len(gp_a), 0)
+
+            error = jdb.check_error(level=10, fix_it=True)
+            self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
+
+            self.assertEqual(jdb, jdb1)
+            self.assertEqual(jdb1['group_a'], gp_a)
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
@@ -4105,6 +4126,13 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(matches), 1)
             self.assertIn('中文', matches)
 
+            jdb[b'bytes'] = val = 'testing'
+            matches = dict(jdb.keys.item_iter(bytearray(b'bytes')))
+            self.assertTrue('bytes' in matches)
+
+            matches = dict(jdb.item_iter(bytearray(b'bytes')))
+            self.assertEqual(matches.get('bytes', None), val)
+
             country = {
                 '美國' : {'國旗':['紅色', '白色', '藍色'], '語言':'英文', '洲':'北美洲'},
                 '英國' : {'國旗':['紅色', '白色', '藍色'], '語言':'英文'},
@@ -4570,6 +4598,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb.is_latest())
             self.assertEqual(jdb.n_lines, jdb.n_records)
             self.assertEqual(len(expect), jdb.n_lines)
+            print(jdb.key_table)
 
             row_id = jdb.key_table['xxx10']
             self.assertEqual(jdb.key_table['xxx10'], row_id)

@@ -106,7 +106,7 @@ class JDbKey2(JDbKey):
 
                 return
 
-            if isinstance(key, int):
+            if isinstance(key, int) and not isinstance(key, bool):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
@@ -129,7 +129,11 @@ class JDbKey2(JDbKey):
                 return
 
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
-                pass
+                key = bytes(key) if isinstance(key, bytearray) else key
+                try:
+                    key = key.decode('utf8')
+                except (UnicodeDecodeError, ValueError):
+                    key = str(key)
 
             elif isinstance(key, (slice, dt_date, datetime)):
                 n_records = io.n_records
@@ -463,7 +467,11 @@ class JDb(JDbReader):
                 return
 
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
-                key = str(key)
+                key = bytes(key) if isinstance(key, bytearray) else key
+                try:
+                    key = key.decode('utf8')
+                except (UnicodeDecodeError, ValueError):
+                    key = str(key)
 
             elif isinstance(key, (slice, dt_date, datetime)):
                 io, fp, key_fp = self.f_get_fp(fp)
@@ -688,7 +696,11 @@ class JDb(JDbReader):
                 pass
 
             elif isinstance(key, (bytes, bytearray)): # pragma: no cover
-                key = str(key)
+                key = bytes(key) if isinstance(key, bytearray) else key
+                try:
+                    key = key.decode('utf8')
+                except (UnicodeDecodeError, ValueError):
+                    key = str(key)
 
             elif isinstance(key, (slice, dt_date, datetime)):
                 io, fp, key_fp = self.f_get_fp(fp)
@@ -1038,7 +1050,11 @@ class JDb(JDbReader):
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, JDbReader):
             jdb = keys
@@ -1340,7 +1356,7 @@ class JDb(JDbReader):
 
             return results
 
-    def recycle(self, parent:str='', level:int=0, merge:bool=False, fill_zero:bool=False, verbose:bool=True): # pragma: no cover
+    def recycle(self, parent:str='', level:int=0, merge:bool=False, fill_zero:bool=False, verbose:bool=True):
         """Purge unlinked dead storage slots rewriting physical indexes sheets to reclaim unallocated disk space footprints metrics.
 
         Args:
@@ -3584,7 +3600,7 @@ class JDb(JDbReader):
             jdb = self.f_get_group(fp, key)
             if jdb is None:
                 jdb = self._decode_row(0x10, 0, key, 0)
-                self.f_write(fp, key, jdb, flags=JFlag(0))
+                self.f_write(fp, key, jdb)
                 self.io.groups[key] = jdb
                 self.childs.pop(key, None)
 
@@ -3972,11 +3988,8 @@ class JDb(JDbReader):
         else: # pragma: no cover
             pass
 
-        if dead_h > safe_h:
-            # SAFE[h] -> DEAD[h]
-            _safe_bytes = io.copy_key(key_fp, safe_h, dead_h)
-        else: # pragma: no cover
-            pass
+        # SAFE[h] -> DEAD[h]
+        _safe_bytes = io.copy_key(key_fp, safe_h, dead_h) if dead_h > safe_h else None
 
         # new key -> SAFE[h] (= REC[t+1])
         io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)

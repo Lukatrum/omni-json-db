@@ -703,7 +703,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
                     else:
                         val_s = json_dumps(val) if isinstance(val_s, bytes) else val_s.decode('utf8')
 
-                except:
+                except: # pragma: no cover
                     return False
 
                 if isinstance(val_s, bytes) and isinstance(rule, bytes) \
@@ -932,7 +932,11 @@ class JDbKey:
                 return {k:v for k,v in self.item_iter(key)}
 
         elif isinstance(key, (bytes, bytearray)): # pragma: no cover
-            pass
+            key = bytes(key) if isinstance(key, bytearray) else key
+            try:
+                key = key.decode('utf8')
+            except (UnicodeDecodeError, ValueError):
+                key = str(key)
 
         elif isinstance(key, (int, float, slice, dt_date, datetime, Pattern)) \
                 or callable(key) \
@@ -1509,7 +1513,7 @@ class JDbKey:
 
                 return
 
-            if isinstance(key, int):
+            if isinstance(key, int) and not isinstance(key, bool):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
@@ -1583,7 +1587,11 @@ class JDbKey:
                 return
 
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
-                pass
+                key = bytes(key) if isinstance(key, bytearray) else key
+                try:
+                    key = key.decode('utf8')
+                except (UnicodeDecodeError, ValueError):
+                    key = str(key)
 
             elif hasattr(key, '__iter__'):
                 done = set()
@@ -1625,7 +1633,7 @@ class JDbKey:
             # bytes | bytearray | bool
             key = str(key)
             row_id = io.key_table[key]
-            if io.n_records > row_id >= 0: # pragma: no cover
+            if io.n_records > row_id >= 0:
                 _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                 old_date, new_date = io.z_conv_date(days)
                 yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -1975,7 +1983,11 @@ class JDbReader:
                         return {k:v for k,v in self.item_iter(key)}
 
         elif isinstance(key, (bytes, bytearray)): # pragma: no cover
-            pass
+            key = bytes(key) if isinstance(key, bytearray) else key
+            try:
+                key = key.decode('utf8')
+            except (UnicodeDecodeError, ValueError):
+                key = str(key)
 
         elif isinstance(key, (slice, dt_date, datetime, Pattern)) \
                 or callable(key) \
@@ -2192,7 +2204,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif hasattr(keys, '__iter__'):
             if not keys:
@@ -3041,7 +3057,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3102,7 +3122,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3140,7 +3164,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3181,7 +3209,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3230,7 +3262,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3264,10 +3300,14 @@ class JDbReader:
             bool: True if local structures envelope all values inside inputs, False otherwise.
         """
         if isinstance(keys, str): # pragma: no cover
-            keys = {str(keys)}
+            keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3315,7 +3355,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3372,7 +3416,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3478,7 +3526,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3524,7 +3576,11 @@ class JDbReader:
             keys = {keys}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
-            keys = {str(keys)}
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
 
         elif isinstance(keys, (JDbReader, JDbKey)):
             jdb = keys.jdb if isinstance(keys, JDbKey) else keys
@@ -3753,7 +3809,7 @@ class JDbReader:
 
                 return
 
-            if isinstance(key, int):
+            if isinstance(key, int) and not isinstance(key, bool):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id > 0:
@@ -3834,7 +3890,14 @@ class JDbReader:
 
                 return
 
-            if hasattr(key, '__iter__') and not isinstance(key, (bytes, bytearray)):
+            if isinstance(key, (bytes, bytearray)): # pragma: no cover
+                key = bytes(key) if isinstance(key, bytearray) else key
+                try:
+                    key = key.decode('utf8')
+                except (UnicodeDecodeError, ValueError):
+                    key = str(key)
+
+            elif hasattr(key, '__iter__'):
                 done = set()
                 f_read = self.f_read
                 key_table = io.key_table
@@ -3858,11 +3921,10 @@ class JDbReader:
                 return
 
             # bytes | bytearray | bool
-            if not isinstance(key, str): # pragma: no cover
-                key = str(key)
-                row_id = io.key_table[key]
-                if row_id >= 0:
-                    yield key, self.f_read(fp, key, row=row_id, copy=False)
+            key = str(key) if not isinstance(key, str) else key
+            row_id = io.key_table[key]
+            if row_id >= 0:
+                yield key, self.f_read(fp, key, row=row_id, copy=False)
 
     def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
         """
@@ -3980,7 +4042,14 @@ class JDbReader:
 
             keys = {'$re': re_compile(keys, flags=re_flags)}
 
-        elif hasattr(keys, '__iter__') and not isinstance(keys, (bytes, bytearray)):
+        elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
+            keys = bytes(keys) if isinstance(keys, bytearray) else keys
+            try:
+                keys = {keys.decode('utf8')}
+            except (UnicodeDecodeError, ValueError):
+                keys = {str(keys)}
+
+        elif hasattr(keys, '__iter__'):
             keys = {'$in': {key if isinstance(key, str) else str(key) for key in keys}}
 
         elif callable(keys):
@@ -4679,7 +4748,6 @@ class JDbReader:
         if max_version is None:
             max_version = io.n_lines
 
-        #pass;0;assert isinstance(max_version, int)
         version = max(version, 0)
         matched_list = {}
         io_read_key = io.read_key
