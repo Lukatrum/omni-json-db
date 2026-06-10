@@ -1374,7 +1374,7 @@ class JDb(JDbReader):
             io = self.io
             io, fp, key_fp = self.f_get_fp(fp)
             has_SIGINT = self.file_lock.has_SIGINT
-            if level > 0: # pragma: no cover
+            if level > 0:
                 for key in sorted(set(io.groups).union(self.childs)):
                     if has_SIGINT():
                         return
@@ -1386,14 +1386,17 @@ class JDb(JDbReader):
                     jdb.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
 
             if io.n_records == io.n_lines:
-                if io.n_records == 0:
-                    io.key_table.clear()
+                if io.n_records == 0: # io.n_lines == 0
+                    io.update_file_table()
+                    for file_id in io.file_table:
+                        self.files_obj.VAL_remove(file_id)
                     io.file_table.clear()
+                    io.key_table.clear()
                     self._cache.clear()
 
                 curr_pos = io.seek(key_fp, io.n_lines)
                 end_pos = key_fp.seek(0,2)
-                if end_pos - curr_pos >= io.index_size:
+                if end_pos - curr_pos >= io.index_size: # pragma: no cover
                     self.fsize = io.write_header(key_fp, truncate=True)
                     print(f'[Done|{"M" if merge else "C"}] truncate size:{curr_pos:,}/{end_pos:,}={self.fsize:,} ... {io.n_records:,}/{io.n_lines:,} tb:{len(io.file_table)}')
                     return
@@ -1402,7 +1405,6 @@ class JDb(JDbReader):
                 return
 
             io_read_key = io.read_key
-            # io_pad = io.pad
             f_get_val_fp = self.f_get_val_fp
             file_table = io.file_table
             old_lines = n_lines = io.n_lines
@@ -1423,10 +1425,10 @@ class JDb(JDbReader):
                     del_rows.append((file_id, offset, row_size, val_size, ver, days, key, row_id))
                     sortable = sortable or curr_end >= file_end
 
-            if not merge and not sortable: # pragma: no cover
+            if not merge and not sortable:
                 curr_pos = key_fp.tell()
                 end_pos = key_fp.seek(0,2)
-                if end_pos - curr_pos >= io.index_size:
+                if end_pos - curr_pos >= io.index_size:  # pragma: no cover
                     self.fsize = io.write_header(key_fp, truncate=True)
                     print(f'[Done|{"M" if merge else "C"}] truncate size:{curr_pos:,}/{end_pos:,}={self.fsize:,} ... {io.n_records:,}/{io.n_lines:,} tb:{len(io.file_table)}  #{len(del_rows)}')
                     return
@@ -1444,13 +1446,23 @@ class JDb(JDbReader):
                         curr_end = offset + row_size
                         file_end = file_table.get(file_id, curr_end)
                         if curr_end >= file_end:
-                            if verbose:
+                            if verbose: # pragma: no cover
                                 print(f'del0 K-row[{key}] -> file_id:{file_id} offset:{offset:,}~{curr_end:,} tb:{file_end:,}')
 
-                            if offset == 0:
-                                file_table.pop(file_id, 0)
-                            else:
+                            if offset > 0:
                                 file_table[file_id] = offset
+                                val_fp = None
+                                try:
+                                    val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
+                                    val_fp.seek(offset)
+                                    val_fp.truncate()
+
+                                finally:
+                                    if val_fp is not None:
+                                        val_fp.close()
+                            else:
+                                file_table.pop(file_id, 0)
+                                self.files_obj.VAL_remove(file_id)
                         else:
                             io.n_lines += 1 # before write_key
                             io_write_key(key_fp, io.n_lines-1, key, file_id, offset, row_size, val_size, ver, days)
@@ -1468,133 +1480,125 @@ class JDb(JDbReader):
                 del_rows.clear()
                 del_rows = new_del_rows
 
-            if not del_rows:
-                if io.n_records == 0:
-                    io.key_table.clear()
-                    io.file_table.clear()
-                    self._cache.clear()
-                io.n_lines = io.n_records
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                self.fsize = io.write_header(key_fp, truncate=True)
-                print(f'[Done|{"M" if merge else "C"}] recycle ... size:{self.fsize:,} {io.n_records:,}/{io.n_lines:,}(old={old_lines:,}) tb:{len(io.file_table)}')
-                return
+            if del_rows and merge:
+                del_rows = sorted(del_rows)
+                prev = del_rows[0]
+                new_rows = {}
+                for curr in del_rows[1:]:
+                    prev_id, prev_start, prev_end, prev_row, prev_cnt = prev
+                    curr_id, curr_start, curr_end, _curr_row, _curr_cnt = curr
+                    if prev_id == curr_id and prev_end == curr_start:
+                        prev = prev_id, prev_start, curr_end, prev_row, prev_cnt+1
+                    else:
+                        new_rows[prev_id,prev_start] = prev_end - prev_start
+                        if fill_zero: # pragma: no cover
+                            val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
+                            val_fp.seek(prev_start)
+                            val_fp.write(b'\0' * (prev_end-prev_start))
 
-            if not merge: # pragma: no cover
-                if io.n_lines == 0:
-                    io.key_table.clear()
-                    io.file_table.clear()
-                    self._cache.clear()
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                self.fsize = io.write_header(key_fp, truncate=True)
-                print(f'[Done|{"M" if merge else "C"}] recycle ... size:{self.fsize:,} {io.n_records:,}/{io.n_lines:,}(old={old_lines:,}) tb:{len(io.file_table)} #{len(del_rows)} ')
-                return
+                        if verbose: # pragma: no cover
+                            print(f'#{len(new_rows)}. DEL K-row #{prev_row}+{prev_cnt} file_id:{prev_id} offset:{prev_start:,}~{prev_end:,} tb:{file_table[prev_id]:,}')
 
-            del_rows = sorted(del_rows)
-            prev = del_rows[0]
-            new_rows = {}
-            for curr in del_rows[1:]:
+                        prev = curr
+
                 prev_id, prev_start, prev_end, prev_row, prev_cnt = prev
-                curr_id, curr_start, curr_end, _curr_row, _curr_cnt = curr
-                if prev_id == curr_id and prev_end == curr_start:
-                    prev = prev_id, prev_start, curr_end, prev_row, prev_cnt+1
-                else:
-                    new_rows[prev_id,prev_start] = prev_end - prev_start
-                    if fill_zero: # pragma: no cover
-                        val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
-                        val_fp.seek(prev_start)
-                        val_fp.write(b'\0' * (prev_end-prev_start))
+                new_rows[prev_id,prev_start] = prev_end - prev_start
+                if fill_zero: # pragma: no cover
+                    val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
+                    val_fp.seek(prev_start)
+                    val_fp.write(b'\0' * (prev_end-prev_start))
 
-                    if verbose:
-                        print(f'#{len(new_rows)}. DEL K-row #{prev_row}+{prev_cnt} file_id:{prev_id} offset:{prev_start:,}~{prev_end:,} tb:{file_table[prev_id]:,}')
+                if verbose: # pragma: no cover
+                    print(f'#{len(new_rows)}. DEL K-row #{prev_row}+{prev_cnt} file_id:{prev_id} offset:{prev_start:,}~{prev_end:,} tb:{file_table[prev_id]:,}')
 
-                    prev = curr
+                print(f'!MEG K-row #{len(del_rows):,} -> #{len(new_rows):,}')
+                io_write_key = io.write_key
+                # rows = {}
+                for row_id in range(io.n_records):
+                    key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
+                    if row_size > 0:
+                        del_size = new_rows.pop((file_id, offset+row_size), -1)
+                        if del_size > 0:
+                            new_size = row_size + del_size
+                            if val_size == 0: # pragma: no cover
+                                val_fp, __i, __o  = f_get_val_fp(fp, file_id)
+                                val_fp.seek(offset + row_size)
+                                val_fp.write(io.pad_byte * del_size)
 
-            prev_id, prev_start, prev_end, prev_row, prev_cnt = prev
-            new_rows[prev_id,prev_start] = prev_end - prev_start
-            if fill_zero: # pragma: no cover
-                val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
-                val_fp.seek(prev_start)
-                val_fp.write(b'\0' * (prev_end-prev_start))
+                            io_write_key(key_fp, row_id, key, file_id, offset, new_size, val_size, ver, days=days)
+                            if verbose: # pragma: no cover
+                                print(f'CHG K-row #{row_id} file_id:{file_id} offset:{offset:,} size:{val_size:,}/({row_size:,}+{del_size:,}={new_size:,}) tb:{file_table[file_id]:,} [DEAD=#{len(new_rows)}]')
 
-            if verbose:
-                print(f'#{len(new_rows)}. DEL K-row #{prev_row}+{prev_cnt} file_id:{prev_id} offset:{prev_start:,}~{prev_end:,} tb:{file_table[prev_id]:,}')
+                        # rows[file_id,offset] = key,row_id,row_size,val_size,ver,days
 
-            print(f'!MEG K-row #{len(del_rows):,} -> #{len(new_rows):,}')
-            io_write_key = io.write_key
-            # rows = {}
-            for row_id in range(io.n_records):
-                key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
-                if row_size > 0:
-                    del_size = new_rows.pop((file_id, offset+row_size), -1)
-                    if del_size > 0:
-                        new_size = row_size + del_size
-                        if val_size == 0:
-                            val_fp, __i, __o  = f_get_val_fp(fp, file_id)
-                            val_fp.seek(offset + row_size)
-                            val_fp.write(io.pad_byte * del_size)
+                print(f'GOOD=#{io.n_records} + DEAD=#{len(new_rows):,}')
+                io.n_lines = io.n_records
+                if io.n_records > 0:
+                    for (file_id,offset),del_size in new_rows.items():
+                        next_offset = offset+del_size
+                        file_end = file_table.get(file_id, next_offset)
+                        if next_offset >= file_end: # pragma: no cover
+                            if offset > 0:
+                                file_table[file_id] = offset
+                                val_fp = None
+                                try:
+                                    val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
+                                    val_fp.seek(offset)
+                                    val_fp.truncate()
 
-                        io_write_key(key_fp, row_id, key, file_id, offset, new_size, val_size, ver, days=days)
-                        if verbose:
-                            print(f'CHG K-row #{row_id} file_id:{file_id} offset:{offset:,} size:{val_size:,}/({row_size:,}+{del_size:,}={new_size:,}) tb:{file_table[file_id]:,} [DEAD=#{len(new_rows)}]')
+                                finally:
+                                    if val_fp is not None:
+                                        val_fp.close()
+                            else:
+                                file_table.pop(file_id, 0)
+                                self.files_obj.VAL_remove(file_id)
 
-                    # rows[file_id,offset] = key,row_id,row_size,val_size,ver,days
+                            if verbose: # pragma: no cover
+                                print(f'KILL K-row #file_id:{file_id} offset:{offset:,}:{file_end:,} tb:{file_table[file_id]:,}')
 
-            print(f'GOOD=#{io.n_records} + DEAD=#{len(new_rows):,}')
-            io.n_lines = io.n_records
-            if io.n_records > 0:
-                for (file_id,offset),del_size in new_rows.items():
-                    next_offset = offset+del_size
-                    file_end = file_table.get(file_id, next_offset)
-                    if next_offset >= file_end:
-                        if offset > 0:
-                            file_table[file_id] = offset
-                        else:
-                            file_table.pop(file_id, 0)
+                            continue
 
-                        if verbose:
-                            print(f'KILL K-row #file_id:{file_id} offset:{offset:,}:{file_end:,} tb:{file_table[file_id]:,}')
+                        io.write_key(key_fp, io.n_lines, '', file_id, offset, del_size, 0)
+                        io.n_lines += 1
 
-                        continue
+                        if verbose: # pragma: no cover
+                            print(Style(f'{io.n_records}/{io.n_lines} DEAD #file_id:{file_id} offset:{offset:,}+{del_size:,} tb:{file_table[file_id]:,}', yellow=1))
 
-                    io.write_key(key_fp, io.n_lines, '', file_id, offset, del_size, 0)
-                    io.n_lines += 1
+                        # _key = file_id,next_offset
+                        # if _key in rows:
+                        #     key,row_id,row_size,val_size,ver,days = rows[_key]
+                        #     new_size = row_size + del_size
+                        #     if verbose:
+                        #         print(f'CHG K-row[{key}] #{row_id} file_id:{file_id} offset:{_key[-1]:,}-{del_size:,} size:{val_size:,}/({row_size:,}+{del_size:,}={new_size:,}) tb:{file_table[file_id]:,}')
 
-                    if verbose:
-                        print(Style(f'{io.n_records}/{io.n_lines} DEAD #file_id:{file_id} offset:{offset:,}+{del_size:,} tb:{file_table[file_id]:,}', yellow=1))
+                        #     if val_size == 0 and del_size > 0:
+                        #         val_fp, __i, __o  = f_get_val_fp(fp, file_id)
+                        #         val_fp.seek(offset + row_size)
+                        #         val_fp.write(io.pad_byte * del_size)
 
-                    # _key = file_id,next_offset
-                    # if _key in rows:
-                    #     key,row_id,row_size,val_size,ver,days = rows[_key]
-                    #     new_size = row_size + del_size
-                    #     if verbose:
-                    #         print(f'CHG K-row[{key}] #{row_id} file_id:{file_id} offset:{_key[-1]:,}-{del_size:,} size:{val_size:,}/({row_size:,}+{del_size:,}={new_size:,}) tb:{file_table[file_id]:,}')
+                        #     io_write_key(key_fp, row_id, key, file_id, offset, new_size, val_size, ver, days=days|CHG_DAY_FLAG)
+                        #     val_fp, __i, __o  = f_get_val_fp(fp, file_id)
+                        #     val_fp.seek(_key[-1])
+                        #     if val_size > 0:
+                        #         data = val_fp.read(val_size)
+                        #     else:
+                        #         data = val_fp.read(row_size)
 
-                    #     if val_size == 0 and del_size > 0:
-                    #         val_fp, __i, __o  = f_get_val_fp(fp, file_id)
-                    #         val_fp.seek(offset + row_size)
-                    #         val_fp.write(io.pad_byte * del_size)
+                        #     val_fp.seek(offset)
+                        #     val_fp.write(data)
+                        # else:
+                        #     if verbose:
+                        #         print(Style(f'BAD K-row #file_id:{file_id} offset:{offset:,}+{del_size:,} tb:{file_table[file_id]:,}', yellow=1))
+                        #     io.n_lines += 1 # before??
+                        #     io_write_key(key_fp, io.n_lines, '', file_id, offset, del_size, 0)
 
-                    #     io_write_key(key_fp, row_id, key, file_id, offset, new_size, val_size, ver, days=days|CHG_DAY_FLAG)
-                    #     val_fp, __i, __o  = f_get_val_fp(fp, file_id)
-                    #     val_fp.seek(_key[-1])
-                    #     if val_size > 0:
-                    #         data = val_fp.read(val_size)
-                    #     else:
-                    #         data = val_fp.read(row_size)
-
-                    #     val_fp.seek(offset)
-                    #     val_fp.write(data)
-                    # else:
-                    #     if verbose:
-                    #         print(Style(f'BAD K-row #file_id:{file_id} offset:{offset:,}+{del_size:,} tb:{file_table[file_id]:,}', yellow=1))
-                    #     io.n_lines += 1 # before??
-                    #     io_write_key(key_fp, io.n_lines, '', file_id, offset, del_size, 0)
-            else:
-                file_table.clear()
-
+            io.update_file_table()
             if io.n_lines == 0:
-                io.key_table.clear()
+                for file_id in io.file_table:
+                    self.files_obj.VAL_remove(file_id)
+
                 io.file_table.clear()
+                io.key_table.clear()
                 self._cache.clear()
 
             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -1627,10 +1631,10 @@ class JDb(JDbReader):
         groups = {}
         with self.open(read_only=False, no_raise=True) as fp:
             io = self.io
+            io.update_file_table()
             file_table = io.file_table.copy()
             swap_id += io.swap_id % 2
             remv_id += io.remv_id % 2
-
             io, fp, key_fp = self.f_get_fp(fp)
             f_get_group = self.f_get_group
             for key in io.groups:
@@ -1650,14 +1654,14 @@ class JDb(JDbReader):
             io.swap_id          = swap_id + 1
             io.remv_id          = remv_id + 1
 
+            for file_id in file_table:
+                if self.files_obj.VAL_remove(file_id):
+                    print(f'\nremoved VAL file -> {file_id}') # pragma: no cover
+
             io.change_APIs(io.api_ver, io._data_type, io._zip_type, reset=True)
             io.write_header(key_fp, truncate=True)
             io.load_keys(key_fp, force=True)
             self.fsize = io.file_size
-
-            for file_id in file_table:
-                if self.files_obj.VAL_remove(file_id):
-                    print(f'\nremoved VAL file -> {file_id}') # pragma: no cover
 
             for key,jdb in groups.items():
                 jdb.clear(agree='yes', wait_sec=0, **kwargs)
@@ -3196,7 +3200,7 @@ class JDb(JDbReader):
         keys = {}
         cnt = 0
         is_unsync = self.fsize == 0
-        with self.open(read_only=not fix_it) as fp:  # pragma: no cover
+        with self.open(read_only=not fix_it) as fp:
             has_SIGINT = self.file_lock.has_SIGINT
             self._cache.clear()
             io, fp, key_fp = self.f_get_fp(fp)
