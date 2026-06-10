@@ -3088,11 +3088,20 @@ class JIo:
         """
         file_table = self.file_table
         VAL_size = self.files_obj.VAL_size
-        file_id = 0
+        file_id = miss_cnt = 0
         file_table.clear()
-        for file_id in range(max(self.n_lines, 1)):
+        for file_id in range(MAX_FILE_ID):
             size = VAL_size(file_id)
-            if size < 0: break
+            if size < 0:
+                miss_cnt += 1
+                if miss_cnt >= 8: break
+                continue
+
+            while miss_cnt > 0:
+                _file_id = max(0, file_id-miss_cnt)
+                file_table[_file_id] = max(file_table.get(_file_id, 0), 0)
+                miss_cnt -= 1
+
             file_table[file_id] = size
 
     def load_keys(self, fp:IO, force:bool=False):

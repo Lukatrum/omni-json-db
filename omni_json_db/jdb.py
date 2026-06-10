@@ -1386,9 +1386,9 @@ class JDb(JDbReader):
                     jdb.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
 
             if io.n_records == io.n_lines:
+                io.update_file_table()
                 if io.n_records == 0: # io.n_lines == 0
-                    io.update_file_table()
-                    for file_id in io.file_table:
+                    for file_id in io.file_table: # pragma: no cover
                         self.files_obj.VAL_remove(file_id)
                     io.file_table.clear()
                     io.key_table.clear()
@@ -1425,7 +1425,7 @@ class JDb(JDbReader):
                     del_rows.append((file_id, offset, row_size, val_size, ver, days, key, row_id))
                     sortable = sortable or curr_end >= file_end
 
-            if not merge and not sortable:
+            if not merge and not sortable: # pragma: no cover
                 curr_pos = key_fp.tell()
                 end_pos = key_fp.seek(0,2)
                 if end_pos - curr_pos >= io.index_size:  # pragma: no cover
@@ -1446,23 +1446,20 @@ class JDb(JDbReader):
                         curr_end = offset + row_size
                         file_end = file_table.get(file_id, curr_end)
                         if curr_end >= file_end:
+                            file_table[file_id] = offset = max(offset, 0)
+                            val_fp = None
+                            try:
+                                val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
+                                val_fp.seek(offset)
+                                val_fp.truncate()
+
+                            finally:
+                                if val_fp is not None:
+                                    val_fp.close()
+
                             if verbose: # pragma: no cover
-                                print(f'del0 K-row[{key}] -> file_id:{file_id} offset:{offset:,}~{curr_end:,} tb:{file_end:,}')
+                                print(f'del0 K-row[{key}] -> file_id:{file_id} offset:{offset:,}:{curr_end:,} tb:{file_table[file_id]:,}')
 
-                            if offset > 0:
-                                file_table[file_id] = offset
-                                val_fp = None
-                                try:
-                                    val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
-                                    val_fp.seek(offset)
-                                    val_fp.truncate()
-
-                                finally:
-                                    if val_fp is not None:
-                                        val_fp.close()
-                            else:
-                                file_table.pop(file_id, 0)
-                                self.files_obj.VAL_remove(file_id)
                         else:
                             io.n_lines += 1 # before write_key
                             io_write_key(key_fp, io.n_lines-1, key, file_id, offset, row_size, val_size, ver, days)
@@ -1538,20 +1535,16 @@ class JDb(JDbReader):
                         next_offset = offset+del_size
                         file_end = file_table.get(file_id, next_offset)
                         if next_offset >= file_end: # pragma: no cover
-                            if offset > 0:
-                                file_table[file_id] = offset
-                                val_fp = None
-                                try:
-                                    val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
-                                    val_fp.seek(offset)
-                                    val_fp.truncate()
+                            file_table[file_id] = offset = max(offset, 0)
+                            val_fp = None
+                            try:
+                                val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
+                                val_fp.seek(offset)
+                                val_fp.truncate()
 
-                                finally:
-                                    if val_fp is not None:
-                                        val_fp.close()
-                            else:
-                                file_table.pop(file_id, 0)
-                                self.files_obj.VAL_remove(file_id)
+                            finally:
+                                if val_fp is not None:
+                                    val_fp.close()
 
                             if verbose: # pragma: no cover
                                 print(f'KILL K-row #file_id:{file_id} offset:{offset:,}:{file_end:,} tb:{file_table[file_id]:,}')
@@ -1594,9 +1587,8 @@ class JDb(JDbReader):
 
             io.update_file_table()
             if io.n_lines == 0:
-                for file_id in io.file_table:
+                for file_id in io.file_table: # pragma: no cover
                     self.files_obj.VAL_remove(file_id)
-
                 io.file_table.clear()
                 io.key_table.clear()
                 self._cache.clear()
@@ -3200,7 +3192,7 @@ class JDb(JDbReader):
         keys = {}
         cnt = 0
         is_unsync = self.fsize == 0
-        with self.open(read_only=not fix_it) as fp:
+        with self.open(read_only=not fix_it) as fp: # pragma: no cover
             has_SIGINT = self.file_lock.has_SIGINT
             self._cache.clear()
             io, fp, key_fp = self.f_get_fp(fp)
