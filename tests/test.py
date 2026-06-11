@@ -1086,6 +1086,23 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb0, jdb)
             jmem1 = jmem.add_group('1st')
             jmem2 = jmem1.add_group('2nd')
+            self.assertIn('1st', jmem)
+            self.assertIn('2nd', jmem1)
+
+            jmem.clear(agree='yes', wait_sec=0)
+            self.assertNotIn('1st', jmem)
+
+            jmem1 = jmem.add_group('1st')
+            jmem2 = jmem1.add_group('2nd')
+            with jmem.open() as fp:
+                self.assertTrue('1st' in jmem.key_table)
+                self.assertTrue(jmem.f_get_group(fp, '1st') is jmem1)
+                with jmem1.open() as fp1:
+                    self.assertTrue('2nd' in jmem1.key_table)
+                    self.assertTrue(jmem1.f_get_group(fp1, '2nd') is jmem2)
+
+            self.assertIn('1st', jmem)
+            self.assertIn('2nd', jmem1)
             jmem2['3rd'] = jdb
             jmem.unsync(with_child=True)
             jmem.recycle(level=8, merge=True, fill_zero=True)

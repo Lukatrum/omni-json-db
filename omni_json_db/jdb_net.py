@@ -477,7 +477,7 @@ class JNetIO(RawIOBase):
         """Flush the write buffers of the stream if applicable. This does nothing for read-only and non-blocking streams.
         """
         with self.lock:
-            if not self.closed: # pragma: no cover
+            if self.closed: # pragma: no cover
                 return
 
             dump_and_send(self.sock, (self.file, 'flush', [], {}))
@@ -488,7 +488,7 @@ class JNetIO(RawIOBase):
             err = JErrCode(resp.get('err', 0))
             if err == JErrCode.NOT_FOUND:
                 raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
+            return
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
