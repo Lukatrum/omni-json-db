@@ -473,7 +473,7 @@ class JNetIO(RawIOBase):
 
         return resp.get('ret', 0)
 
-    def flush(self):
+    def flush(self) -> None:
         """Flush the write buffers of the stream if applicable. This does nothing for read-only and non-blocking streams.
         """
         with self.lock:
@@ -481,7 +481,14 @@ class JNetIO(RawIOBase):
                 return
 
             dump_and_send(self.sock, (self.file, 'flush', [], {}))
-            _resp = recv_and_load(self.sock)
+            resp = recv_and_load(self.sock)
+
+        if not resp.get('ok'): # pragma: no cover
+            cmd = resp.get("cmd", "")
+            err = JErrCode(resp.get('err', 0))
+            if err == JErrCode.NOT_FOUND:
+                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
+            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------

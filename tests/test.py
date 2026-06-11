@@ -313,7 +313,7 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            jmem = JDb()
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem['group'] = jdb1 = JDb(jdb)
 
             jdb.from_ini(io.StringIO(ini_data))
@@ -960,9 +960,8 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            jmem = JDb()
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem['group'] = jdb1 = JDb(jdb)
-            jmem.clear(agree='yes', wait_sec=0)
 
             csv_file = 'db/test.csv'
             jdb += {'key1':1, 'key2':'a', 'key3':3., 'key4':True, 'key5':None}
@@ -1075,13 +1074,21 @@ class TestJDb(unittest.TestCase):
             # --------------------------------------------
             jdb1 = JDb(jdb)
             jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
-            jmem['top'] = jdb
-            jmem.files_obj.is_group(jdb1.files_obj, 'top')
-            jdb.files_obj.is_group(jmem.files_obj, 'top')
+            jmem['1st'] = jdb
+            jmem.files_obj.is_group(jdb1.files_obj, '1st')
+            jdb.files_obj.is_group(jmem.files_obj, '1st')
             if isinstance(jdb.files_obj, JNetFiles):
                 with self.assertRaises(RuntimeError):
                     gp_a = jdb.add_group('group_a')
                 continue
+
+            jdb0 = jmem.pop('1st', None)
+            self.assertEqual(jdb0, jdb)
+            jmem1 = jmem.add_group('1st')
+            jmem2 = jmem1.add_group('2nd')
+            jmem2['3rd'] = jdb
+            jmem.recycle(level=8, merge=True, fill_zero=True)
+            jmem.check_error(level=8, fix_it=True)
 
             jdb['group_a'] = list(range(128))
             jdb['group_b'] = None
@@ -1116,11 +1123,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['group_a:::a'], jdb[':::a'])
             self.assertEqual(jdb.keys['group_a:::a'], jdb.keys[':::a'])
             self.assertEqual(jdb['group_a:::a'], {'group_a:::a':1})
-            self.assertEqual(jmem['top:::group_a:::a'], {'top:::group_a:::a':1})
+            self.assertEqual(jmem['1st:::2nd:::3rd:::group_a:::a'], {'1st:::2nd:::3rd:::group_a:::a':1})
             self.assertEqual(jdb[':::b'], {'group_b:::b':2})
             self.assertEqual(jdb[':::c'], {'group_a:::c':3, 'group_b:::c':3})
-            self.assertEqual(jmem['::::::c'], {'top:::group_a:::c':3, 'top:::group_b:::c':3})
-            self.assertEqual(jmem.find(':::_a$:::[ac]', with_value=True), {'top:::group_a:::a': 1, 'top:::group_a:::c': 3})
+            self.assertEqual(jmem['::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
+            self.assertEqual(jmem['::::::3rd::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
+            self.assertEqual(jmem[':::2nd:::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
+            self.assertEqual(jmem['1st::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
+            self.assertEqual(jmem.find(':::2:::3:::_a$:::[ac]', with_value=True), {'1st:::2nd:::3rd:::group_a:::a': 1, '1st:::2nd:::3rd:::group_a:::c': 3})
             self.assertEqual(jdb.find('_a$:::[ac]', with_value=True), {'group_a:::a': 1, 'group_a:::c': 3})
             self.assertTrue(gp_a is not gp_b)
             gp = jdb.get_group('group_a')
@@ -1234,7 +1244,7 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(len(gp_a), 0)
             self.assertEqual(jdb['group_a'], gp_a)
 
-            jmem1 = JDb()
+            jmem1 = JDb(data_type=f'{jdb.data_type}({jdb.zip_type})', flags=0)
             jmem1['group_a', 'group_b'] = 0
             jdb -= jmem1
             self.assertEqual(len(gp_a), 0)
@@ -2074,7 +2084,7 @@ class TestJDb(unittest.TestCase):
                 _data = jdb.z_loads(jdb[_key], ret_type=_key[0])
                 self.assertEqual(_data, data)
 
-            jmem = JDb(data_type=jdb.data_type)
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             data_b = dumps(jdb)
             jmem += loads(data_b, jdb.data_type[-1])
             self.assertEqual(jmem, jdb)
@@ -2842,9 +2852,8 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            jmem = JDb()
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem['group'] = jdb1 = JDb(jdb)
-            jmem.clear(agree='yes', wait_sec=0)
             jmem.recycle(level=2, merge=True, fill_zero=True)
 
             sync_id = jdb.sync_id
@@ -5468,7 +5477,7 @@ class TestJDb(unittest.TestCase):
             del jdb['key23']
             self.assertNotEqual(jdb, expect)
 
-            jmem = JDb()
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem['key13', 'key23'] = 1
             jdb ^= jmem
             self.assertEqual(jdb, expect)
@@ -5738,7 +5747,7 @@ class TestJDb(unittest.TestCase):
             for key,val in jdb1.keys.item_iter(slice(None)):
                 self.assertEqual(jdb.keys[key], val)
 
-            jmem = JDb()
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem['group'] = jdb
             jmem.keys['group:::kk3'] = dt.datetime(yesterday.year, yesterday.month, yesterday.day)
             info2 = jdb.keys['kk3']

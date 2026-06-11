@@ -512,7 +512,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool: ...
     @abstractmethod
-    def create_group(self, name:str) -> object: ...
+    def create_group(self, name:str) -> JFilesBase: ...
     @abstractmethod
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO: ...
     @abstractmethod
@@ -547,9 +547,9 @@ class JMemFiles(JFilesBase):
 
     Manages layout matrices and dataset segments arrays completely within memory using mutable structures wrappers.
     """
-    __slots__ = {'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock'}
+    __slots__ = {'name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock'}
 
-    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, timestamp:Optional[float]=None):
+    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
         """Initialize volatile in-memory transient array datasets mapping virtual backend tables.
 
         Args:
@@ -558,6 +558,7 @@ class JMemFiles(JFilesBase):
             LCK_file (Optional[bytearray], optional): Mutex tracker array mapping shared concurrent access status bits. Defaults to None.
             lock (Optional[RLock], optional): Primitive synchronization engine tracking multi-threaded operations flows boundaries. Defaults to None.
             timestamp (Optional[float], optional): Baseline initialization timestamp mapping creation timeline markers records. Defaults to None.
+            name (Optional[str], optional): File object name
 
         Raises:
             TypeError: If input values fail framework datatype matching specifications.
@@ -577,6 +578,7 @@ class JMemFiles(JFilesBase):
         if timestamp is None:
             timestamp = datetime.now().timestamp()
 
+        name = '' if not name else name
         if not isinstance(KEY_file, bytearray):
             raise TypeError
         if not isinstance(LCK_file, bytearray):
@@ -584,6 +586,8 @@ class JMemFiles(JFilesBase):
         if not isinstance(VAL_table, dict):
             raise TypeError
         if not isinstance(timestamp, float):
+            raise TypeError
+        if not isinstance(name, str):
             raise TypeError
 
         if len(LCK_file) != 16:
@@ -594,6 +598,7 @@ class JMemFiles(JFilesBase):
         self.VAL_table = VAL_table
         self.lock = lock
         self.timestamp = timestamp
+        self.name = name
 
     def __repr__(self) -> str:
         """Generate tracking diagnostic indicators parameters monitoring object state details.
@@ -601,7 +606,7 @@ class JMemFiles(JFilesBase):
         Returns:
             str: Telemetry presentation tracking pointer identity configurations details.
         """
-        return f'<{type(self).__name__} KEY:{len(self.KEY_file)}@{hex(id(self.KEY_file))} +{len(self.VAL_table)} at {hex(id(self))}>'
+        return f'<{type(self).__name__} KEY{self.get_KEY()}:{len(self.KEY_file)}@{hex(id(self.KEY_file))} +{len(self.VAL_table)} at {hex(id(self))}>'
 
     def __eq__(self, obj) -> bool:
         """Compare transient memory allocations checking structural source equivalence parameters trackers.
@@ -618,9 +623,9 @@ class JMemFiles(JFilesBase):
         """Identify primary core index data file designation token label.
 
         Returns:
-            str: Always returns volatile code placeholder string `<MEM>`.
+            str: Always returns volatile code placeholder string starting with `<MEM`.
         """
-        return '<MEM>'
+        return f'<MEM.{self.name}>' if self.name else '<MEM>'
 
     def get_folder(self) -> str: # pragma: no cover
         """Identify parent directory folder configuration profiles.
@@ -636,7 +641,7 @@ class JMemFiles(JFilesBase):
         Returns:
             str: Descriptive placeholder tracking internal identity index tags text.
         """
-        return f'<MEM@{hex(id(self.KEY_file))}>'
+        return f'{self.get_KEY()}@{hex(id(self.KEY_file))}'
 
     def get_path(self, folder:str='') -> str:
         """Retrieve complete directory locations tracking variables mappings on local sheets layers.
@@ -655,7 +660,7 @@ class JMemFiles(JFilesBase):
         Returns:
             JMemFiles: Replicated virtual storage management context instance.
         """
-        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, timestamp=self.timestamp)
+        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, timestamp=self.timestamp, name=self.name)
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
@@ -668,7 +673,7 @@ class JMemFiles(JFilesBase):
             bool: True if key equals default runtime constraints string constants.
         """
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
-        return KEY_file == '<MEM>'
+        return KEY_file.startswith('<MEM.') and KEY_file[-1] == '>'
 
     def create_group(self, name:str) -> JMemFiles:
         """Spawn virtual child dataset storage segments maps bound inside transient scopes spaces rules profiles.
@@ -679,7 +684,7 @@ class JMemFiles(JFilesBase):
         Returns:
             JMemFiles: Empty virtual memory storage manager workspace pipeline handle.
         """
-        return JMemFiles()
+        return JMemFiles(name=f'{self.name}.{name}' if self.name else name)
 
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO:
         """Initialize in-memory file interface wrappers matching chosen virtual row content segments parts blocks.
@@ -965,7 +970,7 @@ class JDiskFiles(JFilesBase):
             bool: True if criteria tests locate matching layouts configuration blueprints rules.
         """
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
-        return KEY_file == '<MEM>' or KEY_file == self.group_KEY_file.format(group_key=name)
+        return KEY_file.startswith('<MEM.') or KEY_file == self.group_KEY_file.format(group_key=name)
 
     def create_group(self, name:str) -> JDiskFiles:
         """Assemble an isolated disk space subdirectory tree driver instance configured for a specific partition domain cluster.

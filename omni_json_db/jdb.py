@@ -1380,10 +1380,10 @@ class JDb(JDbReader):
                         return
 
                     jdb = self.f_get_child(fp, key)
-                    if not isinstance(jdb, JDb): continue
-                    full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
-                    print(Style(f'Recycling .. {full_key} (merge={merge}, fill_zero={fill_zero})', green=1))
-                    jdb.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
+                    if isinstance(jdb, JDb):
+                        full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
+                        print(Style(f'Recycling .. {full_key} (merge={merge}, fill_zero={fill_zero})', green=1))
+                        jdb.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
 
             if io.n_records == io.n_lines:
                 io.update_file_table()
@@ -3206,13 +3206,13 @@ class JDb(JDbReader):
                         return error
 
                     jdb = self.f_get_child(fp, key)
-                    if not isinstance(jdb, JDb): continue
-                    full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
-                    _error = jdb.check_error(parent=full_key, level=level-1, fix_it=fix_it, verbose=False)
-                    for _row, _key in _error.items():
-                        error[f'{full_key}#{_row}'] = _key
+                    if isinstance(jdb, JDb):
+                        full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
+                        _error = jdb.check_error(parent=full_key, level=level-1, fix_it=fix_it, verbose=False)
+                        for _row, _key in _error.items():
+                            error[f'{full_key}#{_row}'] = _key
 
-                    print(Style(f'[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{full_key}] #{jdb.io.n_records:,}/{jdb.io.n_lines:,}! {len(_error)} -> {len(error)}', red=len(_error) > 0, green=not _error, bright=1))
+                        print(Style(f'[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{full_key}] #{jdb.io.n_records:,}/{jdb.io.n_lines:,}! {len(_error)} -> {len(error)}', red=len(_error) > 0, green=not _error, bright=1))
 
                 for key,jdb in sorted(self.childs.items()):
                     if has_SIGINT():

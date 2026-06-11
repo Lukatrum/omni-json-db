@@ -5193,11 +5193,6 @@ class JDbReader:
 
         if file_id == 0x10: # JDb
             io = self.io
-            if self.files_obj.get_KEY() == '<MEM>':
-                jdb = self.childs.get(key, None)
-                if isinstance(jdb, JDbReader):
-                    return jdb
-
             jdb = io.groups[key]
             if jdb is None:
                 io.groups[key] = jdb = self.create_jdb(
