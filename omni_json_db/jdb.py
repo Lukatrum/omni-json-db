@@ -4815,13 +4815,9 @@ class JDb(JDbReader):
             jio.groups[name] = child
             self.childs.pop(name, None)
 
-        elif name in self.childs:
-            self.childs[name] = child
-
-        elif self.files_obj.is_group(child.files_obj, name):
+        elif name not in self.childs and self.files_obj.is_group(child.files_obj, name):
             jio.groups[name] = child
-            self.childs.pop(name, None)
-
+        
         else:
             self.childs[name] = child
 

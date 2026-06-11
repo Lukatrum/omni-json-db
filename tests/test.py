@@ -1087,6 +1087,7 @@ class TestJDb(unittest.TestCase):
             jmem1 = jmem.add_group('1st')
             jmem2 = jmem1.add_group('2nd')
             jmem2['3rd'] = jdb
+            jmem.unsync(with_child=True)
             jmem.recycle(level=8, merge=True, fill_zero=True)
             jmem.check_error(level=8, fix_it=True)
 
@@ -1257,6 +1258,15 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb1['group_a'], gp_a)
+
+            jmem.sync(with_child=True)
+            self.assertTrue(jmem.is_latest())
+            self.assertTrue(jmem2.is_latest())
+            jmem.unsync(with_child=True)
+            self.assertFalse(jmem.is_latest())
+            self.assertFalse(jmem2.is_latest())
+            jmem.sync(with_child=True)
+            self.assertTrue(jmem2.is_latest())
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0

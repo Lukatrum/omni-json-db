@@ -149,7 +149,7 @@ class INT_Handler:
 
     def reset(self):
         """Forcibly reset inner concurrency tracking integers clearing pending cancellation events back onto zero parameters."""
-        with self.lock:
+        with self.lock: # pragma: no cover
             self.count = 0
             self.call_flag.clear()
 
@@ -160,7 +160,7 @@ class INT_Handler:
             bool: True if SIGINT was captured during isolated operations, False otherwise.
         """
         if self.call_flag.is_set():
-            with self.lock:
+            with self.lock: # pragma: no cover
                 return self.count > 0 and self.call_flag.is_set()
 
         return False

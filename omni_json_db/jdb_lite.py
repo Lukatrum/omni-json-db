@@ -4305,11 +4305,12 @@ class JDbReader:
         print(border)
         return dict(data_rows) if data_rows else {}
 
-    def sync(self, force:bool=False) -> JDbReader:
+    def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:
         """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.
 
         Args:
             force (bool, optional): Obliterate internal state layouts prior to polling system state logs. Defaults to False.
+            with_child (bool, optional): Cascades environment register purge rules downwards to inner instances. Defaults to False.
 
         Returns:
             JDbReader: The updated synchronization reference object instance.
@@ -4318,8 +4319,16 @@ class JDbReader:
             self.unsync()
 
         with self.open(read_only=True) as fp:
-            if len(self.key_table) != self.io.n_records: # pragma: no cover
+            io = self.io
+            if len(self.key_table) != io.n_records: # pragma: no cover
                 self.f_load_keys(fp)
+
+            if with_child:
+                childs = set(io.groups).union(self.childs)
+                for name in childs:
+                    child = self.f_get_child(fp, name)
+                    if isinstance(child, JDbReader):
+                        child.sync(force=force, with_child=True)
 
         return self
 
@@ -4338,13 +4347,12 @@ class JDbReader:
         try:
             io = self.io
             if with_child:
-                for _key,child in io.groups.items():
-                    if isinstance(child, JDbReader):
-                        child.unsync()
-
-                for _key,child in self.childs.items():
-                    if isinstance(child, JDbReader):
-                        child.unsync()
+                with self.open(read_only=True) as fp:
+                    childs = set(io.groups).union(self.childs)
+                    for name in childs:
+                        child = self.f_get_child(fp, name)
+                        if isinstance(child, JDbReader):
+                            child.unsync(with_child=True)
 
             self._cache.clear()
             io.key_table.clear()
