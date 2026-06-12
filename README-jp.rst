@@ -10,7 +10,7 @@ English_ | 中文_ | 日本語_
 
 ..
 
-	靈巧的小松鼠迅速地收集森林的金色橡子！
+	素早いリスが、森中の黄金のどんぐりをあっという間に集めます！
 
 |Build Status| |readthedocs| |Pylint| |Codacy| |Coverage|
 
@@ -18,97 +18,104 @@ English_ | 中文_ | 日本語_
 📌 支援的 Python 版本
 *********************
 
-**omni-json-db** 已在 Python 3.7+ 和 PyPy3 上通過測試。
+**omni-json-db** は Python 3.7+ および PyPy3 でテストされています。
 
 |Python Version|
 
 ..
 
-   如果您覺得 **omni-json-db** 對您有所幫助，請考慮給它一個⭐️！ 這能幫助專案成長並接觸到更多開發者。
+   **omni-json-db** が役に立つと思ったら、ぜひ ⭐️ をお願いします！プロジェクトの成長と、より多くの開発者に届くための大きな力になります。
 
-👉 快速連結
-***********
+👉 クイックリンク
+***************
 
-- `✨ 簡介`_
-- `🛠️ 快速入門`_
-- `📝 規格說明`_
-- `📊 基準測試`_
-- `📄 說明文檔`_
-- `👥 貢獻指南`_
+- `✨ はじめに`_
+- `🛠️ クイックスタート`_
+- `📝 仕様説明`_
+- `📊 ベンチマーク`_
+- `📄 ドキュメント`_
+- `👥 コントリビューションガイド`_
 
-✨ 簡介
-*******
+✨ はじめに
+**********
+**omni-json-db** は、Python 開発者のために設計された高性能な組み込みデータベースエンジンです。超高速なキー・バリュー（Key-Value）ストアと、強力なドキュメントデータベースのクエリ機能との間のギャップを埋めるツールです。
+
+超高スループットとスレッドセーフを考慮して構築された **omni-json-db** は、最新のシリアライズ技術（*JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）と圧縮アルゴリズムを活用し、大量の *JSON* ワークロードを処理する際に、通常 *SQLite* よりも大幅に高速なストレージレイヤーを提供します。ローカルキャッシュ、ログアグリゲーター、分散マイクロサービスのいずれを構築する場合でも、「ゼロコンフィギュレーション」のシンプルさで大規模なデータを処理できます。
+
+従来の *SQLite* や *NoSQL* データベースとは異なり、**omni-json-db** ではネイティブな Python 構文（スライス、Lambda、正規表現、集合演算）を使用してデータのクエリと操作を行うことができます。また、状態のロールバック（元に戻す / やり直し）をサポートする「タイムトラベル」機能も組み込まれています。
+
 **omni-json-db** 是一款專為 Python 開發者設計的高效能嵌入式資料庫引擎。 它填補了極速鍵值（Key-Value）儲存與強大文件資料庫查詢功能之間的空白。   
 
 **omni-json-db** 專為超高吞吐量和執行緒安全而構建，利用現代序列化技術（如 *JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）和壓縮算法，提供了一個在處理大量 *JSON* 工作負載時通常比 *SQLite* 快顯著許多的儲存層。 無論您是在構建本地快取、日誌聚合器還是分散式微服務，它都能以「零配置」的簡易性處理大規模資料。
 
 與傳統的 *SQLite* 或 *NoSQL* 資料庫不同，**omni-json-db** 允許您使用原生的 Python 語法（切片、Lambdas、正則表達式、集合運算）來查詢和操作資料。 它還內建了「時光旅行」功能，支援狀態回滾（復原/重做）。   
 
-* **無模式 (Schema-LESS)**：無需預先定義表格即可儲存複雜、嵌套的資料。   
+* **スキーマレス (Schema-LESS)**: 事前にテーブルを定義することなく、複雑でネストされたデータを保存できます。
 
-* **無伺服器 (Server-LESS)**：直接存取磁碟，沒有資料庫伺服器的額外開銷。   
+* **サーバーレス (Server-LESS)**: データベースサーバーのオーバーヘッドなしに、ディスクへ直接アクセスします。
 
-* **無SQL (SQL-LESS)**：使用原生 Python 語法、正則表達式和 Lambdas 進行資料操作。   
+* **SQLレス (SQL-LESS)**: ネイティブな Python 構文、正規表現、Lambda を使用してデータ操作を行います。
 
-🚀 核心特性
+🚀 主な機能
 ***********
 
-* **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]  
+* **ディープな Python 化**: SQL に別れを告げましょう！標準的な Python の ``dict`` メソッド、スライス、さらには ``set`` 演算を使用してデータベースと対話します。[参照: `基本的な使い方`_ + `演算子`_]
 
-* **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
+* **動的シリアライズと高度な圧縮**: JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle、YAML を自由に組み合わせ、LZ4、Zstandard (z1/z2/zs)、Brotli、Bzip2 などの高度な圧縮アルゴリズムと統合して、I/O 速度とディスク使用量の完璧なバランスを実現します。[参照: `フォーマットの変換`_ + `データタイプ`_ + `圧縮タイプ`_]
 
-* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_ + `更多查詢示範`_]
+* **強力なクエリエンジン**: 正規表現 (Regex)、Lambda フィルター（例: ``jdb[lambda k, v: v > 10]``）、および豊富な条件演算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）を使用して簡単に検索できます。[参照: `クエリエンジン`_ + `その他のクエリ例`_]
 
-* **記憶體快取**：可調整的 ``cache_limit`` 用以平衡記憶體使用率與 I/O 速度。 [參考 `快取種類`_]
+* **メモリキャッシュ**: メモリ使用量と I/O 速度のバランスを調整できる ``cache_limit`` （または ``key_limit``）。[参照: `キャッシュタイプ`_]
 
-* **網路模式 (``JNetFiles``)**：只需一個指令``run_files_server()``，即可將本地實例轉換為網路服務。 [參考 `網路模式`_]
+* **ネットワークモード (JNetFiles)**: コマンド一つ ``run_files_server()`` だけで、ローカルインスタンスをネットワークサービスに変換します。[参照: `ネットワークモード`_]
 
-* **記憶體模式 (``JMemFiles``)**：在記憶體內運行整個資料庫，實現極致效能（適用於即時快取或暫時性會話儲存）。 [參考 `記憶體模式`_]
+* **インメモリモード (JMemFiles)**: データベース全体を RAM 上で実行し、最高のパフォーマンスを実現します（リアルタイムキャッシュや一時的なセッションストレージに最適）。[参照: `インメモリモード`_]
 
-* **時光旅行」與回滾**：資料庫會追蹤內部狀態，允許您復原修改 (``unmodify()``) 或救回刪除的資料 (``unremove()``)。 [參考 `救回`_ + `備份 / 復原`_]
+* **「タイムトラベル」とロールバック**: データベースは内部状態を追跡しており、変更を元に戻したり (``unmodify()``)、削除したデータを復元したり (``unremove()``) できます。[参照: `復元 / ロールバック`_ + `フォーマットの変換`_ ]
 
-* **分組與命名空間**：使用群組（Groups）輕鬆隔離並管理不同的資料模組。 [參考 `群組模式`_]
+* **グループ化と名前空間**: グループ（Groups）を使用して、異なるデータモジュールを簡単に分離し、管理できます。[参照: `グループモード`_]
 
-* **原生 CSV 支援**：內建 ``DictReader`` 和 ``DictWriter`` 接口，可從 *CSV* 匯入海量資料或匯出至 *Excel*/*Pandas* 進行分析。 [參考 `CSV 匯入 / 匯出`_]
+* **ネイティブな CSV サポート**: 組み込みの ``DictReader`` および ``DictWriter`` インターフェースにより、*CSV* から膨大なデータをインポートしたり、*Excel* や *Pandas* で分析するためにエクスポートしたりできます。[参照: `CSV インポート / エクスポート`_]
 
-* **無縫資料遷移**：一行代碼即可完成匯入匯出！ 內建引擎可將關聯式資料庫 (*SQLite*) 轉換為 *NoSQL* 群組結構，並支援 *INI*、*TOML* 配置解析。 [參考 `SQLite 匯入`_ + `INI / TOML 匯入`_]
+* **シームレスなデータ移行**: たった1行のコードでインポートとエクスポートが完了！組み込みエンジンは、リレーショナルデータベース (*SQLite*) を *NoSQL* のグループ構造に変換でき、*INI* や *TOML* 構成の解析もサポートします。[参照: `SQLite インポート`_ + `INI / TOML インポート`_]
 
-* **時間序列支援**：每條記錄都帶有時間戳，支援強大的日期切片查詢。 例如使用 ``jdb[yesterday:now]`` 獲取自昨天以來修改的所有記錄。 [參考 `時間序列`_]
+* **時系列のサポート**: すべてのレコードにタイムスタンプが付与され、強力な日付ベースのスライスクエリをサポートします。例えば、``jdb[yesterday:now]`` を使用して昨日から変更されたすべてのレコードを取得できます。[参照: `時系列`_]
 
-* **並行控制**：針對「多讀/單寫」環境優化，具備可靠的文件鎖定機制。 [參考 `進階用法`_]
+* **並行性制御 (Concurrency Control)**: 「複数読み込み/単一書き込み (Many-Read / Single-Write)」環境向けに最適化されており、堅牢なファイルロックおよび Lock メカニズムを備えています。[参照: `高度な使い方`_]
 
-🛠️ 快速入門
-***********
 
-安裝
-----
+🛠️ クイックスタート
+*****************
+
+インストール
+-----------
 
 .. code-block:: bash
 
    pip install omni-json-db
 
-基本用法
--------
+基本的な使い方
+------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
    
-   # 初始化 Json+mSgpack，不壓縮，檔案模式
+   # Json+mSgpack で初期化、圧縮なし、ファイルモード
    jdb = JDb("example.jdb")
 
-   # 儲存資料
-   jdb["用家1"] = {"名字" : "小明", "職位": "程式員"}
+   # データを保存
+   jdb["ユーザー1"] = {"名前" : "太郎", "役職": "プログラマー"}
    
-   # 讀取資料
-   user = jdb["用家1"]
-   print(user["名字"], user["職位"]) # 輸出: 小明 程式員
+   # データを読み出し
+   user = jdb["ユーザー1"]
+   print(user["名前"], user["役職"]) # 出力: 太郎 プログラマー
 
    
-支援所有標準 ``dict`` 方法: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
+すべての標準的な ``dict`` メソッドをサポートしています: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
 
-記憶體模式
----------
+インメモリモード
+--------------
 
 .. code-block:: python
 
@@ -130,156 +137,132 @@ English_ | 中文_ | 日本語_
    print(jdb1["用家2"]["名字"]) 輸出: 小美
 
 
-查詢引擎
--------
+クエリエンジン
+------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
 
-   # 初始化 Json+Marshal，無壓縮，記憶體模式
+   # Json+Marshal で初期化、圧縮なし、インメモリモード
    jdb = JDb(data_type="J+M")
-   
-   # 批量插入無鍵記錄
+
+   # キーなしのレコードをまとめて挿入
    jdb += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
-            {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
-   
-   # 顯示表格
-   jdb.show();
+           {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
 
-   # 使用 Lambda 函式搜尋名為 'John' 的記錄
+   # テーブルを表示
+   jdb.show()
+
+   # Lambda 関数を使用して 'John' という名前のレコードを検索
    matches = jdb.find(FUNC=lambda key,val: val['name'] == 'John') 
-   print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
+   print(matches) # 出力: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}}
 
-   # 使用正則表達式搜尋 'John' 或 'Bob'
+   # 正規表現を使用して 'John' または 'Bob' を検索
    matches = jdb.find(RE='John|Bob')
-   print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
+   print(matches) # 出力: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
 
 
-條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
+条件演算子には以下のものが含まれます: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
 
-了解 `更多查詢示範`_
+`その他のクエリ例`_ もご覧ください。
 
-救回
-----
+復元 / ロールバック
+-----------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   
-   # 初始化 Json+Pickle，ZStandard壓縮，檔案模式
+
+   # Json+Pickle で初期化、ZStandard 圧縮、ファイルモード
    jdb = JDb("fruit.jdb", data_type="J+P", zip_type='zs')
 
-   # 寫入
+   # 書き込み
    jdb["apple"] = "red"
 
-   # 修改
+   # 変更
    jdb["apple"] = "blue" 
 
-   # 還原 (相等於jdb.unmodify())
+   # 元に戻す (jdb.unmodify() と同等)
    jdb.revert("apple")
    assert jdb["apple"] == 'red'
 
-   # 移除
+   # 削除
    del jdb["apple"] 
    assert "apple" not in jdb
 
-   # 還原 (相等於jdb.unremove())
+   # 削除を取り消す (jdb.unremove() と同等)
    jdb.revert("apple")
    assert jdb["apple"] == "red"
 
-備份 / 復原
+
+グループモード
 ----------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
    
-   # 初始化 mSgpack+Json，Brotli壓縮，檔案模
-   jdb = JDb("fruit.jdb", data_type="S+J", zip_type='bz')
-
-   # 寫入水果到JDb
-   fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}
-   jdb += fruits
-   assert jdb == fruits
-
-   # 備份至bak檔案夾 = ./bak/fruit.jdb
-   jdb_bak = jdb.backup(folder='bak')
-   assert jdb_bak == fruits
-   
-   # 移除所有資料
-   del jdb[fruits]
-   assert len(jdb) == 0
-
-   # 從bak檔案夾還原jdb
-   jdb.restore(folder='bak')
-   assert jdb == fruits
-   
-群組模式
------------
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-   
-   # 初始化 Json+mSgpack，無壓縮，檔案模式
+   # Json+mSgpack で初期化、圧縮なし、ファイルモード
    jdb = JDb('fruit_group.jdb')
 
-   # 新增 red 群組
+   # red グループを追加
    r_jdb = jdb.add_group('red')
    assert r_jdb is jdb['red']
 
-   # 新增yellow群組
+   # yellow グループを追加
    y_jdb = jdb.add_group('yellow')
    assert y_jdb is jdb['yellow']
 
-   # 批量增加水果至red群組
+   # red グループへフルーツをまとめて追加
    r_jdb += {'apple': {'qty':1}, 'tomato': {'qty':2}}
 
-   # 批量增加水果至yellow群組
+   # yellow グループへフルーツをまとめて追加
    y_jdb += {'banana': {'qty':4}, 'lemon': {'qty':6}, 'mango': {'qty':8}}
 
-   # 讀取red群組
-   print(jdb['red']['apple']['qty'])   # 輸出: 1
-   print(jdb['red:::apple'])           # 輸出: {'red:::apple': {'qty': 1}}
-   print(jdb['yellow:::banana'])       # 輸出: {'yellow:::banana': {'qty': 4}}
+   # red グループを読み出し
+   print(jdb['red']['apple']['qty'])   # 出力: 1
+   print(jdb['red:::apple'])           # 出力: {'red:::apple': {'qty': 1}}
+   print(jdb['yellow:::banana'])       # 出力: {'yellow:::banana': {'qty': 4}}
 
-   # 查詢所有群組的水果有'a'字
+   # すべてのグループから名前に 'a' が含まれるフルーツを検索
    matches = jdb.find(r':::a')
-   print(matches) # 輸出: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+   print(matches) # 出力: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
 
-CSV 匯入 / 匯出
--------------------
+
+CSV インポート / エクスポート
+--------------------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   
-   # 初始化 Json+Json，無壓縮，記憶體模式
+
+   # Json+Json で初期化、圧縮なし、インメモリモード
    jdb1 = JDb(data_type="J+J")
 
-   # 批量插入無鍵記錄
+   # キーなしのレコードをまとめて挿入
    jdb1 += [{'name': 'John', 'age': 22}, {'name': 'John', 'age': 37}, \
             {'name': 'Bob', 'age': 42}, {'name': 'Megan', 'age': 27}]
-   
-   # 將JDb的內容匯出至 example.csv
+
+   # JDb の内容を example.csv にエクスポート
    jdb1.to_csv('example.csv')
 
-   # 顯示表格
+   # テーブルを表示
    jdb1.show();
 
-   # 建立另一個JDb
+   # 別の JDb を作成
    jdb2 = JDb()
-   
-   # 從CSV檔案匯入至JDb
-   jdb2.from_csv('example.csv')
-   print(jdb2.find(RE='Bob')) # 輸出: {'name': 'Bob', 'age': 42}
 
-   # 顯示表格
+   # CSV ファイルから JDb にインポート
+   jdb2.from_csv('example.csv')
+   print(jdb2.find(RE='Bob')) # 出力: {'name': 'Bob', 'age': 42}
+
+   # テーブルを表示
    jdb2.show(RE='Bob');
 
-INI / TOML 匯入
------------------
+
+INI / TOML インポート
+--------------------
 
 .. code-block:: python
    
@@ -288,33 +271,34 @@ INI / TOML 匯入
 
    jdb = JDb()
 
-   # --- 準備 INI 格式 ---
+   # --- INI フォーマットの準備 ---
    ini_data = """
    [server]
    host = 127.0.0.1
    port = 8080
    """
 
-   jdb.from_ini(io.StringIO(ini_data)) # 除了IO外，還支援檔案路徑 (例如:'config.ini')
-   print(jdb['server/host']) # 輸出: 127.0.0.1
+   jdb.from_ini(io.StringIO(ini_data)) # IOだけでなく、ファイルパスもサポート (例: 'config.ini')
+   print(jdb['server/host']) # 出力: 127.0.0.1
 
-   # --- 準備 TOML 格式 ---
+   # --- TOML フォーマットの準備 ---
    toml_data = """
    app_name = "Omni Test"
    [network]
    ip = "192.168.1.1"
    port = 8181
    """
-   
-   jdb.from_toml(io.StringIO(toml_data)) # 除了IO外，還支援檔案路徑 (例如:'config.toml')
 
-   print(jdb['/app_name'])    # 輸出: Omni Test
-   print(jdb['network/ip'])   # 輸出: 192.168.1.1
+   jdb.from_toml(io.StringIO(toml_data)) # IOだけでなく、ファイルパスもサポート (例: 'config.toml')
 
-SQLite 匯入
--------------
+   print(jdb['/app_name'])    # 出力: Omni Test
+   print(jdb['network/ip'])   # 出力: 192.168.1.1
 
-Step 1: Prepare *sample.sql*
+
+SQLite インポート
+-----------------
+
+ステップ 1: *sample.sql* の準備
 
 .. code-block:: python
 
@@ -360,7 +344,7 @@ Step 1: Prepare *sample.sql*
    conn.commit()
    conn.close()
 
-Step 2: Import to ``JDb``
+ステップ 2: ``JDb`` へのインポート
 
 .. code-block:: python
 
@@ -368,24 +352,25 @@ Step 2: Import to ``JDb``
 
    jdb = JDb("migrated_data.jdb")
 
-   # Load an entire SQLite database with one line of code
+   # 1行のコードで SQLite データベース全体をロード
    jdb.from_sqlite('sample.sql')
 
-   # SQLite tables (e.g., 'projects' and 'project_logs') automatically become groups
+   # SQLite のテーブル (例: 'projects' や 'project_logs') は自動的にグループになります
    projects = jdb['projects']
    logs = jdb['project_logs']
 
-   # Query relational data using the NoSQL interface
-   print(projects[3]['name'])  # Get the name of the project with ID 3
-   print(len(logs))            # Get the total number of logs
+   # NoSQL インターフェースを使用してリレーショナルデータをクエリ
+   print(projects[3]['name'])  # ID 3 のプロジェクト名を取得
+   print(len(logs))            # ログの総数を取得
 
-   # Combine with powerful Lambda queries to find logs for a specific project
+   # 強力な Lambda クエリと組み合わせて、特定のプロジェクトのログを検索
    project_3_logs = logs.find(FUNC=lambda val: val['project_id'] == 3)
 
-網路模式
-------------
 
-**Server side**
+ネットワークモード
+----------------
+
+**サーバーサイド**
 
 .. code-block:: python
    
@@ -393,53 +378,53 @@ Step 2: Import to ``JDb``
    
    jdb = JDb('storage.jdb')
 
-   # equivalent to: files='storage.jdb'
+   # 次と同等です: files='storage.jdb'
    run_files_server(host='127.0.0.1', port=59898, files=jdb)
 
-   # write key to JDb
+   # JDb にキーを書き込み
    jdb['remote-key'] = 'secret'
 
-**Client side**
+**クライアントサイド**
 
 .. code-block:: python
 
    from omni_json_db import JDb
 
-   # connect to files server
+   # ファイルサーバーに接続
    jdb = JDb('127.0.0.1:59898')
 
-   # read remote key from JDb
-   print(jdb['remote-key']) # Output: secret
+   # JDb からリモートのキーを読み出し
+   print(jdb['remote-key']) # 出力: secret
 
-轉換格式
------------
+フォーマットの変換
+-----------------
 
 .. code-block:: python
 
    from omni_json_db import JDb
 
-   # Initialize the database in memory
-   # Key-Value is Json+Json with no compression
+   # インメモリでデータベースを初期化
+   # Key-Value は Json+Json で圧縮なし
    jdb = JDb(data_type='J+J')
 
    fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}
 
-   # add all fruits to database
+   # すべてのフルーツをデータベースに追加
    jdb += fruits
    assert jdb == fruits
-   print(jdb.data_type, jdb.zip_type) # Output: J+J no
+   print(jdb.data_type, jdb.zip_type) # 出力: J+J no
 
-   # change date_type to 'S+S' and zip_type to 'lz'
+   # date_type を 'S+S' に、zip_type を 'lz' に変更
    jdb.upgrade(data_type='S+S', zip_type='lz')
    assert jdb == fruits
-   print(jdb.data_type, jdb.zip_type) # Output: S+S lz
+   print(jdb.data_type, jdb.zip_type) # 出力: S+S lz
 
-   # only change KEY type from 'S' to 'J'
+   # KEY のタイプのみ 'S' から 'J' に変更
    jdb.change_KEY('J')
    assert jdb == fruits
-   print(jdb.data_type, jdb.zip_type) # Output: J+S lz
+   print(jdb.data_type, jdb.zip_type) # 出力: J+S lz
 
-時間序列
+時系列
 ------------
 
 .. code-block:: python
@@ -447,86 +432,88 @@ Step 2: Import to ``JDb``
    from omni_json_db import JDb
    import datetime as dt
 
-   # Initialize the database in memory
-   # Key+Value is Json+Json with Brotli compression
-   # using BTree as Key Table for better memory usage
+   # インメモリでデータベースを初期化
+   # Key+Value は Json+Json で Brotli(またはGzip) 圧縮
+   # メモリ使用量を改善するため Key Table として BTree を使用
    jdb = JDb(data_type="J+J(gz)", key_limit="bt")
 
-   # insert data
+   # データを挿入
    fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}
    jdb += fruits 
 
-   # datetime for create date, date for modify date
+   # datetime は作成日時、date は変更日時用
    now = dt.datetime.now()
    today = now.date()
-   
-   # find create date: date == now
+
+   # 作成日時で検索: date == now
    matches = jdb[now]
    assert matches == fruits
 
-   # find create date: date >= now
+   # 作成日時で検索: date >= now
    matches = jdb[now:]
    assert matches == fruits
 
-   # find create date: date < now
+   # 作成日時で検索: date < now
    matches = jdb[:now]
    assert len(matches) == 0
 
-   # find create date: now <= date <= now+1
+   # 作成日時で検索: now <= date <= now+1
    next_date = now + dt.timedelta(days=1)
    matches = jdb[now:next_date]
    assert matches == fruits
 
    prev_date = now - dt.timedelta(days=1)
    prev_week = now - dt.timedelta(days=7)
-   
-   # change key create date
+
+   # キーの作成日時を変更
    jdb.keys['apple', 'tomato'] = prev_date
    jdb.keys['mango'] = prev_week
    assert jdb[prev_date] == {'apple':'red', 'tomato':'red'}
    assert jdb[prev_week] == {'mango':'yellow'}
 
-   # find create date: date == now
+   # 作成日時で検索: date == now
    matches = jdb[now]
    assert set(matches) == {'banana', 'lemon'}
 
-   # find create date: date < now
+   # 作成日時で検索: date < now
    matches = jdb[:now]
    assert set(matches) == {'apple', 'mango', 'tomato'}
 
-   # find modify date: date == today
+   # 変更日時で検索: date == today
    matches = jdb[today]
    assert matches == fruits
 
-   # change key modify date + create date
+   # キーの変更日時 + 作成日時を変更
    new_modify_date = prev_date.date()
    new_create_date = prev_week.date()
    assert new_modify_date >= new_create_date
+
    jdb.keys['lemon'] = f'{new_modify_date} {new_create_date}'
-   
-   # find modify date: date == today   
+
+   # 変更日時で検索: date == today   
    matches = jdb[today]
    assert set(matches) == {'apple', 'banana', 'mango', 'tomato'}
 
-   # find modify date: date == prev_date
+   # 変更日時で検索: date == prev_date
    matches = jdb[prev_date.date()]
    assert set(matches) == {'lemon'}
 
-   # change all keys create date
+   # すべてのキーの作成日時を変更
    jdb.keys[:] = today
    assert jdb[today] == fruits
 
-運算子
+演算子
 --------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key+Value is mSgpack+mSgpack with lz4 compression
+
+   # インメモリでデータベースを初期化
+   # Key+Value は mSgpack+mSgpack で lz4 圧縮
    jdb = JDb(data_type="S+S(lz)")
 
-   # [1] KEY+VAL operators
+   # [1] KEY+VAL 演算子
    # <jdb += data> == jdb.update(data)
    data = {f'key{v}':v for v in range(100)}   
    jdb += data
@@ -538,8 +525,8 @@ Step 2: Import to ``JDb``
    # <jdb |= ..> == jdb.insert(..)
    jdb |= {f'key{v}':v+1 for v in range(102)}
    assert jdb['key100'] == 101
-   assert jdb[-2.:] == {'key100':101, 'key101':102} # get last two modified records
-   assert jdb[(f'key{v}' for v in range(100))] == data # equivalent to jdb[data] == data
+   assert jdb[-2.:] == {'key100':101, 'key101':102} # 最後に変更された2つのレコードを取得
+   assert jdb[(f'key{v}' for v in range(100))] == data # jdb[data] == data と同等
 
    # <jdb -= ..> == jdb.remove(..)
    jdb -= ['key100', 'key101', 'key102', 'key103']
@@ -550,30 +537,30 @@ Step 2: Import to ``JDb``
    assert jdb == {f'key{v}':v+1 for v in range(100)}
 
    # <jdb ^= ..> == jdb.unmodify(..)
-   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
+   jdb ^= {f'key{v}' for v in range(100)} # jdb ^= data と同等
    assert jdb == data
 
    # <jdb[:] = ..> == jdb.update(..)
-   jdb[:] = 0 # set all records to zero
+   jdb[:] = 0 # すべてのレコードを 0 に設定
    assert jdb == {f'key{v}':0 for v in range(100)}
    assert jdb.find(NE=0) == {}
 
-   # remove all records
-   jdb -= jdb # equivalent to del jdb[:]
+   # すべてのレコードを削除
+   jdb -= jdb # del jdb[:] と同等
    assert len(jdb) == 0
 
    # <jdb ^= ..> == jdb.unremove(..)
-   jdb ^= {f'key{v}' for v in range(100)} # equivalent to jdb ^= data
+   jdb ^= {f'key{v}' for v in range(100)} # jdb ^= data と同等
    assert all(val == 0 for key,val in jdb.items())
 
-   # lambda VALUE operation
+   # Lambda VALUE 操作
    jdb[:] = lambda key,val: int(key.replace('key', '')) + val
    assert jdb == data
 
    # <del jdb[..]> == jdb.remove_fast(..)
-   del jdb[data] # equivalent to del jdb[:]
+   del jdb[data] # del jdb[:] と同等
 
-   # unremove all data
+   # すべてのデータを復元
    jdb ^= data
    assert jdb == data
 
@@ -581,26 +568,26 @@ Step 2: Import to ``JDb``
    matches = jdb[('key2', 'key22', 'key44', 'key111')]
    assert matches == {'key2':2, 'key22':22, 'key44':44}
 
-   # lambda KEY operation
+   # Lambda KEY 操作
    matches = jdb[lambda key:key.endswith('1')]
    assert set(matches) == {'key1', 'key11', 'key21', 'key31', 'key41', 'key51', 'key61', 'key71', 'key81', 'key91'}
 
-   # set all matched records to -1
+   # マッチしたすべてのレコードを -1 に設定
    jdb[matches] = -1
    matches_2 = jdb[lambda key,val: val == -1]
    assert set(matches) == set(matches_2)
    assert matches_2 == jdb.find(EQ=-1)
    assert matches_2 == jdb.find(FUNC=lambda val: val == -1)
 
-   # RE search
+   # RE (正規表現) 検索
    matches_3 = jdb[::r'1$']
    assert matches_2 == matches_3
 
-   # unmodify
+   # 元に戻す (unmodify)
    jdb ^= matches
    assert jdb == data
 
-   # [2] KEY operators
+   # [2] KEY 演算子
    # <jdb & {..}> == jdb.intersection(..)
    matches = jdb & {f'key{v}' for v in range(98, 120)}
    assert matches == {'key98', 'key99'}
@@ -608,7 +595,7 @@ Step 2: Import to ``JDb``
    # <{..} & jdb> == {..}.intersection(jdb)
    matches_2 = {f'key{v}' for v in range(98, 120)} & jdb
    assert matches == matches_2
-   
+
    # <jdb | {..}> == jdb.union(..)
    matches = jdb | {f'key{v}' for v in range(10, 120)}
    assert matches == {f'key{v}' for v in range(0, 120)}
@@ -616,7 +603,7 @@ Step 2: Import to ``JDb``
    # <{..} | jdb> == {..}.union(jdb)
    matches_2 = {f'key{v}' for v in range(10, 120)} | jdb
    assert matches == matches_2
-   
+
    # <jdb + {..}> == jdb.union(..)
    matches = jdb + {f'key{v}' for v in range(10, 120)}
    assert matches == matches_2
@@ -624,7 +611,7 @@ Step 2: Import to ``JDb``
    # <{..} + jdb> == {..}.union(jdb)   
    matches_2 = {f'key{v}' for v in range(10, 120)} + jdb
    assert matches == matches_2
-   
+
    # <jdb - {..}> == jdb.difference(..)
    matches = jdb - {f'key{v}' for v in range(0, 98)}
    assert matches == {'key98', 'key99'}
@@ -652,21 +639,23 @@ Step 2: Import to ``JDb``
    assert jdb.has_any({'key10', 'key90', 'key110', 'key190'})
    assert jdb.is_disjoint({'key110', 'key190'})
 
-支援所有標準``set``: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``.
 
-更多查詢示範
------------
-Below are examples of how to utilize the various parameters and NoSQL syntax.
+すべての標準的な set メソッドをサポートしています: ``union()``, ``intersection()``, ``difference()``, ``isdisjoint()``, ``issubset()``, ``issuperset()``。
+
+その他のクエリ例
+--------------
+
+以下は、様々なパラメータと NoSQL 構文を活用する方法の例です。
 
 .. code-block:: python
 
    from omni_json_db import JDb
    import re
 
-   # Initialize an in-memory database
+   # インメモリデータベースを初期化
    jdb = JDb()
 
-   # Sample user records
+   # サンプルユーザーレコード
    users = {
       'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
       'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
@@ -674,47 +663,47 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
       'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
    }
 
-   # Insert data 
+   # データを挿入
    jdb += users
 
-   # 1. Exact Match & Global Search (ANY, RE, RE2)
+   # 1. 完全一致 & グローバル検索 (ANY, RE, RE2)
    #----------------------------------------------------------
-   # Find users where any attribute exactly matches 'Alice'
+   # いずれかの属性が 'Alice' と完全に一致するユーザーを検索
    res = jdb.find(ANY='Alice')
    assert list(res) == ['user_1']
 
-   # RE/RE2 convert value into JSON string format for searching.
-   # Find any record that has the string 'designer' inside it
+   # RE/RE2 は検索のために値を JSON 文字列フォーマットに変換します。
+   # 'designer' という文字列を内部に含む任意のレコードを検索
    res = jdb.find(RE=r'designer')
    assert list(res) == ['user_4']
-   
-   # RE2 remove some JSON symbol (,[]{}") before searching
+
+   # RE2 は検索前に一部の JSON 記号 (,[]{}") を削除します
    res = jdb.find(RE2=r'role:designer')
    assert list(res) == ['user_4']
-   
-   # 2. Relational & Conditional Operators (vals)
+
+   # 2. リレーショナル & 条件演算子 (vals)
    #----------------------------------------------------------
-   # Age is greater than or equal to 30
+   # Age (年齢) が 30 以上
    res = jdb.find(vals={'age': {'$gte': 30}}) # find(ANY={'$gte': 30})
    assert list(res) == ['user_1', 'user_3']
 
-   # Age is strictly less than 30
+   # Age が 30 未満
    res = jdb.find(vals={'age': {'$lt': 30}}) # find(ANY={'$lt': 30})
    assert list(res) == ['user_2', 'user_4']
 
-   # Role is either 'admin' or 'designer'
+   # Role (役職) が 'admin' または 'designer'
    res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
    assert list(res) == ['user_1', 'user_4']
 
-   # tags contains 'python'
+   # tags に 'python' が含まれる
    res = jdb.find(vals={'tags': {'$has': 'python'}})
    assert list(res) == ['user_1', 'user_3']
 
-   # Age is NOT 30
+   # Age が 30 ではない
    res = jdb.find(vals={'age': {'$ne': 30}}) # find(ANY={'$ne': 30})
    assert list(res) == ['user_2', 'user_3', 'user_4']
 
-   # Age is 28
+   # Age が 28
    res = jdb.find(vals={'age': {'$eq': 28}}) # find(ANY={'$eq': 28})
    assert list(res) == ['user_4']
 
@@ -722,25 +711,25 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}})
    assert list(res) == ['user_1', 'user_3', 'user_4']
 
-   # 3. Logical Grouping (AND, OR, NOR, NOT)
+   # 3. 論理グループ化 (AND, OR, NOR, NOT)
    #----------------------------------------------------------
    # Age >= 25 AND Age <= 30
    res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
    assert list(res) == ['user_1', 'user_2', 'user_4']
-   
-   # Role is 'admin' OR Age > 30
+
+   # Role が 'admin' OR Age > 30
    res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
    assert list(res) == ['user_1', 'user_3']
 
-   # Role is not 'admin' AND Age <= 30
+   # Role が 'admin' ではない AND Age <= 30
    res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
    assert list(res) == ['user_2', 'user_4']
 
-   # User is NOT a developer
+   # ユーザーが developer ではない
    res = jdb.find(NOT={'role': 'developer'})
    assert list(res) == ['user_1', 'user_4']
 
-   # (Role is 'admin' OR Age > 30) AND 'linux' not in tags
+   # (Role が 'admin' OR Age > 30) AND 'linux' が tags に含まれない
    res = jdb.find(AND=[
       {'$or': [
          {'role': 'admin'},
@@ -750,80 +739,82 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    ])
    assert list(res) == ['user_1']
 
-   # 4. Regular Expressions (RE, RE2, re.compile)
+   # 4. 正規表現 (RE, RE2, re.compile)
    #----------------------------------------------------------
-   # Values matching an email domain regex
+   # Eメールドメインの正規表現に一致する値
    res = jdb.find(vals={'email': re.compile(r'.@example.com')})
    assert list(res) == ['user_1']
 
-   # Find users where any attribute exactly matches regex
-   res = jdb.find(ANY=re.complie(r'.@example.com'))
+   # いずれかの属性が正規表現と完全に一致するユーザーを検索
+   res = jdb.find(ANY=re.compile(r'.@example.com'))
    assert list(res) == ['user_1']
 
-   # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
+   # 'li' を含む文字列のグローバルな正規表現検索 ('Alice', 'Charlie', 'linux' にマッチ)
    res = jdb.find(RE=r'li[a-z]')
    assert list(res) == ['user_1', 'user_3']
 
-   # Match specific Database Keys using compiled regex (e.g., matching 'user_1', 'user_2')
+   # コンパイル済みの正規表現を使用して特定のデータベースキーをマッチング (例: 'user_1', 'user_2' にマッチ)
    res = jdb.find(re.compile(r'^user_[1-2]$'))
    assert list(res) == ['user_1', 'user_2']
 
-   # 5. Array / List Operations
+   # 5. 配列 / リスト操作
    #----------------------------------------------------------
-   # Users with exactly 2 tags in their list
+   # リスト内に tags がちょうど 2 つあるユーザー
    res = jdb.find(vals={'tags': {'$size': 2}})
    assert list(res) == ['user_1', 'user_2', 'user_4']
 
-   # Users whose FIRST tag (index 0) is 'python'
+   # 最初 (インデックス 0) の tag が 'python' であるユーザー
    res = jdb.find(vals={'tags': {'$0': 'python'}})
    assert list(res) == ['user_1', 'user_3']
 
-   # 6. Lambda / Custom Functions (FUNC) & Pagination (limit)
+   # 6. Lambda / カスタム関数 (FUNC) & ページネーション (limit)
    #----------------------------------------------------------
-   # Pass a lambda to evaluate both the key and the value dynamically
-   # Example: Find the first users whose age is an even number
+   # Lambda を渡してキーと値を動的に評価する
+   # 例: 年齢が偶数である最初のユーザーを検索
    res = jdb.find(
        FUNC=lambda k, v: isinstance(v, dict) and v.get('age', 1) % 2 == 0, 
       limit=1
    )
    assert list(res) == ['user_1']
 
-   # Users has email
+   # email を持っているユーザー
    res = jdb.find(vals={'email': lambda v: v != ''})
    assert list(res) == ['user_1', 'user_4']
 
-   # Users don't have email
+   # email を持っていないユーザー
    res = jdb.find(NOT={'email': lambda v: v != ''})
    assert list(res) == ['user_2', 'user_3']
 
-   # For primitive stored values (non-nested), you can use quick keyword arguments:
+   # プリミティブな保存値 (ネストされていない) の場合、迅速なキーワード引数を使用できます:
    jdb['simple_counter'] = 50
-   res = jdb.find(EQ=50)       # Equals 50
+   res = jdb.find(EQ=50)       # 50 と等しい
    assert list(res) == ['simple_counter']
 
-   res = jdb.find(IN=[40, 50]) # Value in list
+   res = jdb.find(IN=[40, 50]) # リスト内の値
    assert list(res) == ['simple_counter']
 
-進階用法
---------
+
+高度な使い方
+----------
 
 .. code-block:: python
 
    from omni_json_db import JDb
-   # Initialize the database in memory
-   # Key-Value is Json+mSgpack with no compression
+
+   # インメモリでデータベースを初期化
+   # Key-Value は Json+mSgpack で圧縮なし
    jdb = JDb()
 
    fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}
 
-   # insert records
+   # レコードの挿入
    with jdb.open() as fp:
       for fruit,color in fruits.items():
          jdb.f_write(fp, fruit, color)
 
    assert jdb == fruits
 
-   # modify records
+   # レコードの変更
    with jdb.open() as fp:
       for fruit in fruits:
          color = jdb.f_read(fp, fruit)
@@ -831,87 +822,87 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 
    assert jdb != fruits
    assert set(jdb) == set(fruits)
-   
-   # unmodify records
+
+   # レコードを元に戻す (unmodify)
    with jdb.open() as fp:
       for fruit in fruits:
          jdb.f_unwrite(fp, fruit)
 
    assert jdb == fruits
-   
-   # remove records
+
+   # レコードの削除
    with jdb.open() as fp:
       for fruit in fruits:
          jdb.f_delete(fp, fruit)
 
    assert len(jdb) == 0
 
-   # unremove records
+   # 削除されたレコードの復元
    with jdb.open() as fp:
       for fruit in fruits:
          jdb.f_undelete(fp, fruit)
 
    assert jdb == fruits
-   
+
    #---------------------------------------
    with jdb.open() as fp:
       key_table = jdb.key_table
 
-      # replace
+      # 置き換え
       for fruit in key_table:
          color = jdb.f_read(fp, fruit)
          jdb.f_write(fp, fruit, color.upper())
 
-      # unmodify
+      # 元に戻す
       for fruit in key_table:
          jdb.f_unwrite(fp, fruit)
 
-      # remove
+      # 削除
       for fruit in fruits:
          jdb.f_delete(fp, fruit)
 
-      # unremove
+      # 復元
       for fruit in fruits:
          jdb.f_undelete(fp, fruit)
 
    assert jdb == fruits
-   
+
    #---------------------------------------
-   # replace all
+   # すべてを置き換え
    jdb[:] = lambda k,v: v.upper()
 
-   # unmodify all
+   # すべてを元に戻す (unmodify)
    jdb ^= jdb
 
-   # remove all
+   # すべてを削除
    jdb -= jdb
 
-   # unremove all
+   # すべての削除を復元
    jdb ^= fruits
 
    assert jdb == fruits
 
 
-📝 規格說明
+📝 仕様説明
 *****************
 
-資料種類
+データタイプ
 ----------------------
 
-可在初始化時配置``data_type``:
+初期化時に ``data_type`` を設定できます:
 
-* ``J+J``: JSON 鍵 + JSON 值
-* ``J+S``: JSON 鍵 + MsgPack 值 (預設)
-* ``J+M``: JSON 鍵 + Marshal 值
-* ``J+P``: JSON 鍵 + Pickle 值
-* ``J+Y``: JSON 鍵 + YAML 值
-* ``S+J``: MsgPack 鍵 + JSON 值
-* ``S+S``: MsgPack 鍵 + MsgPack 值
-* ``S+M``: MsgPack 鍵 + Marshal 值
-* ``S+P``: MsgPack 鍵 + Pickle 值
-* ``S+Y``: MsgPack 鍵 + YAML 值
+* ``J+J``: JSON キー + JSON 値
+* ``J+S``: JSON キー + MsgPack 値 (デフォルト)
+* ``J+M``: JSON キー + Marshal 値
+* ``J+P``: JSON キー + Pickle 値
+* ``J+Y``: JSON キー + YAML 値
+* ``S+J``: MsgPack キー + JSON 値
+* ``S+S``: MsgPack キー + MsgPack 値
+* ``S+M``: MsgPack キー + Marshal 値
+* ``S+P``: MsgPack キー + Pickle 値
+* ``S+Y``: MsgPack キー + YAML 値
 
-*Data size = 70,840,580 (MB = 1,000,000B, no zip)*
+*データサイズ = 70,840,580 (MB = 1,000,000B, 圧縮なし)*
 
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
 | ``data_type``     | size       | ratio | read     | write     | GOODs          | BADs             |
@@ -940,27 +931,27 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 |                   |            |       |          |           |                |* no tuple [a]_   |
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
 
-.. [a] 用 ``list`` 取代
-.. [b] 用 hex string 取代
-.. [c] 只支援 string key
-.. [d] 所有type = ``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
+.. [a] ``list`` に変換して対応
+.. [b] 16進数文字列 (hex string) に変換して対応
+.. [c] 文字列キーのみサポート
+.. [d] すべての型 =``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
 
-壓縮種類
+圧縮タイプ
 ---------------------
 
-可在初始化時配置 ``zip_type``
+初期化時に zip_type を設定できます:
 
-* ``no``: 無壓縮（預設, 速度最快)
+* ``no``: 圧縮なし (デフォルト、最速)
 * ``gz``: Gzip (mode=9)
-* ``bz``: Bzip2 (mode=9, 壓縮比佳，解壓最慢)
+* ``bz``: Bzip2 (mode=9, 圧縮率は良いが解凍が最も遅い)
 * ``xz``: LZMA
-* ``zs``: Zstandard (mode=22, 最佳壓縮比)
-* ``br``: Brotli (mode=6, 比``gz``更好)
-* ``z1``: Zstandard (mode=6, 比``gz``更好)
+* ``zs``: Zstandard (mode=22, 最高の圧縮率)
+* ``br``: Brotli (mode=6, ``gz``よりも優れている)
+* ``z1``: Zstandard (mode=6, ``gz``よりも優れている)
 * ``z2``: Zstandard (mode=11)
-* ``lz``: LZ4 (mode=0, 壓縮/解壓最快，壓縮比最差)
+* ``lz``: LZ4 (mode=0, 圧縮/解凍が最速だが、圧縮率は最も悪い)
 
-**Data size = 70,840,580 (MB = 1,000,000B)**
+**データサイズ = 70,840,580 (MB = 1,000,000B)**
 
 +------------+------------+-------+----------+-----------+---------------+---------------+
 |``zip_type``| size       | ratio | read     | write     | GOODs         | BADs          |
@@ -989,16 +980,16 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 |            |            |       |          |           |* fastest unzip|               |
 +------------+------------+-------+----------+-----------+---------------+---------------+
 
-快取種類
----------
+キャッシュタイプ
+--------------
 
-可在初始化時配置 ``key_limit``
+初期化時に ``key_limit`` を設定できます:
 
-* ``no``: ``dict`` 作為 key_table (預設)
-* ``bt``: ``BTree`` 作為 key_table (減少 44.3% vs ``dict``)
-* ``l0`` - ``l5``: ``LiteKeyTable`` 模式 (減少 60-75% vs ``dict``)
+* ``no``: ``dict`` を key_table として使用 (デフォルト)
+* ``bt``: ``BTree`` を key_table として使用 (``dict`` と比較して 44.3% 削減)
+* ``l0`` - ``l5``: ``LiteKeyTable`` モード (``dict`` と比較して 60-75% 削減)
 
-**Table size = 3,241,854 keys**
+**テーブルサイズ = 3,241,854 キー**
 
 +---------------+--------+--------------+------------+--------------+
 | ``key_limit`` | memory | key search   | HIT > get()| MISS > get() |
@@ -1010,10 +1001,10 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 | ``l3``        | 85MB   | 2.01Mo/s     | 2.01Mo/s   | 1.59Mo/s     |
 +---------------+--------+--------------+------------+--------------+
 
-📊 基準測試
+📊 ベンチマーク
 ***************
 
-測試環境
+テスト環境
 -------
 
 .. code-block:: python
@@ -1023,15 +1014,16 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    >> jdb = JDb(data_type='J+J')
    >> data = {f'key{k}':k for k in range(size)}
    
-   >> jdb += data        # 新增 insert
-   >> jdb[:]             # 讀取全部 get_all
-   >> jdb -= data        # 刪除 remove
-   >> jdb ^= data        # 復原刪除 revert=unremove
-   >> jdb[data] = -1     # 更改 replace
-   >> jdb ^= data        # 復原更改 revert=unmodify
-   >> print(jdb == data) # 輸出: True
+   >> # ベンチマーク操作
+   >> jdb += data        # 挿入 (insert)
+   >> jdb[:]             # 全取得 (get_all)
+   >> jdb -= data        # 削除 (remove)
+   >> jdb ^= data        # 削除復元 (revert=unremove)
+   >> jdb[data] = -1     # 変更 (replace)
+   >> jdb ^= data        # 変更復元 (revert=unmodify)
+   >> print(jdb == data) # 出力: True
 
-測試結果
+測定結果
 -------
 
 +-------+---------+---------+---------+----------+---------+----------+
@@ -1052,15 +1044,15 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 | 1M    | 3.87 s  | 2.78 s  | 7 s     | 6.09 s   | 8.15 s  | 9.83 s   |
 +-------+---------+---------+---------+----------+---------+----------+
 
-👥 貢獻指南
-***************
+👥 コントリビューションガイド
+***************************
 
-我們歡迎任何形式的貢獻，包括回報 Bug、討論改進想法或編寫擴展！   
+バグ報告、改善や新しいアイデアの議論、拡張機能の作成など、**omni-json-db** へのあらゆる形でのコントリビューションを歓迎します！参加方法は以下の通りです：
 
-1. 檢查現有的 Issue 或開設新的討論。
-2. Fork GitHub `儲存庫 <https://github.com/lukatrum/omni-json-db/>`_ 並在新的分支上進行修改。   
-3. 編寫測試以確保功能正常。   
-4. 提交 Pull Request。
+1. 既存の Issue を確認するか、機能のアイデアやバグについての議論を始めるために新しい Issue を作成します。
+2. Github 上の リポジトリ を Fork し、master ブランチから新しいブランチを作成して変更を加えます（いわゆる GitHub Flow です）。
+3. バグが修正されたこと、または機能が期待通りに動作することを示すテストを作成します。
+4. Pull Request を送信し、マージされて公開されるまでメンテナーに知らせてください ☺
 
 English_ | 中文_ | 日本語_
 

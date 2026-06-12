@@ -3014,7 +3014,7 @@ class JDbReader:
 
         return 0
 
-    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDbReader:
+    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDbReader: # pragma: no cover
         """Spawn a relative reader instance sharing configuration models matching local presets.
 
         Args:

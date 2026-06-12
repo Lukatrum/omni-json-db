@@ -1,7 +1,8 @@
-English_ | 中文_
-~~~~~~~~~~~~~~~~
+English_ | 中文_ | 日本語_
+~~~~~~~~~~~~~~~~~~~~~~~~~
 .. _English: https://github.com/lukatrum/omni-json-db/
 .. _中文: https://github.com/Lukatrum/omni-json-db/blob/main/README-tc.rst
+.. _日本語: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
 
 |Version| |License|
 
@@ -32,7 +33,7 @@ English_ | 中文_
 - `🛠️ Quick Start`_
 - `📝 Specifications`_
 - `📊 Benchmarking`_
-- `📄 Documentation <https://omni-json-db.readthedocs.io>`_
+- `📄 Documentation`_
 - `👥 Contributing`_
 
 
@@ -1065,6 +1066,8 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
 2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on Github, create a new branch off the **master** branch and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
 3. Write a test which shows that the bug was fixed or that the feature works as expected.
 4. Send a pull request and bug the maintainer until it gets merged and published ☺
+
+English_ | 中文_ | 日本語_
 
 .. |Logo| image:: https://raw.githubusercontent.com/lukatrum/omni-json-db/master/artwork/logo.png
       :height: 400px

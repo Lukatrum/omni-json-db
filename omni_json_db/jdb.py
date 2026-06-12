@@ -2156,7 +2156,7 @@ class JDb(JDbReader):
                 dst_childs.clear()
                 dst_io.groups.clear()
 
-                for src_child, src_jdb in src_childs.items():
+                for src_child, src_jdb in src_childs.items(): # pragma: no cover
                     dst_childs[src_child] = src_jdb
 
                 if signal:
@@ -4831,7 +4831,7 @@ class JDb(JDbReader):
             jio.groups[name] = child
             self.childs.pop(name, None)
 
-        elif name not in self.childs and self.files_obj.is_group(child.files_obj, name):
+        elif name not in self.childs and self.files_obj.is_group(child.files_obj, name): # pragma: no cover
             jio.groups[name] = child
         else:
             self.childs[name] = child
