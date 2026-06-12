@@ -141,7 +141,8 @@ class JNetIO(RawIOBase):
         try:
             self.open(mode=mode, **kwargs)
         except FileNotFoundError as e: # pragma: no cover
-            print(e)
+            if __debug__:
+                print(e)
 
     def __del__(self):
         """Safely destruct the current context ensuring network resource components disengage."""
@@ -1221,7 +1222,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                     print(e)
 
             if verbose >= 0:
-                print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)} [sock={sock}] files:{files_obj}', cyan=1, bright=1))
+                print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)}', cyan=1, bright=1))
 
             server.active_cnt = max(server.active_cnt-1, 0)
             fp_table.clear()

@@ -1140,17 +1140,25 @@ class JDb(JDbReader):
 
         return self
 
-    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None], **kwargs) -> JDb:
+    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDb:
         """Spawn a child read-write companion database instance mimicking host properties models parameters grids.
 
         Args:
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): File path or core buffer source stream.
-            **kwargs: Extra settings overrides passed seamlessly onto the newly initialized instance driver.
 
         Returns:
             JDb: A relative fresh JDb session workspace environment instance.
         """
-        return JDb(KEY_file=KEY_file, **kwargs)
+        jio = self.io
+        return JDb(KEY_file=KEY_file,
+                    data_type=jio._data_type,
+                    zip_type=jio._zip_type,
+                    reserved_rate=jio.reserved_rate,
+                    cache_limit=self._cache_limit,
+                    key_limit=jio._key_limit,
+                    min_value_size=jio.min_value_size,
+                    max_file_size=jio.max_file_size,
+                    index_size=jio.index_size)
 
     def pop(self, key:str, default_val:Optional[Any]=None) -> Any:
         """Isolate, pop, and erase an individual item record from indices returning previous python object contents.
@@ -2067,14 +2075,13 @@ class JDb(JDbReader):
             raise TypeError('cannot create JDb')
 
         with self.open(read_only=True) as src_fp:
+            _index_size = 64
             src_io, src_fp, key_fp_s = self.f_get_fp(src_fp)
             src_index_size = src_io.index_size
-            _index_size = 64
-
             src_io.seek(key_fp_s, 0)
             for row_id in range(src_io.n_records):
                 row = key_fp_s.read(src_index_size).rstrip(b'\n \x00')
-                _index_size = max(_index_size, len(row)+24)
+                _index_size = max(_index_size, len(row)+2)
 
             if index_size is None:
                 index_size = _index_size
@@ -2144,12 +2151,17 @@ class JDb(JDbReader):
                 dst_encode_row = jdb._encode_row
                 dst_get_val_fp = jdb.f_get_val_fp
                 dst_childs = jdb.childs
-                # dst_files_obj = jdb.files_obj
+                dst_files_obj = jdb.files_obj
+                dst_create_jdb = jdb.create_jdb
+                dst_childs.clear()
+                dst_io.groups.clear()
+
+                for src_child, src_jdb in src_childs.items():
+                    dst_childs[src_child] = src_jdb
 
                 if signal:
                     print(signal, end='', flush=True)
 
-                dst_childs.clear()
                 for row_id in range(src_io.n_records):
                     key, file_id, offset, row_size, val_size, _ver, days = src_io_read_key(key_fp_s, row_id)
                     if row_size == 0:
@@ -2161,7 +2173,9 @@ class JDb(JDbReader):
                             continue
 
                         if file_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
-                            jdb._set_child(key, val)
+                            val = dst_io.groups.get(key, None)
+                            if val is None:
+                                val = dst_io.groups[key] = dst_create_jdb(dst_files_obj.create_group(key))
 
                         if fast_mode:
                             dst_io.n_lines += 1 # before write key

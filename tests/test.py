@@ -1110,6 +1110,9 @@ class TestJDb(unittest.TestCase):
 
             jdb['group_a'] = list(range(128))
             jdb['group_b'] = None
+            jdb['test_key'] = list(range(8))
+
+            self.assertEqual(jmem2['3rd'], jdb)
 
             gp_a = jdb.add_group('group_a')
             self.assertIsNotNone(gp_a)
@@ -1219,7 +1222,6 @@ class TestJDb(unittest.TestCase):
             gp = jdb['group_b']
             self.assertEqual(gp, gp_b)
             self.assertEqual(len(gp_b), 0)
-
             jdb_bak = jdb.backup('bak', zip_type=0 if jdb.zip_type != 'no' else 'lz')
             self.assertEqual(jdb_bak, jdb)
             self.assertNotEqual(jdb_bak.zip_type, jdb.zip_type)
@@ -1227,6 +1229,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb_bak['group_b'], jdb['group_b'])
             self.assertEqual(jdb_bak['group_a'], gp_a)
             self.assertEqual(jdb_bak['group_b'], gp_b)
+            self.assertNotEqual(jdb_bak['group_a'].files_obj, gp_a.files_obj)
+            self.assertNotEqual(jdb_bak['group_b'].files_obj, gp_b.files_obj)
+            self.assertEqual(jdb['test_key'], jdb_bak['test_key'])
 
             if not filename.endswith('.jdb'):
                 continue
@@ -4359,7 +4364,6 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(jdb2.has('kkk5'))
             self.assertTrue(jdb2.is_latest())
 
-
             sync_id = jdb.sync_id
             jdb2 = JDb(jdb.files_obj)
             self.assertEqual(jdb, jdb2)
@@ -4446,6 +4450,17 @@ class TestJDb(unittest.TestCase):
                     self.assertEqual(jdb2.key_table, jdb.key_table)
             self.assertTrue(jdb.is_latest())
             self.assertTrue(jdb2.is_latest())
+
+            file_id = len(jdb.file_table)
+            if file_id > 0:
+                new_file_id = file_id + 2
+                fp = jdb.files_obj.VAL_open(new_file_id, 'wb+')
+                if fp is not None:
+                    fp.write(b'1' * 16)
+                    fp.close()
+                jdb.io.update_file_table()
+                self.assertEqual(new_file_id+1, len(jdb.file_table))
+                self.assertEqual(jdb.file_table[new_file_id], 16)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)

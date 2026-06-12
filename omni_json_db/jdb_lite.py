@@ -3014,17 +3014,25 @@ class JDbReader:
 
         return 0
 
-    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None], **kwargs) -> JDbReader:
+    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDbReader:
         """Spawn a relative reader instance sharing configuration models matching local presets.
 
         Args:
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): Direct target path or source buffer.
-            **kwargs: Extra overrides for instance parameters.
 
         Returns:
             JDbReader: A newly spawned reader environment reference.
         """
-        return JDbReader(KEY_file=KEY_file, **kwargs)
+        jio = self.io
+        return JDbReader(KEY_file=KEY_file,
+                    data_type=jio._data_type,
+                    zip_type=jio._zip_type,
+                    reserved_rate=jio.reserved_rate,
+                    cache_limit=self._cache_limit,
+                    key_limit=jio._key_limit,
+                    min_value_size=jio.min_value_size,
+                    max_file_size=jio.max_file_size,
+                    index_size=jio.index_size)
 
     def can_lock(self) -> bool:
         """Validate if the storage medium filesystem architecture supports isolation parameters control.
@@ -5203,20 +5211,13 @@ class JDbReader:
 
         if file_id == 0x10: # JDb
             io = self.io
+            jdb = self.childs.get(key, None)
+            if isinstance(jdb, JDbReader):
+                return jdb
+
             jdb = io.groups[key]
             if jdb is None:
-                io.groups[key] = jdb = self.create_jdb(
-                    KEY_file=self.files_obj.create_group(key),
-                    data_type=io._data_type,
-                    zip_type=io._zip_type,
-                    reserved_rate=io.reserved_rate,
-                    cache_limit=self._cache_limit,
-                    key_limit=io._key_limit,
-                    min_value_size=io.min_value_size,
-                    max_file_size=io.max_file_size,
-                    index_size=io.index_size)
-
-                self.childs.pop(key, None)
+                io.groups[key] = jdb = self.create_jdb(KEY_file=self.files_obj.create_group(key))
 
             return jdb
 

@@ -302,7 +302,7 @@ PAD_lut = [
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-class JDbGroupDict(dict): # pragma: no cover
+class JDbGroupDict(dict):
     """Custom dictionary implementation returning None instead of throwing KeyError on missing elements."""
     __slots__ = []
     def __missing__(self, key:str) -> None:
@@ -343,7 +343,7 @@ class KeyTable: # pragma: no cover
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-class DictKeyTable(dict): # pragma: no cover
+class DictKeyTable(dict):
     """Dictionary-backed implementation of KeyTable protocol optimizing fast in-memory lookups."""
     __slots__ = []
     def __missing__(self, key:str) -> int:
