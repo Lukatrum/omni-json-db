@@ -2178,8 +2178,8 @@ class JDb(JDbReader):
                             else:
                                 data = offset_d
                                 val_size_d = len(data)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, None)
                                 data_d = dst_io_pad(data, max_size=0)
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
@@ -2199,8 +2199,8 @@ class JDb(JDbReader):
                                 row_size_d = 0
                             else:
                                 val_size_d = len(data)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, None)
                                 data_d = dst_io_pad(data, max_size=0)
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
@@ -2219,8 +2219,8 @@ class JDb(JDbReader):
                             else:
                                 data = offset_d
                                 val_size_d = len(data)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, None)
                                 data_d = dst_io_pad(data, max_size=0)
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
@@ -3861,9 +3861,10 @@ class JDb(JDbReader):
                     if dead_row < 0: # use new_row
                         dead_row = n_lines
                         io.n_lines = n_lines = n_lines + 1 # MUST call write_key(dead_row, ..) first
-                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, None) # create new space
                         data = io.pad(data, max_size=0)
                         new_row_size = len(data)
+                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size) # create new space
+
                     else: # use dead row
                         new_file_id = dead_file_id
                         new_offset = dead_offset
@@ -3921,9 +3922,9 @@ class JDb(JDbReader):
                 if dead_row < 0: # use new row
                     dead_row = n_lines
                     io.n_lines = n_lines = n_lines + 1  # MUST call write_key(dead_row, ..) first
-                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, None)
                     data = io.pad(data, max_size=0)
                     new_row_size = len(data)
+                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
 
                 else: # use dead row
                     new_file_id = dead_file_id
@@ -3967,9 +3968,9 @@ class JDb(JDbReader):
         if dead_row < 0: # use new row
             dead_row = n_lines
             io.n_lines = n_lines = n_lines + 1  # MUST call write_key(dead_row, ..) first
-            val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, None)
             data = io.pad(data, max_size=0)
             new_row_size = len(data)
+            val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
 
         # use dead row
         else: # pragma: no cover
@@ -4117,9 +4118,10 @@ class JDb(JDbReader):
                     if dead_row < 0: # use new_row
                         dead_row = n_lines
                         io.n_lines = n_lines = n_lines + 1 # MUST call write_key(dead_row, ..) first
-                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, None) # create new space
                         data = io.pad(data, max_size=0)
                         new_row_size = len(data)
+                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size) # create new space
+
                     else: # use dead row
                         new_file_id = dead_file_id
                         new_offset = dead_offset
@@ -4261,9 +4263,9 @@ class JDb(JDbReader):
                 if dead_row < 0: # use new row
                     dead_row = n_lines
                     io.n_lines = n_lines = n_lines + 1  # MUST before call write_key(dead_row, ..)
-                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, None)
                     data = io.pad(data, max_size=0)
                     new_row_size = len(data)
+                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
 
                 else: # use dead row
                     new_file_id = dead_file_id
@@ -4338,9 +4340,9 @@ class JDb(JDbReader):
             if dead_row < 0: # use new row
                 dead_row = n_lines
                 io.n_lines = n_lines = n_lines + 1  # MUST call write_key(dead_row, ..) first
-                val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, None)
                 data = io.pad(data, max_size=0)
                 new_row_size = len(data)
+                val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
 
             else: # use dead row
                 val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
@@ -4817,7 +4819,6 @@ class JDb(JDbReader):
 
         elif name not in self.childs and self.files_obj.is_group(child.files_obj, name):
             jio.groups[name] = child
-        
         else:
             self.childs[name] = child
 

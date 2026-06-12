@@ -5022,7 +5022,6 @@ class JDbReader:
             fp_dict = self.fp_table[ident]
 
         io = self.io
-        #pass;0;assert isinstance(fp_dict, dict)
         key_fp = fp_dict.get(-1, None)
         if key_fp is None:
             files_obj = self.files_obj
@@ -5043,12 +5042,13 @@ class JDbReader:
 
         return io, fp_dict, key_fp
 
-    def f_get_val_fp(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None, max_fp:int=64) -> Tuple[IO,int,int]:
+    def f_get_val_fp(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None, req_size:Optional[int]=None, max_fp:int=64) -> Tuple[IO,int,int]:
         """Manage active record segment storage files limiting concurrent hardware descriptive blocks allocation density.
 
         Args:
             fp_dict (Dict[int, IO]): Active file handler matrix registration array mappings table.
             file_id (Optional[int], optional): Target segment classification index code identifier. Defaults to None.
+            req_size (Optional[int], optional): request new file size
             max_fp (int, optional): System density boundary constraining total allocated storage streams descriptors. Defaults to 64.
 
         Returns:
@@ -5056,6 +5056,8 @@ class JDbReader:
         """
         io = self.io
         file_table = io.file_table
+        if req_size is None:
+            req_size = 1024
 
         if file_id is None:
             max_file_size = io.max_file_size
@@ -5064,7 +5066,7 @@ class JDbReader:
             file_id = max(0, num_files-1)
             while True:
                 offset = file_table.get(file_id, 0)
-                if offset <= max_file_size:
+                if offset+req_size <= max_file_size:
                     break
 
                 file_id -= step

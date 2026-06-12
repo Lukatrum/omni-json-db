@@ -178,7 +178,7 @@ LZ_Error = RuntimeError
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 MAX_FILE_ID     = 0x8000
-DEF_FILE_SIZE   = (2**30) * 2  # 2GB
+DEF_FILE_SIZE   = (2**32) - 1  # 4GB
 MIN_FILE_SIZE   = 1024
 MAX_FILE_SIZE   = (2**50) * 1  # 1024TB
 
@@ -197,6 +197,7 @@ DEF_RATIO       = 0.001
 MAX_RATIO       = 256.
 DEF_KEY_LIMIT   = 0 # 0=DictKeyTable(dict)
 HEADER_SIZE     = 128
+TOTAL_KEY_ROWS  = 8
 
 MIN_KEY_STRUCT_V0 = 8 + 8 * 5  # n_pad, (file_id, offset, size, ver, date)
 MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ver, date)
@@ -1799,7 +1800,7 @@ class JIo:
             '_data_type', '_zip_type', '_key_limit', 'index_size',\
             'max_file_size', 'reserved_rate', 'api_ver', 'file_table',\
             'files_obj', 'key_table', 'window_size', 'min_value_size',\
-            '_KEY_row0', '_KEY_row1', 'row_bytes', 'pad_byte', 'pad0_byte',\
+            '_KEY_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0'}
 
@@ -2042,7 +2043,7 @@ class JIo:
         if api_ver is None:
             api_ver = API_LATEST
 
-        self._KEY_row0 = self._KEY_row1 = None
+        self._KEY_rows = {}
         self._data_type = self._zip_type = self._key_limit = -1
         self.key_table      = DictKeyTable() # must before self.key_limit = key_limit
         self.sync_id        = sync_id
@@ -2097,17 +2098,6 @@ class JIo:
             raise TypeError
         if not (isinstance(self.pad0_byte, bytes) and len(self.pad0_byte) == 1):
             raise TypeError
-        #pass;0;assert API_LATEST >= self.api_ver >= API_V0
-        #pass;0;assert self.VAL_zip is not None
-        #pass;0;assert self.VAL_unzip is not None
-        #pass;0;assert self.VAL_unzip0 is not None
-        #pass;0;assert self.VAL_dumps is not None
-        #pass;0;assert self.VAL_loads is not None
-        #pass;0;assert self.KEY_dumps is not None
-        #pass;0;assert self.KEY_loads is not None
-        #pass;0;assert self.HEAD_dumps is not None
-        #pass;0;assert self.HEAD_loads is not None
-        #pass;0;assert self.load_keys is not None
 
     def __repr__(self) -> str:
         """Generate structured string summary reports outlining operational engine states parameters configurations specs.
@@ -2411,9 +2401,9 @@ class JIo:
             self.file_table.clear()
             self.key_table.clear()
             self.groups.clear()
+            self._KEY_rows.clear()
             self._swap_id = self._remv_id = -1
             self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
-            self._KEY_row0 = self._KEY_row1 = None
             self.update_days()
 
         if version is None: # pragma: no cover
@@ -2780,8 +2770,14 @@ class JIo:
         if fp.tell() != pos:
             fp.seek(pos)
 
-        self._KEY_row1 = self._KEY_row0 if not self._KEY_row0 or self._KEY_row0[0] != row_id else None
-        self._KEY_row0 = (row_id, (key, file_id, offset, row_size, val_size, ver_i, days))
+        _KEY_rows = self._KEY_rows
+        _KEY_rows.pop(row_id, None)
+        if row_id < self.n_records:
+            _KEY_rows[row_id] = (key, file_id, offset, row_size, val_size, ver_i, days)
+            while len(_KEY_rows) > TOTAL_KEY_ROWS:
+                _pop_id = next(iter(_KEY_rows))
+                _KEY_rows.pop(_pop_id, None)
+
         wr_size = fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
         if need_flush and wr_size > 0:
             fp.flush()
@@ -2798,17 +2794,11 @@ class JIo:
         Returns:
             Tuple[str,int,int,int,int,int,int]: Complete row structural metadata metrics (key, file_id, offset, row_size, val_size, ver, days).
         """
-        if self._KEY_row0:
-            _row_id, _info = self._KEY_row0
-            if _row_id == row_id:
-                return _info
-
-        if self._KEY_row1:
-            _row_id, _info = self._KEY_row1
-            if _row_id == row_id:
-                self._KEY_row1 = self._KEY_row0
-                self._KEY_row0 = (_row_id, _info)
-                return _info
+        _KEY_rows = self._KEY_rows
+        _info = _KEY_rows.pop(row_id, None)
+        if _info is not None:
+            _KEY_rows[row_id] = _info
+            return _info
 
         index_size = self.index_size
         pos = HEADER_SIZE + row_id * index_size
@@ -2817,8 +2807,12 @@ class JIo:
 
         data = fp.read(index_size)
         info = self.KEY_loads(data)
-        self._KEY_row1 = self._KEY_row0
-        self._KEY_row0 = (row_id, info)
+        if row_id < self.n_records:
+            _KEY_rows[row_id] = info
+            while len(_KEY_rows) > TOTAL_KEY_ROWS:
+                _pop_id = next(iter(_KEY_rows))
+                _KEY_rows.pop(_pop_id, None)
+
         return info
 
     def update_days(self) -> int:
@@ -2837,8 +2831,8 @@ class JIo:
         Returns:
             bool: True if alignment indicators match active storage timeline parameters perfectly, False otherwise.
         """
-        self._KEY_row0 = self._KEY_row1 = None
         if self.file_size <= 0 or self.sync_id != self._sync_id:
+            self._KEY_rows.clear()
             return False
 
         return True
@@ -2859,7 +2853,7 @@ class JIo:
         self.days = self._swap_id = self.min_days = self._remv_id = self._n_records = self._n_lines = -1
         self.key_table.clear()
         self.file_table.clear()
-        self._KEY_row0 = self._KEY_row1 = None
+        self._KEY_rows.clear()
         self.update_days()
         self.row_bytes = self.index_size - self.min_value_size * (1 + self.reserved_rate)
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
@@ -3125,12 +3119,11 @@ class JIo:
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
         self.file_size = records = lines = 0
-        self._KEY_row0 = self._KEY_row1 = None
         self.update_days()
         if force or n_lines == 0 or prev_n_lines == 0 or line_diff < 0:
             key_table.clear()
             file_table.clear()
-
+            self._KEY_rows.clear()
         else:
             # swap+1 if swap record A and record B
             prev_swap_id = self._swap_id
@@ -3143,6 +3136,9 @@ class JIo:
             # sync+1 if change, add, delete
             prev_sync_id = self._sync_id
             sync_diff = (sync_id - prev_sync_id) if sync_id >= prev_sync_id else (sync_id + 0X_7FF_FFFF_FFFF + 1 - prev_sync_id) & 0X_7FF_FFFF_FFFF
+
+            if sync_diff != 0:
+                self._KEY_rows.clear()
 
             # [A] no swapping
             if swap_diff == 0:
@@ -3381,7 +3377,9 @@ class JIo:
         Returns:
             Union[bytes, tuple, list]: Copied binary stream metadata chunk array, or unpacked items elements tuple.
         """
-        self._KEY_row0 = self._KEY_row1 = None
+        self._KEY_rows.pop(src_row, None)
+        self._KEY_rows.pop(dst_row, None)
+
         size = self.index_size
         src_pos = HEADER_SIZE + src_row * size
         dst_pos = HEADER_SIZE + dst_row * size
@@ -3406,7 +3404,6 @@ class JIo:
             size (int, optional): Combined length measure tracking total logical rows objects to shift. Defaults to 1.
             block_size (Optional[int], optional): Internal parsing lookahead width constraining buffered file operations rows loops. Defaults to None.
         """
-        self._KEY_row0 = self._KEY_row1 = None
         n_lines = self.n_lines
         index_size = self.index_size
         if block_size is None:
@@ -3416,8 +3413,11 @@ class JIo:
         if (size % block_size) > 0:
             n_blocks += 1
 
+        _KEY_rows = self._KEY_rows
         src_row = min(start+size, n_lines)
-        for _ in range(n_blocks):
+        for row_id in range(n_blocks):
+            _KEY_rows.pop(row_id, None)
+
             if src_row >= block_size:
                 rd_size = block_size * index_size
                 src_row -= block_size
