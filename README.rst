@@ -33,7 +33,7 @@ English_ | 中文_ | 日本語_
 - `🛠️ Quick Start`_
 - `📝 Specifications`_
 - `📊 Benchmarking`_
-- `📄 Documentation`_
+- `📄 Documentation <https://omni-json-db.readthedocs.io>`_
 - `👥 Contributing`_
 
 
