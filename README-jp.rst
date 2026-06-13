@@ -1,10 +1,4 @@
-English_ | 中文_ | 日本語_
-~~~~~~~~~~~~~~~~~~~~~~~~~
-.. _English: https://github.com/lukatrum/omni-json-db/
-.. _中文: https://github.com/Lukatrum/omni-json-db/blob/main/README-tc.rst
-.. _日本語: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
-
-|Version| |License|
+|Version| |License| |Language1| |Language2| |Language3|
 
 |Logo|
 
@@ -1064,9 +1058,9 @@ English_ | 中文_ | 日本語_
    :alt: PyPI - Status
    :target: https://github.com/lukatrum/omni-json-db
 
-.. |readthedocs| image:: https://img.shields.io/readthedocs/omni-json-db?logo=readthedocs&logoColor=white
-   :alt: Read the Docs
-   :target: https://omni-json-db.readthedocs.io
+.. |readthedocs| image:: https://img.shields.io/badge/docs-passing-brightgreen?logo=readthedocs
+   :target: https://omni-json-db.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
 
 .. |Version| image:: https://img.shields.io/pypi/v/omni-json-db?pypiBaseUrl=https%3A%2F%2Fpypi.org&logo=pypi&logoColor=white
    :alt: PyPI - Version
@@ -1089,4 +1083,14 @@ English_ | 中文_ | 日本語_
 
 .. |Codacy| image:: https://app.codacy.com/project/badge/Grade/861e1d81ccad4b8292d0062413b6daec    
    :target: https://app.codacy.com/gh/Lukatrum/omni-json-db/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade
+
+.. |Language1| image:: https://img.shields.io/static/v1?label=&message=English&logo=googletranslate&logoColor=white
+   :target: https://github.com/lukatrum/omni-json-db/
+
+.. |Language2| image:: https://img.shields.io/static/v1?label=&message=中文&logo=googletranslate&logoColor=white
+   :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-tc.rst
+
+.. |Language3| image:: https://img.shields.io/static/v1?label=&message=日本語&logo=googletranslate&logoColor=white
+   :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
+
 
