@@ -1095,11 +1095,11 @@ Whether reporting bugs, discussing improvements and new ideas or writing extensi
 .. |Codacy| image:: https://app.codacy.com/project/badge/Grade/861e1d81ccad4b8292d0062413b6daec    
    :target: https://app.codacy.com/gh/Lukatrum/omni-json-db/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade
 
-.. |Language1| image:: https://img.shields.io/static/v1?label=&message=English&logo=googletranslate&logoColor=white
+.. |Language1| image:: https://img.shields.io/badge/-ENG-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/lukatrum/omni-json-db/
 
-.. |Language2| image:: https://img.shields.io/static/v1?label=&message=中文&logo=googletranslate&logoColor=white
+.. |Language2| image:: https://img.shields.io/badge/-%E4%B8%AD%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-tc.rst
 
-.. |Language3| image:: https://img.shields.io/static/v1?label=&message=日本語&logo=googletranslate&logoColor=white
+.. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
