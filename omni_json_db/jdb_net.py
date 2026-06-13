@@ -1165,11 +1165,9 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                             elif cmd == 'write':
                                 resp['ret'] = fp.write(*_args, **_kwargs)
-                                fp.flush()
 
                             elif cmd == 'truncate':
                                 resp['ret'] = fp.truncate(*_args, **_kwargs)
-                                fp.flush()
 
                             elif cmd == 'readall':
                                 resp['ret'] = fp.readall(*_args, **_kwargs)
@@ -1185,7 +1183,6 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                             elif cmd == 'writelines':
                                 resp['ret'] = fp.writelines(*_args, **_kwargs)
-                                fp.flush()
 
                             else:
                                 if verbose >= 1:

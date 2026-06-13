@@ -375,7 +375,7 @@ class PartialKeyTable(KeyTable):
 
     Postpones loading full keys sets from physical devices disks by maintaining localized bloom filter configurations trackers.
     """
-    __slots__ = {'cache', 'io', 'files_obj', 'flags', 'size', 'groups', 'found_flags'}
+    __slots__ = {'cache', 'io', 'files_obj', 'flags', 'size', 'groups', 'mask', 'found_flags'}
 
     def __init__(self, jio:JIo):
         """Initialize partial tracking layers parsing data indices boundaries criteria metrics models.
@@ -387,7 +387,8 @@ class PartialKeyTable(KeyTable):
         self.io = jio
         self.files_obj = jio.files_obj.copy()
         self.flags = bitarray(DEF_FLAG_SIZE) # not all zero
-        self.groups = [bytearray() for _ in range(0xFFFF+1)]
+        self.mask = 0xFFF
+        self.groups = [bytearray() for _ in range(self.mask+1)]
         self.size = -1
         self.found_flags = bitarray()
 
@@ -427,7 +428,9 @@ class PartialKeyTable(KeyTable):
             cache[key] = row_id
             return
 
-        key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+        key_hash = xhash(key)
+        key_array = self.groups[key_hash & self.mask]
+        old_row_id, s_idx, e_idx = self._find_key(key_array, key)
         if old_row_id >= 0: # old key
             if old_row_id != row_id:
                 key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
@@ -435,11 +438,10 @@ class PartialKeyTable(KeyTable):
 
         else: # new key
             self.size += 1
-            self.flags[_flag_idx] = 1
+            self.flags[key_hash & DEF_FLAG_MASK] = True
             key_array.extend(_msg_dumps((key, row_id)) or b'')
 
-        self.__set_found_flag(row_id)
-
+        self.__set_found_flag(row_id, True)
         while len(cache) >= self.io._key_limit:
             old_key = next(iter(cache))
             cache.pop(old_key, None)
@@ -465,11 +467,24 @@ class PartialKeyTable(KeyTable):
         jio = self.io
         n_records = len(self)
         is_sync = self.size == n_records
-        if is_sync and not self.flags[xhash(key) & DEF_FLAG_MASK]:
+        key_hash = xhash(key)
+        flag_idx = key_hash & DEF_FLAG_MASK
+        if is_sync and not self.flags[flag_idx]:
             return default_row_id
 
-        key_array, _flag_idx, row_id, s_idx, e_idx = self._find_key(key)
+        mask = self.mask
+        groups = self.groups
+        find_key = self._find_key
+        set_found_flag = self.__set_found_flag
+        key_array = groups[key_hash & mask]
+        row_id, s_idx, e_idx = find_key(key_array, key)
         if row_id >= 0:
+            if is_sync:
+                del key_array[s_idx:e_idx]
+                self.size -= 1
+                set_found_flag(row_id, False)
+                return row_id
+
             KEY_loads = jio.KEY_loads
             index_size = jio.index_size
             fp = None
@@ -480,12 +495,14 @@ class PartialKeyTable(KeyTable):
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
-                    self.__set_found_flag(row_id)
+                    set_found_flag(row_id, False)
                     return row_id
 
-                is_sync = False
-                del key_array[s_idx:e_idx]
-                self.size -= 1
+                else: # pragma: no cover
+                    is_sync = False
+                    del key_array[s_idx:e_idx]
+                    self.size -= 1
+                    set_found_flag(row_id, False)
 
             except FileNotFoundError: # pragma: no cover
                 self.clear()
@@ -497,10 +514,12 @@ class PartialKeyTable(KeyTable):
         if not is_sync:
             for _key, row_id in self._item_iter():
                 if key != _key: continue
-                key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+                old_row_id, s_idx, e_idx = find_key(key_array, key)
                 if old_row_id == row_id:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
+
+                set_found_flag(row_id, False)
                 return row_id
 
         return default_row_id
@@ -521,16 +540,21 @@ class PartialKeyTable(KeyTable):
         jio = self.io
         n_records = len(self)
         is_sync = self.size == n_records
-        if is_sync and not self.flags[xhash(key) & DEF_FLAG_MASK]:
+        key_hash = xhash(key)
+        flag_idx = key_hash & DEF_FLAG_MASK
+        if is_sync and not self.flags[flag_idx]:
             return default_row_id
 
         cache = self.cache
         row_id = cache[key]
         if row_id >= 0:
-            # pass;0;assert self._find_key(key, self.key_array)[0] == row_id
             return row_id
 
-        _key_array, _flag_idx, row_id, _s_idx, _e_idx = self._find_key(key)
+        mask = self.mask
+        groups = self.groups
+        find_key = self._find_key
+        key_array = groups[key_hash & mask]
+        row_id, _s_idx, _e_idx = find_key(key_array, key)
         if row_id >= 0:
             while len(cache) >= jio._key_limit:
                 old_key = next(iter(cache))
@@ -697,36 +721,51 @@ class PartialKeyTable(KeyTable):
         is_empty = self.size == 0
         cache = self.cache
         flags = self.flags
-        _add_key = self._add_key
-        _find_key = self._find_key
-        __get_found_flag = self.__get_found_flag
-        __set_found_flag = self.__set_found_flag
+        mask = self.mask
+        find_key = self._find_key
+        get_found_flag = self.__get_found_flag
+        set_found_flag = self.__set_found_flag
         index_size = jio.index_size
         KEY_loads = jio.KEY_loads
-        is_found = __get_found_flag(jio.n_records-1)
+        is_found = not is_empty
+        groups = self.groups
+        empty_groups = [False] * (mask+1)
         fp = None
         try:
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                if row_id % 32 == 0:
-                    is_found = __get_found_flag(row_id)
+                key_hash = xhash(_key)
+                flag_idx = key_hash & DEF_FLAG_MASK
+                group_idx = key_hash & mask
+                key_array = groups[group_idx]
+                is_found = get_found_flag(row_id)
                 if is_empty or not is_found:
-                    _add_key(_key, row_id)
+                    self.size += 1
+                    flags[flag_idx] = True
+                    key_array.extend(_msg_dumps((_key, row_id)) or b'')
                 else:
-                    key_array, flag_idx, old_row_id, s_idx, e_idx = _find_key(_key)
-                    if old_row_id >= 0: # old key
-                        if old_row_id != row_id: # pragma: no cover
-                            key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-                            cache.pop(_key, None)
-
-                    else: # new key
+                    if empty_groups[group_idx]:
                         self.size += 1
-                        flags[flag_idx] = 1
+                        flags[flag_idx] = True
                         key_array.extend(_msg_dumps((_key, row_id)) or b'')
+                    else:
+                        old_row_id, s_idx, e_idx = find_key(key_array, _key)
+                        if old_row_id >= 0: # old key
+                            if old_row_id != row_id: # pragma: no cover
+                                key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
+                                cache.pop(_key, None)
 
-                __set_found_flag(row_id)
+                        else: # new key
+                            if len(key_array) == 0:
+                                empty_groups[group_idx] = True
+
+                            self.size += 1
+                            flags[flag_idx] = True
+                            key_array.extend(_msg_dumps((_key, row_id)) or b'')
+
+                set_found_flag(row_id, True)
                 yield _key, row_id
 
         except FileNotFoundError: # pragma: no cover
@@ -736,31 +775,16 @@ class PartialKeyTable(KeyTable):
             if fp is not None:
                 fp.close()
 
-    def _add_key(self, key:str, row_id:int):
-        """Add new key to corresponding key array
-
-        Args:
-            key (str): new_key.
-            row_id (int): row number for the new key
-
-        """
-        _hash_id = xhash(key)
-        self.size += 1
-        self.flags[_hash_id & DEF_FLAG_MASK] = 1
-        self.groups[_hash_id & 0xFFFF].extend(_msg_dumps((key, row_id)) or b'')
-
-    def _find_key(self, key:str) -> Tuple[bytearray, int, int, int, int]:
+    def _find_key(self, key_array:bytearray, key:str) -> Tuple[int, int, int]:
         """Find key msgpack pattern in bytearray.
 
         Args:
+            key_array (bytearray): bytearray to store key+row
             key (str): key in bytearray.
 
         Returns:
-            Tuple[bytearray, int, int, int, int]: key_array, flag_idx, key's row ID, bytearray start index, bytearry end index
+            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index
         """
-        _hash_id = xhash(key)
-        flag_idx = _hash_id & DEF_FLAG_MASK
-        key_array = self.groups[_hash_id & 0xFFFF]
         n_bytes = len(key_array)
         if n_bytes > 0:
             search_prefix = b'\x92' + (_msg_dumps(key) or b'')
@@ -784,29 +808,27 @@ class PartialKeyTable(KeyTable):
                             val_type - 256 if val_type >= 0xe0 else -1
 
                         if row_id >= 0:
-                            return key_array, flag_idx, row_id, idx, val_idx_e
+                            return row_id, idx, val_idx_e
 
                 idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
-        return key_array, flag_idx, -1, -1, -1
+        return -1, -1, -1
 
-    def __set_found_flag(self, row_id:int):
+    def __set_found_flag(self, row_id:int, is_found:bool=True):
         found_flags = self.found_flags
-        blk_id = row_id // 32
-        ext_size = blk_id + 1 - len(found_flags)
+        ext_size = row_id + 1 - len(found_flags)
         if ext_size > 0:
             found_flags.extend('0' * ext_size)
-        found_flags[blk_id] = True
+        found_flags[row_id] = is_found
 
     def __get_found_flag(self, row_id:int) -> bool:
         found_flags = self.found_flags
-        blk_id = row_id // 32
-        ext_size = blk_id + 1 - len(found_flags)
+        ext_size = row_id + 1 - len(found_flags)
         if ext_size > 0:
             found_flags.extend('0' * ext_size)
             return False
 
-        return found_flags[blk_id]
+        return found_flags[row_id]
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -850,11 +872,11 @@ class LiteKeyTable(KeyTable):
         else:
             raise ValueError(f'invalid mode {mode}!')
 
+        self.mode = mode
         self.io = jio
         self.files_obj = jio.files_obj.copy()
-        self.groups = [bytearray() for _ in range(self.mask+1)]
         self.flags = bitarray(self.flags_mask+1)
-        self.mode = mode
+        self.groups = [bytearray() for _ in range(self.mask+1)]
         self.size = -1
         self.found_flags = bitarray()
 
@@ -877,17 +899,19 @@ class LiteKeyTable(KeyTable):
             self.clear()
 
         # self.size must >= 0
-        key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+        key_hash = xhash(key)
+        key_array = self.groups[key_hash & self.mask]
+        old_row_id, s_idx, e_idx = self._find_key(key_array, key)
         if old_row_id >= 0: # old key
             if old_row_id != row_id:
                 key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
 
         else: # new key
             self.size += 1
-            self.flags[_flag_idx] = 1
+            self.flags[key_hash & self.flags_mask] = True
             key_array.extend(_msg_dumps((key, row_id)) or b'')
 
-        self.__set_found_flag(row_id)
+        self.__set_found_flag(row_id, True)
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Extract and remove specific entries maps tracks variables returning previous records boundaries indices numbers parameters logs.
@@ -905,11 +929,24 @@ class LiteKeyTable(KeyTable):
         jio = self.io
         n_records = len(self)
         is_sync = self.size == n_records
-        if is_sync and not self.flags[xhash(key) & self.flags_mask]:
+        key_hash = xhash(key)
+        flag_idx = key_hash & self.flags_mask
+        if is_sync and not self.flags[flag_idx]:
             return default_row_id
 
-        key_array, _flag_idx, row_id, s_idx, e_idx = self._find_key(key)
+        mask = self.mask
+        groups = self.groups
+        find_key = self._find_key
+        set_found_flag = self.__set_found_flag
+        key_array = groups[key_hash & mask]
+        row_id, s_idx, e_idx = find_key(key_array, key)
         if row_id >= 0:
+            if is_sync:
+                del key_array[s_idx:e_idx]
+                self.size -= 1
+                set_found_flag(row_id, False)
+                return row_id
+
             KEY_loads = jio.KEY_loads
             index_size = jio.index_size
             fp = None
@@ -920,12 +957,14 @@ class LiteKeyTable(KeyTable):
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
-                    self.__set_found_flag(row_id)
+                    set_found_flag(row_id, False)
                     return row_id
 
-                is_sync = False
-                del key_array[s_idx:e_idx]
-                self.size -= 1
+                else: # pragma: no cover
+                    is_sync = False
+                    del key_array[s_idx:e_idx]
+                    self.size -= 1
+                    set_found_flag(row_id, False)
 
             except FileNotFoundError: # pragma: no cover
                 self.clear()
@@ -937,10 +976,12 @@ class LiteKeyTable(KeyTable):
         if not is_sync:
             for _key, row_id in self._item_iter():
                 if key != _key: continue
-                key_array, _flag_idx, old_row_id, s_idx, e_idx = self._find_key(key)
+                old_row_id, s_idx, e_idx = find_key(key_array, key)
                 if old_row_id == row_id:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
+
+                set_found_flag(row_id, False)
                 return row_id
 
         return default_row_id
@@ -960,10 +1001,16 @@ class LiteKeyTable(KeyTable):
 
         n_records = len(self)
         is_sync = self.size == n_records
-        if is_sync and not self.flags[xhash(key) & self.flags_mask]:
+        key_hash = xhash(key)
+        flag_idx = key_hash & self.flags_mask
+        if is_sync and not self.flags[flag_idx]:
             return default_row_id
 
-        _key_array, _flag_idx, row_id, _s_idx, _e_idx = self._find_key(key)
+        mask = self.mask
+        groups = self.groups
+        find_key = self._find_key
+        key_array = groups[key_hash & mask]
+        row_id, _s_idx, _e_idx = find_key(key_array, key)
         if row_id >= 0:
             return row_id
 
@@ -1129,34 +1176,51 @@ class LiteKeyTable(KeyTable):
         jio = self.io
         is_empty = self.size == 0
         flags = self.flags
-        _add_key = self._add_key
-        _find_key = self._find_key
-        __get_found_flag = self.__get_found_flag
-        __set_found_flag = self.__set_found_flag
+        mask = self.mask
+        flags_mask = self.flags_mask
+        find_key = self._find_key
+        get_found_flag = self.__get_found_flag
+        set_found_flag = self.__set_found_flag
         index_size = jio.index_size
         KEY_loads = jio.KEY_loads
-        is_found = __get_found_flag(jio.n_records-1)
+        is_found = not is_empty
+        groups = self.groups
+        empty_groups = [False] * (mask+1)
         fp = None
         try:
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
             for row_id in range(jio.n_records):
                 _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
-                is_found = __get_found_flag(row_id)
+                key_hash = xhash(_key)
+                flag_idx = key_hash & flags_mask
+                group_idx = key_hash & mask
+                key_array = groups[group_idx]
+                is_found = get_found_flag(row_id)
                 if is_empty or not is_found:
-                    _add_key(_key, row_id)
+                    self.size += 1
+                    flags[flag_idx] = True
+                    key_array.extend(_msg_dumps((_key, row_id)) or b'')
                 else:
-                    key_array, flag_idx, old_row_id, s_idx, e_idx = _find_key(_key)
-                    if old_row_id >= 0: # old key
-                        if old_row_id != row_id: # pragma: no cover
-                            key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
-
-                    else: # new key
+                    if empty_groups[group_idx]:
                         self.size += 1
-                        flags[flag_idx] = 1
+                        flags[flag_idx] = True
                         key_array.extend(_msg_dumps((_key, row_id)) or b'')
+                    else:
+                        old_row_id, s_idx, e_idx = find_key(key_array, _key)
+                        if old_row_id >= 0: # old key
+                            if old_row_id != row_id: # pragma: no cover
+                                key_array[s_idx:e_idx] = _msg_dumps((_key, row_id)) or b''
 
-                __set_found_flag(row_id)
+                        else: # new key
+                            if len(key_array) == 0:
+                                empty_groups[group_idx] = True
+
+                            self.size += 1
+                            flags[flag_idx] = True
+                            key_array.extend(_msg_dumps((_key, row_id)) or b'')
+
+                set_found_flag(row_id, True)
                 yield _key, row_id
 
         except FileNotFoundError: # pragma: no cover
@@ -1166,31 +1230,16 @@ class LiteKeyTable(KeyTable):
             if fp is not None:
                 fp.close()
 
-    def _add_key(self, key:str, row_id:int):
-        """Add new key to corresponding key array
-
-        Args:
-            key (str): new_key.
-            row_id (int): row number for the new key
-
-        """
-        _hash_id = xhash(key)
-        self.size += 1
-        self.flags[_hash_id & self.flags_mask] = 1
-        self.groups[_hash_id & self.mask].extend(_msg_dumps((key, row_id)) or b'')
-
-    def _find_key(self, key:str) -> Tuple[bytearray, int, int, int, int]:
+    def _find_key(self, key_array:bytearray, key:str) -> Tuple[int, int, int]:
         """Find key msgpack pattern in bytearray.
 
         Args:
+            key_array (bytearray): bytearray to store key+row
             key (str): key in bytearray.
 
         Returns:
-            Tuple[bytearray, int, int, int, int]: key_array, flag_idx, key's row ID, bytearray start index, bytearry end index
+            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index
         """
-        _hash_id = xhash(key)
-        flag_idx = _hash_id & self.flags_mask
-        key_array = self.groups[_hash_id & self.mask]
         n_bytes = len(key_array)
         if n_bytes > 0:
             search_prefix = b'\x92' + (_msg_dumps(key) or b'')
@@ -1214,18 +1263,18 @@ class LiteKeyTable(KeyTable):
                             val_type - 256 if val_type >= 0xe0 else -1
 
                         if row_id >= 0:
-                            return key_array, flag_idx, row_id, idx, val_idx_e
+                            return row_id, idx, val_idx_e
 
                 idx = key_array.find(search_prefix, idx+1) # pragma: no cover
 
-        return key_array, flag_idx, -1, -1, -1
+        return -1, -1, -1
 
-    def __set_found_flag(self, row_id:int):
+    def __set_found_flag(self, row_id:int, is_found:bool=True):
         found_flags = self.found_flags
         ext_size = row_id + 1 - len(found_flags)
         if ext_size > 0:
             found_flags.extend('0' * ext_size)
-        found_flags[row_id] = True
+        found_flags[row_id] = is_found
 
     def __get_found_flag(self, row_id:int) -> bool:
         found_flags = self.found_flags

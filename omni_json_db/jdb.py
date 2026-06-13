@@ -4698,8 +4698,6 @@ class JDb(JDbReader):
             if not sync_chg:
                 break
 
-        if key in self._cache: # pragma: no cover
-            self._cache[new_key] = self._cache.pop(key, None)
 
         _key, file_id, offset, row_size, val_size, _ver, days = io.read_key(key_fp, row)
         if io.write_key(key_fp, row, new_key, file_id, offset, row_size, val_size, days=days) > 0:
