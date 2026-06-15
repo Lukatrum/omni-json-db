@@ -863,7 +863,7 @@ class JDbKey:
     """
     A lightweight, read-only interface for interacting strictly with the keys of a JDbReader instance.
     """
-    __slots__ = {'jdb'}
+    __slots__ = ('jdb', )
 
     def __init__(self, jdb:JDbReader):
         """
@@ -1691,9 +1691,9 @@ class JDbReader:
     Handles data retrieval, filtering, and caching logic without allowing 
     data modification. Designed for safe, concurrent read operations.
     """
-    __slots__ = {'files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
+    __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
                 'io', 'fsize', 'fp_table', 'childs', 'safe_line', 'chg_keys',
-                'write_hook', 'max_wsize', 'flags'}
+                'write_hook', 'max_wsize', 'flags')
 
     def __init__(self,\
                 KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\

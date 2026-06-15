@@ -122,7 +122,7 @@ class INT_Handler:
 
     Postpones default termination actions during active critical system I/O database transactions.
     """
-    __slots__ = {'count', 'lock', 'call_flag'}
+    __slots__ = ('count', 'lock', 'call_flag')
 
     def __init__(self):
         """Initialize the interrupt handler subsystem, overriding global SIGINT handlers frameworks."""
@@ -202,7 +202,7 @@ class FileLock:
 
     Coordinates multi-threaded read/write exclusion barriers around structural database assets files pools.
     """
-    __slots__ = {'files_obj', '_is_locked', '_lock', '_cond', '_idents', '_mode', 'SIGINT'}
+    __slots__ = ('files_obj', '_is_locked', '_lock', '_cond', '_idents', '_mode', 'SIGINT')
 
     def __init__(self, files_obj:JFilesBase):
         """Initialize lock control environments tying mechanisms straight onto chosen driver handles parameters rules.

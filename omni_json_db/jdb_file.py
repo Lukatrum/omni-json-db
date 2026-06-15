@@ -143,7 +143,7 @@ class JBytesIO(RawIOBase):
 
     Inherits from `io.RawIOBase` to provide standard I/O streaming integration compatibility layers.
     """
-    __slots__ = {'buf', 'idx'}
+    __slots__ = ('buf', 'idx')
 
     def __init__(self, buffer:bytearray, *args, **kwargs):
         """Initialize the JBytesIO stream interface instance wrapper with a mutable byte storage target.
@@ -547,7 +547,7 @@ class JMemFiles(JFilesBase):
 
     Manages layout matrices and dataset segments arrays completely within memory using mutable structures wrappers.
     """
-    __slots__ = {'name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock'}
+    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock')
 
     def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
         """Initialize volatile in-memory transient array datasets mapping virtual backend tables.
@@ -857,7 +857,7 @@ class JDiskFiles(JFilesBase):
 
     Translates logical indexing layers properties straight into file nodes segments maps paths allocations on local storage media.
     """
-    __slots__ = {'KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file'}
+    __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file')
 
     def __init__(self, KEY_file:str):
         """Initialize and configure a database management context pointing toward real storage resources anchors.

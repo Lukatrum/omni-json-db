@@ -113,7 +113,7 @@ class JNetIO(RawIOBase):
     Translates native I/O stream method sequences down into network call sequences routed
     and tracked synchronously against a remote specialized files server.
     """
-    __slots__ = {'file', 'sock', 'lock', 'mode'}
+    __slots__ = ('file', 'sock', 'lock', 'mode')
 
     def __init__(self, sock:IO, file:str, mode:str='rb+', **kwargs):
         """Initialize the network-backed simulated file IO pipeline stream context.
