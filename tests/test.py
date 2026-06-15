@@ -4914,20 +4914,33 @@ class TestJDb(unittest.TestCase):
             for val in jdb.values():
                 self.assertEqual(expect[f'xxx{val-10000}'], val)
 
-            if jdb.key_limit == 'no':
-                for key,val in jdb.items(read_only=False):
-                    jdb.f_write(None, key, val + 1)
-                    self.assertEqual(val + 1, jdb.f_read(None, key))
-            else:
-                keys = list(jdb)
-                with jdb.open(read_only=False) as fp:
+            for key,val in jdb.items(read_only=False):
+                jdb.f_write(None, key, val + 1)
+                self.assertEqual(val + 1, jdb.f_read(None, key))
+
+            keys = list(jdb)
+            with jdb.open(read_only=False) as fp:
+                for key in keys:
+                    val = jdb.f_read(fp, key)
+                    jdb.f_write(fp, key, val + 1)
+                    self.assertEqual(val + 1, jdb.f_read(fp, key))
+
+            with jdb.open(read_only=False) as fp:
+                with jdb.open(read_only=False) as fp1:
                     for key in keys:
                         val = jdb.f_read(fp, key)
-                        jdb.f_write(fp, key, val + 1)
-                        self.assertEqual(val + 1, jdb.f_read(fp, key))
+                        jdb.f_write(fp1, key, val + 1)
+                        self.assertEqual(val + 1, jdb.f_read(fp1, key))
 
-            for key,val in jdb.item_iter():
-                self.assertEqual(expect[key] + 1, val)
+            with jdb.open(read_only=False) as fp:
+                try:
+                    fp1 = jdb.f_open(read_only=False)
+                    for key in keys:
+                        val = jdb.f_read(fp, key)
+                        jdb.f_write(fp1, key, val + 1)
+                        self.assertEqual(val + 1, jdb.f_read(fp1, key))
+                finally:
+                    jdb.f_close()
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])

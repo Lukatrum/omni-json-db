@@ -1,6 +1,6 @@
 from __future__ import annotations # pylint: disable=too-many-lines
 from abc import ABCMeta, abstractmethod
-from typing import Any, Union, Optional, Tuple, Callable, Generator, IO, Dict
+from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, Dict
 from io import DEFAULT_BUFFER_SIZE
 from time import time
 from functools import reduce
@@ -322,7 +322,7 @@ class JDbGroupDict(dict):
 xhash = hash # hash() is not deterministic, can export PYTHONHASHSEED=0
 class KeyTable:
     """Protocol Interface layout contract defining standard indexing schemas for tracking index rows keys mappings."""
-    __slots__ = ('io', 'cache', 'files_obj', 'groups', 'size', 'mask', 'flags', 'flags_mask', 'found_flags')
+    __slots__ = ('io', 'cache', 'files_obj', 'groups', 'size', 'mask', 'flags', 'flags_mask', 'found_flags', 'with_cache')
 
     def __init__(self, jio:JIo, groups_mask:int, flags_mask:int, with_cache:bool=False):
         """Initialize compact storage partitions maps arrays based on specialized mask profiling parameters rules.
@@ -346,10 +346,11 @@ class KeyTable:
         self.mask = groups_mask
         self.flags_mask = flags_mask
         self.flags = bitarray(flags_mask+1)
-        self.groups = [bytearray() for _ in range(groups_mask+1)]
+        self.groups:List[bytearray] = [bytearray() for _ in range(groups_mask+1)]
         self.size = -1
         self.found_flags = bitarray()
-        self.cache = {} if with_cache else None
+        self.with_cache = with_cache
+        self.cache:Dict[str,int] = {}
 
     def get_mode(self) -> int:
         """Get the classification mode configuration parameter code.
@@ -366,7 +367,7 @@ class KeyTable:
             str: Presentation text log summary details parameters strings.
         """
         return f'<{type(self).__name__} '\
-            f'cache:{len(self.cache) if isinstance(self.cache, dict) else "-"} '\
+            f'cache:{len(self.cache) if self.with_cache else "-"} '\
             f'mask:{self.mask:x} '\
             f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
             f'done:{self.size}/{self.io.n_records}+{self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}% '\
@@ -383,7 +384,7 @@ class KeyTable:
             self.clear()
 
         cache = self.cache
-        if isinstance(cache, dict) and cache.get(key, None) == row_id: # pragma: no cover
+        if self.with_cache and cache.get(key, None) == row_id: # pragma: no cover
             cache.pop(key, None)
             cache[key] = row_id
             return
@@ -403,7 +404,7 @@ class KeyTable:
 
         self._set_found_flag(row_id, True)
 
-        if isinstance(cache, dict):
+        if self.with_cache:
             while len(cache) >= self.io._key_limit:
                 old_key = next(iter(cache))
                 cache.pop(old_key, None)
@@ -423,9 +424,7 @@ class KeyTable:
         if self.size < 0: #pragma: no cover
             self.clear()
 
-        cache = self.cache
-        if cache: cache.pop(key, None)
-
+        self.cache.pop(key, None)
         jio = self.io
         is_sync = self.size == jio.n_records
         key_hash = xhash(key)
@@ -506,7 +505,7 @@ class KeyTable:
             return default_row_id
 
         cache = self.cache
-        if isinstance(cache, dict):
+        if self.with_cache:
             row_id = cache.get(key, -1)
             if row_id >= 0:
                 return row_id
@@ -517,7 +516,7 @@ class KeyTable:
         key_array = groups[key_hash & mask]
         row_id, _s_idx, _e_idx = find_key(key_array, key)
         if row_id >= 0:
-            if isinstance(cache, dict):
+            if self.with_cache:
                 while len(cache) >= jio._key_limit:
                     old_key = next(iter(cache))
                     cache.pop(old_key, None)
@@ -529,7 +528,7 @@ class KeyTable:
             for _key, row_id in self._item_iter():
                 if _key == key:
                     # clean up extra buffer
-                    if isinstance(cache, dict):
+                    if self.with_cache:
                         while len(cache) >= jio._key_limit:
                             old_key = next(iter(cache))
                             cache.pop(old_key, None)
@@ -615,15 +614,14 @@ class KeyTable:
         Returns:
             KeyTable: Carbon copy replication workspace object context wrapper tracker handle.
         """
-        return KeyTable(self.io, self.mask, self.flags_mask, isinstance(self.cache, dict))
+        return KeyTable(self.io, self.mask, self.flags_mask, self.with_cache)
 
     def clear(self):
         """Purge memory configurations reset trackers parameters indicators initializing bloom filters blocks matrices maps grids back onto zero fields."""
         if self.size != 0:
             for key_array in self.groups:
                 key_array.clear()
-            if isinstance(self.cache, dict):
-                self.cache.clear()
+            self.cache.clear()
             self.found_flags.clear()
             self.flags.setall(0)
             self.size = 0

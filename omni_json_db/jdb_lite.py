@@ -1692,7 +1692,7 @@ class JDbReader:
     data modification. Designed for safe, concurrent read operations.
     """
     __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
-                'io', 'fsize', 'fp_table', 'childs', 'safe_line', 'chg_keys',
+                'io', 'fsize', 'fp_table', 'th_table', 'childs', 'safe_line', 'chg_keys',
                 'write_hook', 'max_wsize', 'flags')
 
     def __init__(self,\
@@ -1856,6 +1856,7 @@ class JDbReader:
         self.fsize = self.safe_line = 0
         self.childs:Dict[str,JDbReader] = {}
         self.fp_table:Dict[int,dict] = {}
+        self.th_table:Dict[int,int] = {}
         self.chg_keys:Set = set()
         self._cache:Dict[str,Any] = {}
         self._cache_limit = cache_limit
@@ -2465,32 +2466,35 @@ class JDbReader:
             _cache = self._cache
             files_obj = self.files_obj
             fp_table = self.fp_table
+            th_table = self.th_table
             io = self.io
             fp_table[ident] = fp_dict = fp_table.get(ident, {-1:None})
+            th_table[ident] = th_table.get(ident, 0) + 1
             try:
                 try:
-                    is_latest = False
                     if read_only:
                         if io.is_updated():
-                            is_latest = files_obj.KEY_size() == io.file_size
-                            if is_latest:
+                            if files_obj.KEY_size() == io.file_size:
                                 self.safe_line = io.n_records
                                 if chg_keys: chg_keys.clear()
+
                                 return fp_dict
+
+                        is_latest = False
                     else:
                         io.update_days()
                         is_latest = files_obj.KEY_size() == io.file_size
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None: # pragma: no cover
+                    if key_fp is not None:
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
                     io.read_header(key_fp)
-                    if not io.is_updated() or not is_latest: # pragma: no cover
+                    if not io.is_updated() or not is_latest:
                         io.load_keys(key_fp, force=data_type==0)
                         if _cache: _cache.clear()
                         self.fsize = io.file_size
@@ -2534,54 +2538,56 @@ class JDbReader:
             fp_table = self.fp_table
             fp_dict = fp_table.get(ident, None)
             if fp_dict is None:
+                self.th_table.pop(ident, 0)
                 return
 
+            th_table = self.th_table
+            th_cnt = th_table.get(ident, 0) - 1
             try:
                 io = self.io
                 if not io.is_updated():
                     if file_lock.mode == 'w':
-                        key_fp = fp_dict.pop(-1, None)
-                        try:
-                            if key_fp is None: # pragma: no cover
-                                try:
-                                    key_fp = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
+                        key_fp = fp_dict.get(-1, None)
+                        if key_fp is None: # pragma: no cover
+                            try:
+                                fp_dict[-1] = key_fp = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
 
-                                except FileNotFoundError:
-                                    io, key_fp = self._init_KEY()
+                            except FileNotFoundError:
+                                io, key_fp = self._init_KEY()
+                                fp_dict[-1] = key_fp
+                        else:
+                            key_fp.flush()
+                            key_fp.seek(0)
+
+                        if _cache: # pragma: no cover
+                            if not io.key_table:
+                                _cache.clear()
                             else:
-                                key_fp.flush()
-                                key_fp.seek(0)
+                                for kk in set(_cache).difference(io.key_table):
+                                    _cache.pop(kk, 0)
 
-                            if _cache: # pragma: no cover
-                                if not io.key_table:
-                                    _cache.clear()
-                                else:
-                                    for kk in set(_cache).difference(io.key_table):
-                                        _cache.pop(kk, 0)
-
-                            self.fsize = io.write_header(key_fp)
-
-                        finally:
-                            if key_fp is not None:
-                                key_fp.close()
+                        self.fsize = io.write_header(key_fp)
 
                     # read mode
                     elif io.file_size == 0 or io.n_records != len(io.key_table): # pragma: no cover
-                        if _cache:
-                            _cache.clear()
-                        chg_keys.clear()
+                        _cache.clear()
                         io.key_table.clear()
                         io.file_table.clear()
                         self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
             finally:
-                chg_keys.clear()
-                for fp in fp_dict.values():
-                    if fp is not None:
-                        fp.close()
+                if th_cnt <= 0:
+                    chg_keys.clear()
+                    for fp in fp_dict.values():
+                        if fp is not None:
+                            fp.close()
 
-                fp_dict.clear()
-                fp_table.pop(ident, None)
+                    fp_dict.clear()
+                    fp_table.pop(ident, None)
+                    th_table.pop(ident, 0)
+                else:
+                    th_table[ident] = th_cnt
+
                 file_lock.release()
 
     @contextmanager
@@ -2609,7 +2615,9 @@ class JDbReader:
             _cache = self._cache
             files_obj = self.files_obj
             fp_table = self.fp_table
+            th_table = self.th_table
             fp_table[ident] = fp_dict = fp_table.get(ident, {-1:None})
+            th_table[ident] = th_cnt = th_table.get(ident, 0) + 1
             io = self.io
             try:
                 try:
@@ -2630,7 +2638,7 @@ class JDbReader:
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None: # pragma: no cover
+                    if key_fp is not None:
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
@@ -2705,7 +2713,7 @@ class JDbReader:
                     fp_dict[-1] = key_fp
                     sync_id = io.sync_id
                     fsize = io.file_size
-                    if chg_keys: chg_keys.clear()
+                    chg_keys.clear()
                     self.safe_line = io.n_records
                     yield fp_dict
 
@@ -2718,37 +2726,38 @@ class JDbReader:
                     if not io.is_updated():
                         if file_lock.mode == 'w':
                             if not is_error:
-                                key_fp = fp_dict.pop(-1, None)
-                                try:
-                                    if key_fp is None: # pragma: no cover
-                                        key_fp = files_obj.KEY_open('ab+', buffering=KEY_FILE_BUF_SIZE)
-                                    else:
-                                        key_fp.flush()
+                                key_fp = fp_dict.get(-1, None)
+                                if key_fp is None: # pragma: no cover
+                                    fp_dict[-1] = key_fp = files_obj.KEY_open('ab+', buffering=KEY_FILE_BUF_SIZE)
+                                else:
+                                    key_fp.flush()
 
-                                    if _cache and io.remv_id != io._remv_id:
-                                        for kk in set(_cache).difference(io.key_table):
-                                            _cache.pop(kk, 0)
+                                if _cache and io.remv_id != io._remv_id:
+                                    for kk in set(_cache).difference(io.key_table):
+                                        _cache.pop(kk, 0)
 
-                                    self.fsize = io.write_header(key_fp)
+                                self.fsize = io.write_header(key_fp)
 
-                                finally:
-                                    if key_fp is not None:
-                                        key_fp.close()
-
-                        elif io.file_size == 0 or io.n_records != len(io.key_table): # read mode
-                            if _cache: _cache.clear()
-                            chg_keys.clear()
+                        elif files_obj.KEY_size() != io.file_size: # read mode
+                            _cache.clear()
                             io.key_table.clear()
                             io.file_table.clear()
                             self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
                 finally:
-                    for fp in fp_dict.values():
-                        if fp is not None:
-                            fp.close()
+                    th_cnt -= 1
+                    if th_cnt <= 0:
+                        chg_keys.clear()
+                        for fp in fp_dict.values():
+                            if fp is not None:
+                                fp.close()
 
-                    fp_dict.clear()
-                    fp_table.pop(ident, None)
+                        fp_dict.clear()
+                        fp_table.pop(ident, None)
+                        th_table.pop(ident, 0)
+                    else:
+                        th_table[ident] = th_cnt
+
                     file_lock.release()
 
         finally:
