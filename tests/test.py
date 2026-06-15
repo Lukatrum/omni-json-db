@@ -4653,8 +4653,12 @@ class TestJDb(unittest.TestCase):
 
             if hasattr(jdb.key_table, 'files_obj'):
                 jdb.key_table.clear()
+                row_id = jdb.key_table.pop('xxxx1', -1)
+                self.assertEqual(row_id, -1)
                 row_id = jdb.key_table.pop('xxx1', -1)
                 self.assertEqual(row_id, 1)
+                with self.assertRaises(KeyError):
+                    del jdb.key_table['xxxx2']
 
             row_id = jdb.key_table['xxx10']
             self.assertEqual(jdb.key_table['xxx10'], row_id)

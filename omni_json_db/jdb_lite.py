@@ -2342,9 +2342,7 @@ class JDbReader:
                 _step = int(_step)
 
             elif isinstance(_step, str):
-                if _step:
-                    filter_re = re_compile(_step)#, flags=re.I)
-
+                filter_re = re_compile(_step)
                 _step = 1
             else:
                 raise JTypeError(key)
@@ -2510,8 +2508,8 @@ class JDbReader:
 
             except: # pragma: no cover
                 io = self.io
-                if _cache: _cache.clear()
-                if chg_keys: chg_keys.clear()
+                _cache.clear()
+                chg_keys.clear()
                 self.fsize = io.file_size = 0
 
                 for fp in fp_dict.values():
@@ -2571,17 +2569,13 @@ class JDbReader:
                     elif io.file_size == 0 or io.n_records != len(io.key_table): # pragma: no cover
                         if _cache:
                             _cache.clear()
-
-                        if chg_keys:
-                            chg_keys.clear()
+                        chg_keys.clear()
                         io.key_table.clear()
                         io.file_table.clear()
                         self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
             finally:
-                if chg_keys:
-                    chg_keys.clear()
-
+                chg_keys.clear()
                 for fp in fp_dict.values():
                     if fp is not None:
                         fp.close()
@@ -2695,8 +2689,8 @@ class JDbReader:
                 if no_raise or sync_id != io.sync_id or fsize != io.file_size:
                     io.key_table.clear()
                     io.file_table.clear()
-                    if _cache: _cache.clear()
-                    if chg_keys: chg_keys.clear()
+                    _cache.clear()
+                    chg_keys.clear()
                     self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
                 for fp in fp_dict.values():
@@ -2743,7 +2737,7 @@ class JDbReader:
 
                         elif io.file_size == 0 or io.n_records != len(io.key_table): # read mode
                             if _cache: _cache.clear()
-                            if chg_keys: chg_keys.clear()
+                            chg_keys.clear()
                             io.key_table.clear()
                             io.file_table.clear()
                             self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
