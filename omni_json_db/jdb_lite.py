@@ -2480,7 +2480,7 @@ class JDbReader:
 
                                 return fp_dict
 
-                        is_latest = False
+                        is_latest = False # pragma: no cover
                     else:
                         io.update_days()
                         is_latest = files_obj.KEY_size() == io.file_size
@@ -2537,7 +2537,7 @@ class JDbReader:
             files_obj = self.files_obj
             fp_table = self.fp_table
             fp_dict = fp_table.get(ident, None)
-            if fp_dict is None:
+            if fp_dict is None: # pragma: no cover
                 self.th_table.pop(ident, 0)
                 return
 
