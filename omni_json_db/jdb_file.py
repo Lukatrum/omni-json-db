@@ -915,7 +915,7 @@ class JDiskFiles(JFilesBase):
         self.KEY_file = KEY_file = path_join(dir_name, file_name)
         self.VAL_file = KEY_file + '.{file_id}'
         self.LCK_file = KEY_file  + '.lock'
-        self.LCK_fp = None
+        self.LCK_fp:Optional[Union[int, IO]] = None
 
         _parts = KEY_file.split('.')
         self.group_KEY_file = ('.'.join(_parts[:-1]) + '+{group_key}.' + _parts[-1]) if len(_parts) > 1 else \
@@ -1046,8 +1046,13 @@ class JDiskFiles(JFilesBase):
         """
         path = self.VAL_file.format(file_id=file_id)
         if path_exists(path):
-            os_remove(path)
-            return True
+            try:
+                os_remove(path)
+                return True
+
+            except PermissionError as e: # pragma: no cover
+                print(e)
+                return False
 
         return False
 
@@ -1159,6 +1164,13 @@ class JDiskFiles(JFilesBase):
     def LCK_remove(self): # pragma: no cover
         """Purge system lock indicators files physically from disk storage pools completely erasing active synchronization markers tracks."""
         self.LCK_close()
-        os_remove(self.LCK_file)
+        try:
+            os_remove(self.LCK_file)
+
+        except FileNotFoundError as e: # pragma: no cover
+            print(e)
+
+        except PermissionError as e: # pragma: no cover
+            print(e)
 
 #
