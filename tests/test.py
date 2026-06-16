@@ -333,7 +333,7 @@ class TestJDb(unittest.TestCase):
                 log_jdb = jdb.get_group('project_logs')
                 self.assertEqual(project_jdb, jdb['projects'])
                 self.assertEqual(log_jdb, jdb['project_logs'])
-                self.assertEqual(len(log_jdb), 4)
+                self.assertEqual(len(log_jdb), 4, Style(f'{filename}:{jdb}', red=1))
                 self.assertEqual(len(project_jdb), 3)
                 self.assertEqual(project_jdb[3]['name'], 'coding')
                 self.assertEqual(project_jdb[3]['name'], 'coding')
@@ -7576,7 +7576,7 @@ class TestJDb(unittest.TestCase):
             for th in th_list:
                 th.join()
 
-            self.assertEqual(jdb0, expect)
+            self.assertEqual(jdb0, expect, Style(f'{filename}:{jdb}', red=1))
             self.assertEqual(jdb1, jdb0)
             self.assertEqual(jdb2, jdb0)
 

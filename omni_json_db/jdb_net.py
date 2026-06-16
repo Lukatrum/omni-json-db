@@ -811,7 +811,7 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
-    def LCK_rlock(self):
+    def LCK_rlock(self, block:bool=False):
         """Acquire distributed thread shared reader locks executing over network transaction scopes boundaries blocks.
 
         Raises:
@@ -819,7 +819,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'rlock', [], {}))
+                dump_and_send(self.sock, ('LCK', 'rlock', [block], {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -827,7 +827,7 @@ class JNetFiles(JFilesBase):
 
             raise BlockingIOError
 
-    def LCK_wlock(self):
+    def LCK_wlock(self, block:bool=False):
         """Acquire a distributed network-wide exclusive write barrier lock blocking parallel mutative calls.
 
         Raises:
@@ -835,7 +835,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'wlock', [], {}))
+                dump_and_send(self.sock, ('LCK', 'wlock', [block], {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -1016,13 +1016,13 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                     elif cmd == 'rlock':
                         try:
-                            resp['ret'] = files_obj.LCK_rlock()
+                            resp['ret'] = files_obj.LCK_rlock(*_args)
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
 
                     elif cmd == 'wlock':
                         try:
-                            resp['ret'] = files_obj.LCK_wlock()
+                            resp['ret'] = files_obj.LCK_wlock(*_args)
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
 

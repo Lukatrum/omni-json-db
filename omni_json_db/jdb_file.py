@@ -7,7 +7,7 @@ from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
 from os import remove as os_remove, stat as os_stat
 from os.path import basename, dirname, join as path_join, exists as path_exists
 from datetime import datetime
-from threading import RLock, get_ident
+from threading import RLock, get_ident, Condition
 #-----------------------------------------------------------------------------
 
 try:
@@ -15,12 +15,13 @@ try:
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
 
     OPEN_FLAGS = O_APPEND | O_CREAT
-    def file_rlock(fd:int, LCK_file:str) -> int:
+    def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int:
         """Acquire a non-blocking shared (read) lock on a physical file descriptor.
 
         Args:
             fd (int): An existing file descriptor. If 0, a new file descriptor will be opened.
             LCK_file (str): System path pointing to the targeted lock file.
+            block (bool): True = wait until lock it.
 
         Returns:
             int: The active file descriptor holding the shared lock.
@@ -32,19 +33,20 @@ try:
             fd = os_open(LCK_file, OPEN_FLAGS)
 
         try:
-            flock(fd, LOCK_SH | LOCK_NB)
+            flock(fd, LOCK_SH if block else (LOCK_SH | LOCK_NB))
             return fd
 
         except (IOError, OSError) as e: # pragma: no cover
             os_close(fd)
             raise BlockingIOError from e
 
-    def file_wlock(fd:int, LCK_file:str) -> int:
+    def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int:
         """Acquire a non-blocking exclusive (write) lock on a physical file descriptor.
 
         Args:
             fd (int): An existing file descriptor. If 0, a new file descriptor will be opened.
             LCK_file (str): System path pointing to the targeted lock file.
+            block (bool): True = wait until lock it.
 
         Returns:
             int: The active file descriptor holding the exclusive lock.
@@ -56,7 +58,7 @@ try:
             fd = os_open(LCK_file, OPEN_FLAGS)
 
         try:
-            flock(fd, LOCK_EX | LOCK_NB)
+            flock(fd, LOCK_EX if block else (LOCK_EX | LOCK_NB))
             return fd
 
         except (IOError, OSError) as e: # pragma: no cover
@@ -76,12 +78,13 @@ try:
 except ImportError:
     from portalocker import LOCK_SH, LOCK_NB, LOCK_EX, lock as pl_lock, unlock as pl_unlock, LockException
 
-    def file_rlock(fd:IO, LCK_file:str) -> IO:
+    def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO:
         """Acquire a non-blocking shared (read) lock on a file object via cross-platform portalocker fallback.
 
         Args:
             fd (IO): An existing open file-like streaming handle. If None, a new file object is initialized.
             LCK_file (str): System path pointing to the targeted lock file.
+            block (bool): True = wait until lock it.
 
         Returns:
             IO: The stream interface object holding the active shared read lock.
@@ -93,19 +96,20 @@ except ImportError:
             fd = open(LCK_file, 'a+')
 
         try:
-            pl_lock(fd, LOCK_SH | LOCK_NB)
+            pl_lock(fd, LOCK_SH if block else (LOCK_SH | LOCK_NB))
             return fd
 
         except (IOError, OSError, LockException) as e: # pragma: no cover
             fd.close()
             raise BlockingIOError from e
 
-    def file_wlock(fd:IO, LCK_file:str) -> IO:
+    def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:
         """Acquire a non-blocking exclusive (write) lock on a file object via cross-platform portalocker fallback.
 
         Args:
             fd (IO): An existing open file-like streaming handle. If None, a new file object is initialized.
             LCK_file (str): System path pointing to the targeted lock file.
+            block (bool): True = wait until lock it.
 
         Returns:
             IO: The stream interface object holding the active exclusive write lock.
@@ -117,7 +121,7 @@ except ImportError:
             fd = open(LCK_file, 'a+')
 
         try:
-            pl_lock(fd, LOCK_EX | LOCK_NB)
+            pl_lock(fd, LOCK_EX if block else (LOCK_EX | LOCK_NB))
             return fd
 
         except (IOError, OSError, LockException) as e: # pragma: no cover
@@ -528,9 +532,9 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def KEY_date(self) -> int: ...
     @abstractmethod
-    def LCK_rlock(self): ...
+    def LCK_rlock(self, block:bool=False): ...
     @abstractmethod
-    def LCK_wlock(self): ...
+    def LCK_wlock(self, block:bool=False): ...
     @abstractmethod
     def LCK_unlock(self): ...
     @abstractmethod
@@ -547,9 +551,9 @@ class JMemFiles(JFilesBase):
 
     Manages layout matrices and dataset segments arrays completely within memory using mutable structures wrappers.
     """
-    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock')
+    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond')
 
-    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
+    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
         """Initialize volatile in-memory transient array datasets mapping virtual backend tables.
 
         Args:
@@ -557,6 +561,7 @@ class JMemFiles(JFilesBase):
             VAL_table (Optional[dict], optional): Repository tracking mapped file_ids onto internal rows bytearrays blocks contents. Defaults to None.
             LCK_file (Optional[bytearray], optional): Mutex tracker array mapping shared concurrent access status bits. Defaults to None.
             lock (Optional[RLock], optional): Primitive synchronization engine tracking multi-threaded operations flows boundaries. Defaults to None.
+            cond (Optional[Condition], optional): condition variable object
             timestamp (Optional[float], optional): Baseline initialization timestamp mapping creation timeline markers records. Defaults to None.
             name (Optional[str], optional): File object name
 
@@ -574,6 +579,9 @@ class JMemFiles(JFilesBase):
 
         if lock is None:
             lock = RLock()
+
+        if cond is None:
+            cond = Condition(lock)
 
         if timestamp is None:
             timestamp = datetime.now().timestamp()
@@ -599,6 +607,7 @@ class JMemFiles(JFilesBase):
         self.lock = lock
         self.timestamp = timestamp
         self.name = name
+        self.cond = cond
 
     def __repr__(self) -> str:
         """Generate tracking diagnostic indicators parameters monitoring object state details.
@@ -660,7 +669,7 @@ class JMemFiles(JFilesBase):
         Returns:
             JMemFiles: Replicated virtual storage management context instance.
         """
-        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, timestamp=self.timestamp, name=self.name)
+        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name)
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
@@ -779,8 +788,11 @@ class JMemFiles(JFilesBase):
         """
         return int(self.timestamp)
 
-    def LCK_rlock(self):
+    def LCK_rlock(self, block:bool=False):
         """Acquire volatile thread shared reader locks blocking writers but encouraging parallel reader paths.
+
+        Args:
+            block (bool): True = wait until lock it.
 
         Raises:
             BlockingIOError: If an exclusive write session lock context is currently active under another execution context thread.
@@ -788,37 +800,48 @@ class JMemFiles(JFilesBase):
         current_id = get_ident()
         LCK_file = self.LCK_file
         with self.lock:
-            write_id = int.from_bytes(LCK_file[4:12], 'big') # get write_id
-            if write_id == 0 or write_id == current_id:
-                # set reader
-                read_cnt = int.from_bytes(LCK_file[0:4], 'big') + 1
-                LCK_file[0:4] = read_cnt.to_bytes(4, 'big')
-                return
+            while True:
+                write_id = int.from_bytes(LCK_file[4:12], 'big') # get write_id
+                if write_id == 0 or write_id == current_id:
+                    # set reader
+                    read_cnt = int.from_bytes(LCK_file[0:4], 'big') + 1
+                    LCK_file[0:4] = read_cnt.to_bytes(4, 'big')
+                    return
 
-        raise BlockingIOError
+                if not block:
+                    raise BlockingIOError
 
-    def LCK_wlock(self):
+                self.cond.wait()
+
+    def LCK_wlock(self, block:bool=False):
         """Acquire volatile transaction exclusive writer barriers freezing alternative threads operations execution metrics.
 
+        Args:
+            block (bool): True = wait until lock it.
+    
         Raises:
             BlockingIOError: If existing active transaction records indicate reading or writing overlapping activities.
         """
         current_id = get_ident()
         LCK_file = self.LCK_file
         with self.lock:
-            write_id = int.from_bytes(LCK_file[4:12], 'big') # get write_id
-            if write_id == current_id: # pragma: no cover
-                write_cnt = int.from_bytes(LCK_file[12:16], 'big') + 1
-                LCK_file[12:16] = write_cnt.to_bytes(4, 'big')
-                return
+            while True:
+                write_id = int.from_bytes(LCK_file[4:12], 'big') # get write_id
+                if write_id == current_id: # pragma: no cover
+                    write_cnt = int.from_bytes(LCK_file[12:16], 'big') + 1
+                    LCK_file[12:16] = write_cnt.to_bytes(4, 'big')
+                    return
 
-            read_cnt = int.from_bytes(LCK_file[0:4], 'big')
-            if read_cnt == 0 and write_id == 0:
-                LCK_file[4:12] = current_id.to_bytes(8, 'big')
-                LCK_file[12:16] = int(1).to_bytes(4, 'big') # set write_cnt = 1
-                return
+                read_cnt = int.from_bytes(LCK_file[0:4], 'big')
+                if read_cnt == 0 and write_id == 0:
+                    LCK_file[4:12] = current_id.to_bytes(8, 'big')
+                    LCK_file[12:16] = int(1).to_bytes(4, 'big') # set write_cnt = 1
+                    return
 
-        raise BlockingIOError
+                if not block:
+                    raise BlockingIOError
+
+                self.cond.wait()
 
     def LCK_unlock(self):
         """Release session concurrency tracking markers yielding resource block access rules control indicators back to pools."""
@@ -831,22 +854,26 @@ class JMemFiles(JFilesBase):
                 LCK_file[12:16] = write_cnt.to_bytes(4, 'big')
                 if write_cnt == 0:
                     LCK_file[4:12] = int(0).to_bytes(8, 'big') # set write_id = 0
+            else:
+                read_cnt = int.from_bytes(LCK_file[0:4], 'big')
+                if read_cnt > 0:
+                    read_cnt -= 1
+                    LCK_file[0:4] = read_cnt.to_bytes(4, 'big') # set read_id - 1
 
-                return
-
-            read_cnt = int.from_bytes(LCK_file[0:4], 'big')
-            if read_cnt > 0:
-                read_cnt -= 1
-                LCK_file[0:4] = read_cnt.to_bytes(4, 'big') # set read_id - 1
+            self.cond.notify_all()
 
     def LCK_close(self): # pragma: no cover
         """Placeholder system stream shutdown routine tracking pipeline variables preservation parameters limits."""
-        return
+        with self.lock:
+            self.LCK_unlock()
+            self.LCK_file[:] = b'\x00' * 16
+            self.cond.notify_all()
 
     def LCK_remove(self): # pragma: no cover
         """Reset virtual concurrency tracker values initializing lock bytes matrices structures layers directly back to zero values."""
         with self.lock:
             self.LCK_file[:] = b'\x00' * 16
+            self.cond.notify_all()
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -1099,13 +1126,23 @@ class JDiskFiles(JFilesBase):
 
         return 0
 
-    def LCK_rlock(self):
-        """Request and secure a platform-safe shared reader lock on file layer blocking writers but enabling read parallelism features."""
-        self.LCK_fp = file_rlock(self.LCK_fp, self.LCK_file)
+    def LCK_rlock(self, block:bool=False):
+        """Request and secure a platform-safe shared reader lock on file layer blocking writers but enabling read parallelism features.
 
-    def LCK_wlock(self):
-        """Request and secure a platform-safe exclusive write barrier lock blocking parallel transactions modifications across execution boundaries threads."""
-        self.LCK_fp = file_wlock(self.LCK_fp, self.LCK_file)
+        Args:
+            block (bool): True = wait until lock it.
+
+        """
+        self.LCK_fp = file_rlock(self.LCK_fp, self.LCK_file, block)
+
+    def LCK_wlock(self, block:bool=False):
+        """Request and secure a platform-safe exclusive write barrier lock blocking parallel transactions modifications across execution boundaries threads.
+
+        Args:
+            block (bool): True = wait until lock it.
+
+        """
+        self.LCK_fp = file_wlock(self.LCK_fp, self.LCK_file, block)
 
     def LCK_unlock(self):
         """Relinquish secured filesystem concurrency lock structures allowing outstanding queue entities processing paths access permissions."""
