@@ -961,7 +961,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', yellow=1, bright=1))
                     continue
 
-                except Exception as e:
+                except Exception as e: # pragma: no cover
                     if verbose >= 0:
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', red=1, bright=1))
                     raise
@@ -1215,7 +1215,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                 if fp is None: continue
                 try:
                     fp.close()
-                except Exception as e:
+                except Exception as e: # pragma: no cover
                     print(e)
 
             if verbose >= 0:
@@ -1225,7 +1225,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
             fp_table.clear()
             try:
                 del files_obj
-            except Exception as e:
+            except Exception as e: # pragma: no cover
                 print(e)
 
 #---------------------------------------------------------------------

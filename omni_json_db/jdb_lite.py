@@ -5053,7 +5053,7 @@ class JDbReader:
 
         return io, fp_dict, key_fp
 
-    def f_get_val_fp(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None, req_size:Optional[int]=None, max_fp:int=64) -> Tuple[IO,int,int]:
+    def f_get_val_fp(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None, req_size:Optional[int]=None, max_fp:int=32) -> Tuple[IO,int,int]:
         """Manage active record segment storage files limiting concurrent hardware descriptive blocks allocation density.
 
         Args:

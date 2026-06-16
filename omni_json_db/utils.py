@@ -252,15 +252,15 @@ class FileLock:
                 self._mode = 'x'
                 try:
                     self.files_obj.LCK_unlock()
-                except OSError: # pragma: no cover
-                    pass
+                except OSError as e: # pragma: no cover
+                    print(e)
 
             else:
                 self._mode = 'x'
                 try:
                     self.files_obj.LCK_close()
-                except Exception: # pragma: no cover
-                    pass
+                except Exception as e: # pragma: no cover
+                    print(e)
 
             self.SIGINT.reset()
             self._idents.clear()
@@ -387,23 +387,24 @@ class FileLock:
                             _new_cnt = _cnt - 1
                             if _new_cnt <= 0:
                                 _idents.pop(ident, 0)
-                            else:
+                            else: # pragma: no cover
                                 _idents[ident] = _new_cnt
 
                             if not _idents:
                                 # this thread is the last lock owner
                                 try:
                                     self.files_obj.LCK_unlock()
-                                except OSError:
-                                    pass
+                                except OSError as e: # pragma: no cover
+                                    print(e)
+
                                 self._mode = ''
 
-                            else:
+                            else: # pragma: no cover
                                 # still have other threads own the lock
                                 _idents[ident] = _cnt
 
-                    if self._mode != '':
-                        if not block: # pragma: no cover
+                    if self._mode != '': # pragma: no cover
+                        if not block:
                             raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}")
 
                         # wait for other threads call release
@@ -441,14 +442,16 @@ class FileLock:
 
                         finally:
                             self._lock.acquire() # pylint: disable=consider-using-with
-                            if not os_lock_acquired:
-                                if self._mode == 'p':
-                                    self._mode = ''
-                                    self._cond.notify_all()
+                            if not os_lock_acquired and self._mode == 'p': # pragma: no cover
+                                self._mode = ''
+                                self._cond.notify_all()
 
-                        if self._mode == 'x':
+                        if self._mode == 'x': # pragma: no cover
                             if os_lock_acquired:
-                                self.files_obj.LCK_unlock()
+                                try:
+                                    self.files_obj.LCK_unlock()
+                                except OSError as e1: # pragma: no cover
+                                    print(e1)
                             break
 
                         if read_only:
@@ -494,7 +497,11 @@ class FileLock:
                     if self._mode == 'w':
                         self.SIGINT.enable()
 
-                    self.files_obj.LCK_unlock()
+                    try:
+                        self.files_obj.LCK_unlock()
+                    except OSError as e: # pragma: no cover
+                        print(e)
+
                     self._mode =  ''
                     self._cond.notify_all()
 

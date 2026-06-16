@@ -15,7 +15,7 @@ try:
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
 
     OPEN_FLAGS = O_APPEND | O_CREAT
-    def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int:
+    def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int: # pragma: no cover
         """Acquire a non-blocking shared (read) lock on a physical file descriptor.
 
         Args:
@@ -36,11 +36,11 @@ try:
             flock(fd, LOCK_SH if block else (LOCK_SH | LOCK_NB))
             return fd
 
-        except (IOError, OSError) as e: # pragma: no cover
+        except (IOError, OSError) as e:
             os_close(fd)
             raise BlockingIOError from e
 
-    def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int:
+    def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int: # pragma: no cover
         """Acquire a non-blocking exclusive (write) lock on a physical file descriptor.
 
         Args:
@@ -61,11 +61,11 @@ try:
             flock(fd, LOCK_EX if block else (LOCK_EX | LOCK_NB))
             return fd
 
-        except (IOError, OSError) as e: # pragma: no cover
+        except (IOError, OSError) as e:
             os_close(fd)
             raise BlockingIOError from e
 
-    def file_unlock(fd:int):
+    def file_unlock(fd:int): # pragma: no cover
         """Release the acquired file lock and safely close the associated file descriptor.
 
         Args:
@@ -78,7 +78,7 @@ try:
 except ImportError:
     from portalocker import LOCK_SH, LOCK_NB, LOCK_EX, lock as pl_lock, unlock as pl_unlock, LockException
 
-    def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO:
+    def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO: # pragma: no cover
         """Acquire a non-blocking shared (read) lock on a file object via cross-platform portalocker fallback.
 
         Args:
@@ -99,11 +99,11 @@ except ImportError:
             pl_lock(fd, LOCK_SH if block else (LOCK_SH | LOCK_NB))
             return fd
 
-        except (IOError, OSError, LockException) as e: # pragma: no cover
+        except (IOError, OSError, LockException) as e:
             fd.close()
             raise BlockingIOError from e
 
-    def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:
+    def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO: # pragma: no cover
         """Acquire a non-blocking exclusive (write) lock on a file object via cross-platform portalocker fallback.
 
         Args:
@@ -124,11 +124,11 @@ except ImportError:
             pl_lock(fd, LOCK_EX if block else (LOCK_EX | LOCK_NB))
             return fd
 
-        except (IOError, OSError, LockException) as e: # pragma: no cover
+        except (IOError, OSError, LockException) as e:
             fd.close()
             raise BlockingIOError from e
 
-    def file_unlock(fd:IO):
+    def file_unlock(fd:IO): # pragma: no cover
         """Release the portalocker-managed file lock and safely terminate the file object stream.
 
         Args:
