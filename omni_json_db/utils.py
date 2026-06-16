@@ -1,5 +1,6 @@
 from collections import defaultdict
 from contextlib import contextmanager
+from time import perf_counter
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
 # from typing import Union, Optional
@@ -194,12 +195,14 @@ class FileLockException(Exception):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
+DELAY_S = 0.05
+
 class FileLock:
     """High-performance thread-safe and process-safe synchronization locking mechanism manager proxy.
 
     Coordinates multi-threaded read/write exclusion barriers around structural database assets files pools.
     """
-    __slots__ = ('files_obj', '_lock', '_cond', '_idents', '_mode', 'SIGINT')
+    __slots__ = ('files_obj', '_is_locked', '_lock', '_cond', '_idents', '_mode', 'SIGINT')
 
     def __init__(self, files_obj:JFilesBase):
         """Initialize lock control environments tying mechanisms straight onto chosen driver handles parameters rules.
@@ -212,8 +215,8 @@ class FileLock:
         """
         if not isinstance(files_obj, JFilesBase):
             raise TypeError
-
         self.files_obj = files_obj
+        self._is_locked = Event()
         self._lock = Lock()
         self._cond = Condition(self._lock)
         self._idents = defaultdict(int)
@@ -243,27 +246,15 @@ class FileLock:
             return False
 
         try:
-            if self._idents:
-                try:
-                    self.files_obj.LCK_wlock(block=True)
-                except (BlockingIOError, FileLockException, OSError):
-                    pass
+            while self._is_locked.is_set():
+                self._cond.wait(DELAY_S)
 
-                self._mode = 'x'
-                try:
-                    self.files_obj.LCK_unlock()
-                except OSError as e: # pragma: no cover
-                    print(e)
+            if self._mode == 'w':
+                self.SIGINT.enable()
 
-            else:
-                self._mode = 'x'
-                try:
-                    self.files_obj.LCK_close()
-                except Exception as e: # pragma: no cover
-                    print(e)
-
-            self.SIGINT.reset()
+            self._mode = 'x'
             self._idents.clear()
+            self._is_locked.clear()
             self._cond.notify_all()
 
         finally:
@@ -285,7 +276,7 @@ class FileLock:
         Returns:
             bool: True if the internal active transaction indicator is set, False otherwise.
         """
-        return len(self._idents) > 0
+        return self._is_locked.is_set()
 
     @property
     def mode(self) -> str:
@@ -338,20 +329,22 @@ class FileLock:
             bool: True if system resources are ready for non-blocking lock setup, False otherwise.
         """
         try:
-            self.acquire(block=False, read_only=True)
-            self.release()
+            self.acquire(timeout=0, read_only=False)
             return True
 
         except FileLockException: # pragma: no cover
             return False
 
-    def acquire(self, block:bool=True, read_only:bool=False) -> int:
+        finally:
+            self.release()
+
+    def acquire(self, timeout:int=-1, read_only:bool=False) -> int:
         """Request and secure process isolation locks matching shared reading or exclusive writing transaction guidelines parameters.
 
         Handles complex scenario workflows like downgrading and upward re-escalation from read tokens straight to write tokens.
 
         Args:
-            block (bool, optional): Whether to wait the IO lock. Defaults to True.
+            timeout (int, optional): Sizing time-out boundary ceiling threshold constraint regulating maximum lookahead seconds. Defaults to -1.
             read_only (bool, optional): Choose shared multi-reader capabilities instead of unique execution write slots properties. Defaults to False.
 
         Returns:
@@ -366,108 +359,84 @@ class FileLock:
 
         try:
             ident = get_ident()
+            _mode = self._mode
             _idents = self._idents
-            while True:
-                _mode = self._mode
-                if _mode == 'x':
-                    raise FileLockException("FileLock is closed or being destroyed.") # pragma: no cover
-
-                # [1] thread level
-                if _mode == 'r' and read_only and _idents: # allow multiple reader
+            if _mode and self._is_locked.is_set():
+                if _mode == 'r' and read_only:
+                    # allow multiple reader
                     _idents[ident] += 1
                     return ident
 
-                if _mode == 'w' and ident in _idents: # only allow one writer (same thread)
-                    _idents[ident] += 1
-                    return ident
+                if _mode == 'w':
+                    if ident in _idents:
+                        # only one writer
+                        _idents[ident] += 1
+                        return ident
 
-                elif _mode == 'r' and not read_only and ident in _idents:
-                    # release 'r', then switch 'r' to 'w'
-                    _cnt = _idents.pop(ident)
-                    if not _idents:
-                        # this thread is the last lock owner
-                        try:
-                            self.files_obj.LCK_unlock()
-                        except OSError as e: # pragma: no cover
-                            print(e)
-
-                        _mode = self._mode = ''
-
-                    elif not block:
-                        _idents[ident] = _cnt
-
-                if _mode != '':
-                    if not block:
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") # pragma: no cover
-
-                    self._cond.wait()
-                    continue
-
-                # [2] process level
-                try:
-                    if read_only:
-                        self.files_obj.LCK_rlock(block=False)
-                        self._mode = 'r'
-                    else:
-                        self.files_obj.LCK_wlock(block=False)
-                        self._mode = 'w'
-                        self.SIGINT.disable()
-
-                    _idents[ident] += 1
-                    self._cond.notify_all()
-                    return ident
-
-                except BlockingIOError as e:
-                    if not block: # pragma: no cover
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from e
-
-                    self._mode = 'p'
-                    self._lock.release()
-                    os_lock_acquired = False
-                    os_err = None
-                    try:
-                        if read_only:
-                            self.files_obj.LCK_rlock(block=True)
-                        else:
-                            self.files_obj.LCK_wlock(block=True)
-                        os_lock_acquired = True
-
-                    except Exception as ex: # pragma: no cover
-                        os_err = ex
-
-                    finally:
-                        self._lock.acquire() # pylint: disable=consider-using-with
-                        if not os_lock_acquired and self._mode == 'p': # pragma: no cover
-                            self._mode = ''
-                            self._cond.notify_all()
-
-                    if self._mode == 'x': # pragma: no cover
-                        if os_lock_acquired:
+                else: # _mode == 'r' and read_only == False ('w' request)
+                    _cnt = _idents[ident] = _idents.get(ident, 0) - 1
+                    if _cnt <= 0:
+                        _idents.pop(ident, 0)
+                        if not _idents:
+                            # release 'r'
                             try:
                                 self.files_obj.LCK_unlock()
-                            except OSError as e1: # pragma: no cover
-                                print(e1)
+                            except OSError as e: # pragma: no cover
+                                print(e)
+                            self._mode = ''
+                            self._is_locked.clear()
+                            self._cond.notify_all()
 
-                        raise FileLockException("FileLock is closed or being destroyed.") from e
+                            # switch 'r' to 'w'
+                            try:
+                                self.files_obj.LCK_wlock()
+                                self._mode = 'w'
+                                self.SIGINT.disable()
+                                _idents[ident] += 1
+                                self._is_locked.set()
+                                return ident
 
-                    if os_err is not None: # pragma: no cover
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from os_err
+                            except BlockingIOError:
+                                pass
+
+            start_time = perf_counter() if timeout > 0 else 0
+            wait = False
+            while self._mode != 'x':
+                try:
+                    if wait:
+                        wait_s = (DELAY_S if read_only else DELAY_S / 2)
+                        self._cond.wait(wait_s)
 
                     if read_only:
+                        self.files_obj.LCK_rlock()
                         self._mode = 'r'
+
                     else:
+                        self.files_obj.LCK_wlock()
                         self._mode = 'w'
                         self.SIGINT.disable()
 
                     _idents[ident] += 1
-                    self._cond.notify_all() # wake up all thread due to 'p'
-                    return ident
+                    self._is_locked.set()
+                    break
+
+                except BlockingIOError as e:
+                    # if __debug__:
+                    #     print(f'\t\t\t[{self.files_obj.get_name()}] {hex(ident)[-8:]} mode:{self._mode} req:{"r" if read_only else "w"} lock:{self._is_locked.is_set()} {e}')
+
+                    if timeout == 0: # pragma: no cover
+                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from e
+
+                    if timeout > 0: # pragma: no cover
+                        if (perf_counter() - start_time) >= timeout:
+                            raise FileLockException("Timeout occured.") from e
+
+                wait = True
 
         finally:
-            try:
-                self._lock.release()
-            except RuntimeError as e: # pragma: no cover
-                print(e)
+            self._lock.release()
+
+        return ident
 
     def release(self) -> int:
         """Relinquish acquired concurrency control privileges yielding structural access metrics keys back onto common system execution pools.
@@ -484,31 +453,29 @@ class FileLock:
         try:
             _idents = self._idents
             ident = get_ident()
-
-            _cnt = _idents.get(ident, -1)
-            if _cnt >= 0:
-                if _cnt <= 1:
+            if self._is_locked.is_set():
+                if _idents.get(ident, 0) <= 1:
                     _idents.pop(ident, 0)
                 else:
-                    _idents[ident] = _cnt - 1
+                    _idents[ident] -= 1
 
                 if not _idents:
                     if self._mode == 'w':
                         self.SIGINT.enable()
-
                     try:
                         self.files_obj.LCK_unlock()
-                    except OSError as e: # pragma: no cover
-                        print(e)
-
+                    except OSError as e1: # pragma: no cover
+                        print(e1)
                     self._mode =  ''
-
-                self._cond.notify_all()
+                    self._is_locked.clear()
+                    self._cond.notify_all()
 
             return ident
 
         finally:
-            self._lock.release()
-
+            try:
+                self._lock.release()
+            except RuntimeError as e: # pragma: no cover
+                print(e)
 
 #
