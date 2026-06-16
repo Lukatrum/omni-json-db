@@ -1016,13 +1016,13 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                     elif cmd == 'rlock':
                         try:
-                            resp['ret'] = files_obj.LCK_rlock(*_args)
+                            resp['ret'] = files_obj.LCK_rlock()
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
 
                     elif cmd == 'wlock':
                         try:
-                            resp['ret'] = files_obj.LCK_wlock(*_args)
+                            resp['ret'] = files_obj.LCK_wlock()
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
 
