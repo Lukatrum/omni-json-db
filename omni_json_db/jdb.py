@@ -3040,6 +3040,25 @@ class JDb(JDbReader):
             elif key.__hash__:
                 keys.add(str(key))
             else:
+                if key is self:
+                    ret = {}
+                    with self.open(read_only=False) as fp:
+                        has_SIGINT = self.file_lock.has_SIGINT
+                        f_delete = self.f_delete
+                        files_obj = self.files_obj
+                        io, fp, key_fp = self.f_get_fp(fp)
+                        io_read_key = io.read_key
+                        for row_id in range(io.n_records-1, -1, -1):
+                            if has_SIGINT(): break
+                            key, _file_id, _offset, _row_size, _val_size, _ver, _days = io_read_key(key_fp, row_id)
+                            jdb = _val = f_delete(fp, key, row=row_id)
+                            if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
+                                with jdb.open(read_only=True) as jdb_fp:
+                                    for _row_id in range(jdb.io.n_records-1, -1, -1):
+                                        jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
+                            ret[key] = _val
+                    return ret
+
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
 
@@ -3105,6 +3124,25 @@ class JDb(JDbReader):
             elif key.__hash__:
                 keys.add(str(key))
             else:
+                if key is self:
+                    ret = set()
+                    with self.open(read_only=False) as fp:
+                        has_SIGINT = self.file_lock.has_SIGINT
+                        f_delete = self.f_delete
+                        files_obj = self.files_obj
+                        io, fp, key_fp = self.f_get_fp(fp)
+                        io_read_key = io.read_key
+                        for row_id in range(io.n_records-1, -1, -1):
+                            if has_SIGINT(): break
+                            key, _file_id, _offset, _row_size, _val_size, _ver, _days = io_read_key(key_fp, row_id)
+                            jdb = f_delete(fp, key, row=row_id, read_value=False)
+                            if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
+                                with jdb.open(read_only=True) as jdb_fp:
+                                    for _row_id in range(jdb.io.n_records-1, -1, -1):
+                                        jdb.f_delete(jdb_fp, key='', read_value=False, row=_row_id)
+                            ret.add(key)
+                    return ret
+
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
 

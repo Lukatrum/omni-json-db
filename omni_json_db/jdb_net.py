@@ -825,7 +825,9 @@ class JNetFiles(JFilesBase):
                 if resp.get('ok'):
                     return
 
-            raise BlockingIOError
+                raise BlockingIOError
+
+            raise RuntimeError
 
     def LCK_wlock(self, block:bool=False):
         """Acquire a distributed network-wide exclusive write barrier lock blocking parallel mutative calls.
@@ -841,7 +843,9 @@ class JNetFiles(JFilesBase):
                 if resp.get('ok'):
                     return
 
-            raise BlockingIOError
+                raise BlockingIOError
+
+            raise RuntimeError
 
     def LCK_unlock(self):
         """Relinquish acquired concurrency network lock indicators resetting multi-threading parameters indicators."""
@@ -853,7 +857,9 @@ class JNetFiles(JFilesBase):
                 if resp.get('ok'):
                     return
 
-            raise BlockingIOError
+                raise BlockingIOError
+
+            raise RuntimeError
 
     def LCK_close(self): # pragma: no cover
         """Gracefully release lock indicators channels context variables avoiding distributed resource starvation models."""
@@ -869,7 +875,6 @@ class JNetFiles(JFilesBase):
                 except OSError:
                     return
 
-            # raise BlockingIOError
 
     def LCK_remove(self): # pragma: no cover
         """Purge and wipe network synchronization lock tracking references elements from remote system pools.
@@ -885,7 +890,7 @@ class JNetFiles(JFilesBase):
                 if resp.get('ok'):
                     return
 
-            raise FileNotFoundError
+            raise RuntimeError
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -1011,32 +1016,40 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                     if cmd == 'remove':
                         try:
                             resp['ret'] = files_obj.LCK_remove()
-                        except FileNotFoundError:
+                        except (RuntimeError, IOError, FileNotFoundError):
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     elif cmd == 'rlock':
                         try:
-                            resp['ret'] = files_obj.LCK_rlock()
+                            resp['ret'] = files_obj.LCK_rlock(*_args, **_kwargs)
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
+                        except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
+                            resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     elif cmd == 'wlock':
                         try:
-                            resp['ret'] = files_obj.LCK_wlock()
+                            resp['ret'] = files_obj.LCK_wlock(*_args, **_kwargs)
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
+                        except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
+                            resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     elif cmd == 'unlock':
                         try:
                             resp['ret'] = files_obj.LCK_unlock()
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
+                        except (RuntimeError, IOError): # pragma: no cover
+                            resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     elif cmd == 'close':
                         try:
                             resp['ret'] = files_obj.LCK_close()
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
+                        except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
+                            resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     else:
                         if verbose >= 1:
@@ -1210,23 +1223,17 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
 
                 dump_and_send(sock, resp)
 
+            # if verbose >= 0:
+            #     print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)} [sock={sock}] files:{files_obj}', cyan=1, bright=1))
+
         finally:
             for _file_name,fp in fp_table.items():
                 if fp is None: continue
-                try:
-                    fp.close()
-                except Exception as e: # pragma: no cover
-                    print(e)
-
-            if verbose >= 0:
-                print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)}', cyan=1, bright=1))
+                fp.close()
 
             server.active_cnt = max(server.active_cnt-1, 0)
             fp_table.clear()
-            try:
-                del files_obj
-            except Exception as e: # pragma: no cover
-                print(e)
+            del files_obj
 
 #---------------------------------------------------------------------
 #
