@@ -217,10 +217,10 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x10lz.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<4'},
 
             {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_11lz.jdb',  'api_ver':1, 'data_type':'J+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'bt'},
+            {'KEY_file':'db/test_11lz.jdb',  'api_ver':1, 'data_type':'J+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'bt'},
 
             {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_12lz.jdb',  'api_ver':1, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'l4'},
+            {'KEY_file':'db/test_12lz.jdb',  'api_ver':1, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l4'},
         ]
 
         self.jdbs = {}
@@ -2971,7 +2971,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(sync_id, jdb.sync_id)
 
             jdb2 = JDb('db/tmp.jdb')
-            jdb2.remove(jdb2)
+            val = jdb2[:]
+            val2 = jdb2.remove(jdb2)
+            self.assertEqual(val, val2)
             jdb2.reinit(jdb, agree='yes', wait_sec=0)
             self.assertEqual(jdb2, expect)
 
@@ -2981,7 +2983,8 @@ class TestJDb(unittest.TestCase):
 
             jdb2.insert(jdb)
             self.assertEqual(jdb, jdb2)
-            jdb2.remove(jdb2)
+            val = jdb2.remove(jdb2)
+            self.assertEqual(val, jdb)
             self.assertEqual(len(jdb2), 0)
             self.assertNotEqual(jdb, jdb2)
             jdb2.update(jdb)
@@ -5188,13 +5191,13 @@ class TestJDb(unittest.TestCase):
             jdb2.sync()
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
             self.assertEqual(jdb.key_table, jdb2.key_table)
-            jdb.remove('zzz1')
-            jdb.remove('zzz3')
+            jdb.remove_fast('zzz1')
+            jdb.remove_fast('zzz3')
             self.assertNotEqual(jdb.sync_id, jdb2.sync_id)
 
             self.assertEqual(jdb, jdb2)
 
-            jdb.remove('zzz2')
+            jdb.remove_fast('zzz2')
             self.assertEqual(jdb, jdb2)
 
             jdb['zzz1'] = 34
@@ -5202,9 +5205,7 @@ class TestJDb(unittest.TestCase):
             jdb['zzz3'] = 56
             jdb2.sync()
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
-            jdb.remove('zzz1')
-            jdb.remove('zzz3')
-            jdb.remove('zzz2')
+            jdb.remove_fast('zzz1', 'zzz3', 'zzz3')
             self.assertNotEqual(jdb.sync_id, jdb2.sync_id)
             self.assertEqual(jdb, jdb2)
 
@@ -6790,7 +6791,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb.insert(expect)
             self.assertEqual(ret, expect)
             self.assertEqual(jdb, expect)
-            ret = jdb.remove_fast(jdb)
+            ret = jdb.remove_fast(expect)
             self.assertEqual(ret, set(expect))
             self.assertEqual(len(jdb), 0)
             ret = jdb.insert(expect)
@@ -6860,7 +6861,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem.keys[:], jmem1.keys[:])
                 self.assertEqual(jmem.sync_id, jmem1.sync_id)
 
-            ret = jdb.remove_fast(jdb)
+            ret = jdb.remove_fast(set(jdb))
             self.assertEqual(len(jdb), 0)
 
             jdb1 = JDb(jdb)
@@ -6895,9 +6896,10 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(jdb.keys.items()), set(jdb1.keys.items()))
             self.assertEqual(set(jdb.keys.values()), set(jdb1.keys.values()))
 
-            ret = jdb.remove_fast(jdb)
+            ret = jdb.remove_fast(expect)
             self.assertEqual(ret, set(expect))
             self.assertEqual(len(jdb), 0)
+
             self.assertEqual(jdb1, jdb)
             self.assertEqual(set(jdb.keys), set(jdb1.keys))
             self.assertEqual(set(jdb.keys.items()), set(jdb1.keys.items()))
@@ -6932,6 +6934,7 @@ class TestJDb(unittest.TestCase):
             # write error data to KEY header
             header = b''
             with jdb.files_obj.KEY_open('rb+') as fp:
+                print(jdb.files_obj.get_folder())
                 header = fp.read(512)
                 self.assertGreaterEqual(len(header), 128)
                 fp.seek(0)

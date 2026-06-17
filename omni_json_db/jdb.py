@@ -3034,10 +3034,10 @@ class JDb(JDbReader):
             Dict[str, Any]: Dictionary mapping successfully deleted record elements strings identifiers back onto their contents maps arrays blocks.
         """
         keys = set()
-        for key in records: # pragma: no cover
+        for key in records:
             if isinstance(key, str):
                 keys.add(key)
-            elif key.__hash__:
+            elif key.__hash__: # pragma: no cover
                 keys.add(str(key))
             else:
                 if key is self:
@@ -3118,10 +3118,10 @@ class JDb(JDbReader):
             Set[str]: Registry containing successfully discarded items keys list mappings logs.
         """
         keys = set()
-        for key in records: # pragma: no cover
+        for key in records:
             if isinstance(key, str):
                 keys.add(key)
-            elif key.__hash__:
+            elif key.__hash__: # pragma: no cover
                 keys.add(str(key))
             else:
                 if key is self:

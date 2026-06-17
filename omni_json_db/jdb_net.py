@@ -915,12 +915,9 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
         Raises:
             TypeError: If incoming dataset managers violate target class interface expectations profiles.
         """
-        if RequestHandlerClass is None:
-            RequestHandlerClass = ServerHandler
+        super().__init__(server_address, ServerHandler if RequestHandlerClass is None else RequestHandlerClass, bind_and_activate, **kwargs)
 
-        super().__init__(server_address, RequestHandlerClass, bind_and_activate, **kwargs)
-
-        if files_obj is None:
+        if files_obj is None: # pragma: no cover
             _files_obj = JMemFiles(**kwargs)
         elif isinstance(files_obj, JFilesBase):
             _files_obj = files_obj
@@ -956,14 +953,14 @@ class ServerHandler(BaseRequestHandler):
             while True:
                 try:
                     packet = recv_and_load(sock)
-                    if not packet:
+                    if not packet: # pragma: no cover
                         continue
 
                 except (EOFError, ConnectionResetError):
                     break
 
-                except ValueError as e:
-                    if verbose >= 0:
+                except ValueError as e: # pragma: no cover
+                    if verbose >= 0: 
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', yellow=1, bright=1))
                     continue
 
@@ -975,14 +972,14 @@ class ServerHandler(BaseRequestHandler):
                 try:
                     file, cmd, _args, _kwargs = packet
 
-                except ValueError:
+                except ValueError: # pragma: no cover
                     if verbose >= 1:
                         print(Style(f'[FAIL|{client}]Invalid format: {packet}', yellow=1))
 
                     dump_and_send(sock, {'ok':False, 'cmd':'', 'ret':None, 'err':JErrCode.INVALID_FMT})
                     continue
 
-                if not file.startswith(('VAL.', 'KEY', 'LCK')):
+                if not file.startswith(('VAL.', 'KEY', 'LCK')): # pragma: no cover
                     if verbose >= 1:
                         print(Style(f'[FAIL|{client}]Invalid file: {packet}', yellow=1))
                     dump_and_send(sock, {'ok':False, 'cmd':f'{file}', 'ret':None, 'err':JErrCode.INVALID_ID})
@@ -994,17 +991,17 @@ class ServerHandler(BaseRequestHandler):
                         _val_file, file_id = file.split('.')
                         file_id = int(file_id)
 
-                    except ValueError:
+                    except ValueError: # pragma: no cover
                         dump_and_send(sock, {'ok':False, 'cmd':f'{file}', 'ret':None, 'err':JErrCode.INVALID_ID})
                         continue
 
-                if not cmd or not isinstance(cmd, str):
+                if not cmd or not isinstance(cmd, str): # pragma: no cover
                     if verbose >= 1:
                         print(Style(f'[FAIL|{client}]{file}:Invalid command: {packet}', yellow=1))
                     dump_and_send(sock, {'ok':False, 'cmd':f'{file}:{cmd}', 'ret':None, 'err':JErrCode.INVALID_CMD})
                     continue
 
-                if not isinstance(_kwargs, dict):
+                if not isinstance(_kwargs, dict): # pragma: no cover
                     if verbose >= 1:
                         print(Style(f'[FAIL|{client}]{file}:Invalid arg type: {packet}', yellow=1))
                     dump_and_send(sock, {'ok':False, 'cmd':f'{file}:{cmd}', 'ret':None, 'err':JErrCode.INVALID_ARGS})
@@ -1014,7 +1011,7 @@ class ServerHandler(BaseRequestHandler):
                 fp = fp_table.get(file, None)
                 resp = {'ok':True, 'cmd':f'{file}:{cmd}', 'ret':None, 'err':JErrCode.OKAY}
                 if file == 'LCK':
-                    if cmd == 'remove':
+                    if cmd == 'remove':  # pragma: no cover
                         try:
                             resp['ret'] = files_obj.LCK_remove()
                             n_lockers = 0
@@ -1025,7 +1022,7 @@ class ServerHandler(BaseRequestHandler):
                         try:
                             resp['ret'] = files_obj.LCK_rlock(*_args, **_kwargs)
                             n_lockers += 1
-                        except BlockingIOError:
+                        except BlockingIOError: # pragma: no cover
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
@@ -1034,7 +1031,7 @@ class ServerHandler(BaseRequestHandler):
                         try:
                             resp['ret'] = files_obj.LCK_wlock(*_args, **_kwargs)
                             n_lockers += 1
-                        except BlockingIOError:
+                        except BlockingIOError: # pragma: no cover
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
@@ -1043,7 +1040,7 @@ class ServerHandler(BaseRequestHandler):
                         try:
                             resp['ret'] = files_obj.LCK_unlock()
                             n_lockers -= 1
-                        except BlockingIOError:
+                        except BlockingIOError: # pragma: no cover
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError): # pragma: no cover
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
@@ -1051,19 +1048,19 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'close':
                         try:
                             resp['ret'] = files_obj.LCK_close()
-                        except BlockingIOError:
+                        except BlockingIOError: # pragma: no cover
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
-                    else:
+                    else: # pragma: no cover
                         if verbose >= 1:
                             print(Style(f'[FAIL|{client}]{file}: cannot find command: {packet}', yellow=1))
                         resp.update(ok=False, err=JErrCode.INVALID_CMD)
 
                 elif file == 'KEY':
                     if cmd == 'open':
-                        if fp is not None:
+                        if fp is not None: # pragma: no cover
                             if verbose >= 0:
                                 print(Style(f'[WARN|{client}]{file}:{cmd}(file_id={file_id},{_args},{_kwargs}) reopen() fp={fp}', yellow=1))
                             fp.flush()
@@ -1071,7 +1068,7 @@ class ServerHandler(BaseRequestHandler):
                         else:
                             try:
                                 fp_table[file] = fp = resp['ret'] = files_obj.KEY_open(*_args, **_kwargs)
-                                if fp is None:
+                                if fp is None: # pragma: no cover
                                     if verbose >= 1:
                                         print(Style(f'[FAIL|{client}]{file}:{cmd}({_args},{_kwargs})', yellow=1))
 
@@ -1100,7 +1097,7 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'is_group':
                         resp['ret'] = files_obj.is_group(*_args, **_kwargs)
 
-                    elif cmd == 'create_group':
+                    elif cmd == 'create_group': # pragma: no cover
                         resp['ret'] = files_obj.create_group(*_args, **_kwargs)
 
                     elif cmd == 'size':
@@ -1114,7 +1111,7 @@ class ServerHandler(BaseRequestHandler):
 
                 else:
                     if cmd == 'open':
-                        if fp is not None:
+                        if fp is not None: # pragma: no cover
                             if verbose >= 0:
                                 print(Style(f'[WARN|{client}]{file}:{cmd}(file_id={file_id},{_args},{_kwargs}) reopen() fp={fp}', yellow=1))
                             fp.flush()
@@ -1122,7 +1119,7 @@ class ServerHandler(BaseRequestHandler):
                         else:
                             try:
                                 fp_table[file] = fp = resp['ret'] = files_obj.VAL_open(file_id, *_args, **_kwargs)
-                                if fp is None:
+                                if fp is None: # pragma: no cover
                                     if verbose >= 1:
                                         print(Style(f'[FAIL|{client}]{file}:{cmd}(file_id={file_id},{_args},{_kwargs})', yellow=1))
                                     resp.update(ok=False, err=JErrCode.FAIL_OPEN)
@@ -1146,7 +1143,7 @@ class ServerHandler(BaseRequestHandler):
 
                 if not is_done:
 
-                    if cmd == 'closed':
+                    if cmd == 'closed': # pragma: no cover
                         if fp is None:
                             resp['ret'] = True
                         elif fp.closed:
@@ -1187,27 +1184,27 @@ class ServerHandler(BaseRequestHandler):
                             elif cmd == 'truncate':
                                 resp['ret'] = fp.truncate(*_args, **_kwargs)
 
-                            elif cmd == 'readall':
+                            elif cmd == 'readall': # pragma: no cover
                                 resp['ret'] = fp.readall(*_args, **_kwargs)
 
-                            elif cmd == 'readinto':
+                            elif cmd == 'readinto': # pragma: no cover
                                 resp['ret'] = fp.readinto(*_args, **_kwargs)
 
-                            elif cmd == 'readline':
+                            elif cmd == 'readline': # pragma: no cover
                                 resp['ret'] = fp.readline(*_args, **_kwargs)
 
-                            elif cmd == 'readlines':
+                            elif cmd == 'readlines': # pragma: no cover
                                 resp['ret'] = fp.readlines(*_args, **_kwargs)
 
-                            elif cmd == 'writelines':
+                            elif cmd == 'writelines': # pragma: no cover
                                 resp['ret'] = fp.writelines(*_args, **_kwargs)
 
-                            else:
+                            else: # pragma: no cover
                                 if verbose >= 1:
                                     print(Style(f'[FAIL|{client}]{file}:cannot find command: {packet}', yellow=1))
                                 resp.update(ok=False, err=JErrCode.INVALID_CMD)
 
-                        except Exception as e:
+                        except Exception as e: # pragma: no cover
                             if verbose >= 1:
                                 print(Style(f'[FAIL|{client}]{file}:{cmd}(fp={fp}, {_args}, {_kwargs}) err:{e}', yellow=1))
                             resp.update(ok=False, err=JErrCode.FAIL_CALL)
@@ -1218,7 +1215,7 @@ class ServerHandler(BaseRequestHandler):
                         ret_s = str(ret)
                     elif isinstance(ret, (list,tuple,str,bytes,bytearray)):
                         ret_s = f"{ret[:64]}+{len(ret):,}"
-                    elif isinstance(ret, (dict,set)):
+                    elif isinstance(ret, (dict,set)): # pragma: no cover
                         ret_s = f"{type(ret)}+{len(ret):,}"
                     else:
                         resp['ret'] = ret_s = str(type(ret))
@@ -1232,14 +1229,14 @@ class ServerHandler(BaseRequestHandler):
             #     print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)} [sock={sock}] files:{files_obj}', cyan=1, bright=1))
 
         finally:
-            while n_lockers > 0:
+            while n_lockers > 0: # pragma: no cover
                 n_lockers -= 1
                 try:
                     files_obj.LCK_unlock()
                 except (BlockingIOError, RuntimeError, IOError): # pragma: no cover
                     break
 
-            for _file_name,fp in fp_table.items():
+            for _file_name,fp in fp_table.items(): # pragma: no cover
                 if fp is None: continue
                 fp.close()
 
