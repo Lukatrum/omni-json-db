@@ -7,7 +7,7 @@ from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
 from os import remove as os_remove, stat as os_stat
 from os.path import basename, dirname, join as path_join, exists as path_exists
 from datetime import datetime
-from threading import RLock, Condition
+from threading import Lock, Condition
 #-----------------------------------------------------------------------------
 
 try:
@@ -37,10 +37,11 @@ try:
             return fd
 
         except (IOError, OSError) as e:
-            try:
-                os_close(fd)
-            except OSError as e1: # pragma: no cover
-                print(e1)
+            if fd is not None:
+                try:
+                    os_close(fd)
+                except OSError as e1: # pragma: no cover
+                    print(e1)
             raise BlockingIOError from e
 
     def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
@@ -65,10 +66,11 @@ try:
             return fd
 
         except (IOError, OSError) as e:
-            try:
-                os_close(fd)
-            except OSError as e1: # pragma: no cover
-                print(e1)
+            if fd is not None:
+                try:
+                    os_close(fd)
+                except OSError as e1: # pragma: no cover
+                    print(e1)
             raise BlockingIOError from e
 
     def file_unlock(fd:int):  # pragma: no cover
@@ -109,10 +111,11 @@ except ImportError:
             return fd
 
         except (IOError, OSError, LockException) as e:
-            try:
-                os_close(fd)
-            except OSError as e1: # pragma: no cover
-                print(e1)
+            if fd is not None:
+                try:
+                    fd.close()
+                except OSError as e1: # pragma: no cover
+                    print(e1)
             raise BlockingIOError from e
 
     def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
@@ -137,10 +140,11 @@ except ImportError:
             return fd
 
         except (IOError, OSError, LockException) as e:
-            try:
-                os_close(fd)
-            except OSError as e1: # pragma: no cover
-                print(e1)
+            if fd is not None:
+                try:
+                    fd.close()
+                except OSError as e1: # pragma: no cover
+                    print(e1)
             raise BlockingIOError from e
 
     def file_unlock(fd:IO):  # pragma: no cover
@@ -571,14 +575,14 @@ class JMemFiles(JFilesBase):
     """
     __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond')
 
-    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[RLock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
+    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
         """Initialize volatile in-memory transient array datasets mapping virtual backend tables.
 
         Args:
             KEY_file (Optional[bytearray], optional): In-memory buffer tracking key index structure lines maps. Defaults to None.
             VAL_table (Optional[dict], optional): Repository tracking mapped file_ids onto internal rows bytearrays blocks contents. Defaults to None.
             LCK_file (Optional[bytearray], optional): Mutex tracker array mapping shared concurrent access status bits. Defaults to None.
-            lock (Optional[RLock], optional): Primitive synchronization engine tracking multi-threaded operations flows boundaries. Defaults to None.
+            lock (Optional[Lock], optional): Primitive synchronization engine tracking multi-threaded operations flows boundaries. Defaults to None.
             cond (Optional[Condition], optional): condition variable object for blocking mode
             timestamp (Optional[float], optional): Baseline initialization timestamp mapping creation timeline markers records. Defaults to None.
             name (Optional[str], optional): File object name
@@ -596,7 +600,7 @@ class JMemFiles(JFilesBase):
             LCK_file = bytearray()
 
         if lock is None:
-            lock = RLock()
+            lock = Lock()
 
         if cond is None:
             cond = Condition(lock)
@@ -830,7 +834,7 @@ class JMemFiles(JFilesBase):
                 if not block:
                     raise BlockingIOError('cannot acquire the lock')
 
-                self.cond.wait()
+                self.cond.wait() # pragma: no cover
 
             raise RuntimeError(f'closed {LCK_file}')
 
@@ -864,7 +868,7 @@ class JMemFiles(JFilesBase):
                 if not block:
                     raise BlockingIOError('cannot acquire the lock')
 
-                self.cond.wait()
+                self.cond.wait() # pragma: no cover
 
             raise RuntimeError(f'closed {LCK_file}')
 
@@ -880,10 +884,8 @@ class JMemFiles(JFilesBase):
                 if write_cnt == 0:
                     LCK_file[4:12] = int(0).to_bytes(8, 'big') # set write_id = 0
             else:
-                read_cnt = int.from_bytes(LCK_file[0:4], 'big')
-                if read_cnt > 0:
-                    read_cnt -= 1
-                    LCK_file[0:4] = read_cnt.to_bytes(4, 'big') # set read_id - 1
+                read_cnt = max(0, int.from_bytes(LCK_file[0:4], 'big') - 1)
+                LCK_file[0:4] = read_cnt.to_bytes(4, 'big') # set read_id - 1
 
             self.cond.notify_all()
 

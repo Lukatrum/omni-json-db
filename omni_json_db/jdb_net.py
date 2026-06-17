@@ -896,7 +896,7 @@ class JNetFiles(JFilesBase):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-class ThreadedTCPServer(ThreadingMixIn, TCPServer): # pragma: no cover
+class ThreadedTCPServer(ThreadingMixIn, TCPServer):
     """Multi-threaded high-performance TCP server architecture acting as distributed backend engine for JFiles."""
     daemon_threads = True
     allow_reuse_address = True
@@ -935,7 +935,7 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer): # pragma: no cover
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-class ServerHandler(BaseRequestHandler): # pragma: no cover
+class ServerHandler(BaseRequestHandler):
     """Asynchronous transaction stream interpreter routing incoming socket instructions into structural operations."""
 
     def handle(self):
@@ -951,6 +951,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
             print(Style(f'[IN|#{server.active_cnt}] client:{client} on {hex(thread_id)} [sock={sock}] files:{files_obj}', green=1, bright=1))
 
         fp_table = {}
+        n_lockers = 0
         try:
             while True:
                 try:
@@ -1016,12 +1017,14 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                     if cmd == 'remove':
                         try:
                             resp['ret'] = files_obj.LCK_remove()
+                            n_lockers = 0
                         except (RuntimeError, IOError, FileNotFoundError):
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
                     elif cmd == 'rlock':
                         try:
                             resp['ret'] = files_obj.LCK_rlock(*_args, **_kwargs)
+                            n_lockers += 1
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
@@ -1030,6 +1033,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                     elif cmd == 'wlock':
                         try:
                             resp['ret'] = files_obj.LCK_wlock(*_args, **_kwargs)
+                            n_lockers += 1
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError, FileNotFoundError): # pragma: no cover
@@ -1038,6 +1042,7 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
                     elif cmd == 'unlock':
                         try:
                             resp['ret'] = files_obj.LCK_unlock()
+                            n_lockers -= 1
                         except BlockingIOError:
                             resp.update(ok=False, err=JErrCode.BLOCK_IO)
                         except (RuntimeError, IOError): # pragma: no cover
@@ -1227,6 +1232,13 @@ class ServerHandler(BaseRequestHandler): # pragma: no cover
             #     print(Style(f'[OUT|#{server.active_cnt}] client:{client} on {hex(thread_id)} [sock={sock}] files:{files_obj}', cyan=1, bright=1))
 
         finally:
+            while n_lockers > 0:
+                n_lockers -= 1
+                try:
+                    files_obj.LCK_unlock()
+                except (BlockingIOError, RuntimeError, IOError): # pragma: no cover
+                    break
+
             for _file_name,fp in fp_table.items():
                 if fp is None: continue
                 fp.close()

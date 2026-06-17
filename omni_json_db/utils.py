@@ -393,13 +393,13 @@ class FileLock:
 
                             except BlockingIOError: # pragma: no cover
                                 self._cond.notify_all()
-                    else:
+                    else: # pragma: no cover
                         _idents[ident] = _cnt - 1
 
             start_time = perf_counter() if timeout > 0 else 0
             wait = False
             while True:
-                if self._mode == 'x':
+                if self._mode == 'x': # pragma: no cover
                     raise FileLockException("FileLock is closed or being destroyed.")
 
                 try:
@@ -466,7 +466,8 @@ class FileLock:
                     except OSError as e1: # pragma: no cover
                         print(e1)
                     self._mode =  ''
-                    self._cond.notify_all()
+
+                self._cond.notify_all()
 
             return ident
 
