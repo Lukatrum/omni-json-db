@@ -1,6 +1,5 @@
 from collections import defaultdict
 from contextlib import contextmanager
-from time import perf_counter
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
 # from typing import Union, Optional
@@ -195,8 +194,6 @@ class FileLockException(Exception):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-DELAY_S = 0.05
-
 class FileLock:
     """High-performance thread-safe and process-safe synchronization locking mechanism manager proxy.
 
@@ -437,8 +434,8 @@ class FileLock:
                         os_err = ex
 
                     finally:
-                        self._lock.acquire()
-                        if self._mode == 'p':
+                        self._lock.acquire() # pylint: disable=consider-using-with
+                        if self._mode == 'p': # pragma: no cover
                             self._mode = ''
 
                         self._cond.notify_all()
@@ -447,7 +444,7 @@ class FileLock:
                         if os_lock_acquired:
                             try:
                                 self.files_obj.LCK_unlock()
-                            except OSError as e1: # pragma: no cover
+                            except OSError as e1:
                                 print(e1)
 
                         raise FileLockException("FileLock is closed or being destroyed.") from e
