@@ -1,10 +1,9 @@
+from __future__ import annotations # pylint: disable=too-many-lines
 from collections import defaultdict
 from contextlib import contextmanager
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
-# from typing import Union, Optional
-#-----------------------------------------------------------------------------
-from .jdb_file import JFilesBase
+from typing import Callable
 #-----------------------------------------------------------------------------
 try:
     import ipdb
@@ -199,20 +198,36 @@ class FileLock:
 
     Coordinates multi-threaded read/write exclusion barriers around structural database assets files pools.
     """
-    __slots__ = ('files_obj', '_lock', '_cond', '_idents', '_mode', 'SIGINT')
+    __slots__ = ('_rlock', '_wlock', '_unlock', '_close', '_remove', \
+                '_lock', '_cond', '_idents', '_mode', 'SIGINT')
 
-    def __init__(self, files_obj:JFilesBase):
+    def __init__(self, \
+            rlock:Callable[[bool], None],
+            wlock:Callable[[bool], None],
+            unlock:Callable[[], None],
+            close:Callable[[], None],
+            remove:Callable[[], None]):
+
         """Initialize lock control environments tying mechanisms straight onto chosen driver handles parameters rules.
 
         Args:
-            files_obj (JFilesBase): Persistent abstract dataset filesystem connection controller interface object instance.
+            rlock (Callable[[bool], None]): read LCK lock function
+            wlock (Callable[[bool], None]): write LCK lock function
+            unlock (Callable[[], None]): LCK unlock function
+            close (Callable[[], None]): close LCK function
+            remove (Callable[[], None]): remove LCK function
 
         Raises:
             TypeError: If the incoming asset driver fails core framework datatype matching rules verification checkpoints.
         """
-        if not isinstance(files_obj, JFilesBase):
+        if not callable(rlock) or not callable(wlock) or not callable(unlock) or not callable(close) or not callable(remove):
             raise TypeError
-        self.files_obj = files_obj
+
+        self._rlock = rlock
+        self._wlock = wlock
+        self._unlock = unlock
+        self._close = close
+        self._remove = remove
         self._lock = Lock()
         self._cond = Condition(self._lock)
         self._idents = defaultdict(int)
@@ -230,7 +245,7 @@ class FileLock:
     def __del__(self):
         """Systematically release outstanding acquired lock layers ensuring clear background thread disconnection cleanups loops."""
         self.release_all()
-        self.files_obj.LCK_close()
+        self._close()
 
     def release_all(self) -> bool: # pragma: no cover
         """Forcibly clear outstanding threads registries resetting allocation states metrics fields.
@@ -260,7 +275,7 @@ class FileLock:
     def reset_lock(self) -> None: # pragma: no cover
         """systematically purge and delete physical transaction lock tracker files nodes anchors from disk storage devices pools."""
         try:
-            self.files_obj.LCK_remove()
+            self._remove()
         except FileNotFoundError:
             pass
 
@@ -333,7 +348,15 @@ class FileLock:
         finally:
             self.release()
 
-    def acquire(self, block:bool=True, read_only:bool=False) -> int:
+    def get_count(self, thread_id:int) -> int:
+        """Get number of this thread acquired count
+
+        Returns:
+            int: number of acquired count for this thread
+        """
+        return self._idents.get(thread_id, 0)
+
+    def acquire(self, block:bool=True, read_only:bool=False, switch:bool=False) -> int:
         """Request and secure process isolation locks matching shared reading or exclusive writing transaction guidelines parameters.
 
         Handles complex scenario workflows like downgrading and upward re-escalation from read tokens straight to write tokens.
@@ -341,6 +364,7 @@ class FileLock:
         Args:
             block (bool, optional): True = block mode, False = non-block mode
             read_only (bool, optional): Choose shared multi-reader capabilities instead of unique execution write slots properties. Defaults to False.
+            switch (bool, optional): switch to read/write mode without release
 
         Returns:
             int: The active unique execution thread identifier key integer address logging resource allocation controls.
@@ -377,7 +401,7 @@ class FileLock:
                         if not _idents:
                             # this thread is the last lock owner
                             try:
-                                self.files_obj.LCK_unlock()
+                                self._unlock()
 
                             except OSError as e: # pragma: no cover
                                 print(e)
@@ -386,14 +410,21 @@ class FileLock:
 
                             _mode = self._mode = ''
                             self._cond.notify_all()
+
+                            if not switch:
+                                _idents[ident] = _cnt
+
                             continue
 
-                    else: # pragma: no cover
+                        if not switch and _cnt > 0:
+                            _idents[ident] = _cnt
+
+                    elif switch: # pragma: no cover
                         _idents[ident] = _cnt - 1
 
                 if _mode != '':
                     if not block:
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") # pragma: no cover
+                        raise FileLockException("Could not acquire lock") # pragma: no cover
 
                     self._cond.wait()
                     continue
@@ -401,10 +432,10 @@ class FileLock:
                 # [2] process level
                 try:
                     if read_only:
-                        self.files_obj.LCK_rlock(block=False)
+                        self._rlock(block=False)
                         self._mode = 'r'
                     else:
-                        self.files_obj.LCK_wlock(block=False)
+                        self._wlock(block=False)
                         self._mode = 'w'
                         self.SIGINT.disable()
 
@@ -414,7 +445,7 @@ class FileLock:
 
                 except BlockingIOError as e:
                     if not block: # pragma: no cover
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from e
+                        raise FileLockException("Could not acquire lock") from e
 
                     self._mode = 'p'
                     self._lock.release()
@@ -425,9 +456,9 @@ class FileLock:
 
                     try:
                         if read_only:
-                            self.files_obj.LCK_rlock(block=True)
+                            self._rlock(block=True)
                         else:
-                            self.files_obj.LCK_wlock(block=True)
+                            self._wlock(block=True)
                         os_lock_acquired = True
 
                     except Exception as ex: # pragma: no cover
@@ -443,14 +474,14 @@ class FileLock:
                     if self._mode == 'x': # pragma: no cover
                         if os_lock_acquired:
                             try:
-                                self.files_obj.LCK_unlock()
+                                self._unlock()
                             except OSError as e1:
                                 print(e1)
 
                         raise FileLockException("FileLock is closed or being destroyed.") from e
 
                     if os_err is not None: # pragma: no cover
-                        raise FileLockException(f"Could not acquire lock on {self.files_obj.get_name()}") from os_err
+                        raise FileLockException("Could not acquire lock") from os_err
 
                     if read_only:
                         self._mode = 'r'
@@ -492,7 +523,7 @@ class FileLock:
                     if self._mode == 'w':
                         self.SIGINT.enable()
                     try:
-                        self.files_obj.LCK_unlock()
+                        self._unlock()
                     except OSError as e1: # pragma: no cover
                         print(e1)
                     self._mode =  ''

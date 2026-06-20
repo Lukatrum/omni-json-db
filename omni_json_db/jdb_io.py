@@ -4,7 +4,7 @@ from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, D
 from io import DEFAULT_BUFFER_SIZE
 from time import time
 from functools import reduce
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from re import findall as re_findall
 from datetime import date as dt_date, datetime, timedelta
 from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError # nosec B403
@@ -184,7 +184,8 @@ MAX_FILE_SIZE   = (2**50) * 1  # 1024TB
 
 DEF_INDEX_SIZE  = 128
 MIN_INDEX_SIZE  = 16 + 8 * 6  # key(16), (file_id, offset, row_size, val_size, ver, date)
-MAX_INDEX_SIZE  = 2**15
+MAX_INDEX_SIZE  = 2**13       # 8192
+MAX_KEY_SIZE    = MAX_INDEX_SIZE - DEF_INDEX_SIZE
 
 DEF_VALUE_SIZE  = 16 # 1-15 bytes can store in KEY file
 MIN_VALUE_SIZE  = 1
@@ -196,7 +197,9 @@ DEF_RATIO       = 0.001
 MAX_RATIO       = 256.
 DEF_KEY_LIMIT   = 0 # 0=DictKeyTable(dict)
 HEADER_SIZE     = 128
+
 TOTAL_KEY_ROWS  = 8
+TOTAL_DEAD_ROWS = 16
 
 MIN_KEY_STRUCT_V0 = 8 + 8 * 5  # n_pad, (file_id, offset, size, ver, date)
 MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ver, date)
@@ -350,7 +353,7 @@ class KeyTable:
         self.size = -1
         self.found_flags = bitarray()
         self.with_cache = with_cache
-        self.cache:Dict[str,int] = {}
+        self.cache:Dict[str,int] = OrderedDict()
 
     def get_mode(self) -> int:
         """Get the classification mode configuration parameter code.
@@ -385,8 +388,7 @@ class KeyTable:
 
         cache = self.cache
         if self.with_cache and cache.get(key, None) == row_id: # pragma: no cover
-            cache.pop(key, None)
-            cache[key] = row_id
+            cache.move_to_end(key, last=True)
             return
 
         key_hash = xhash(key)
@@ -406,10 +408,10 @@ class KeyTable:
 
         if self.with_cache:
             while len(cache) >= self.io._key_limit:
-                old_key = next(iter(cache))
-                cache.pop(old_key, None)
+                cache.popitem(last=False)
 
             cache[key] = row_id
+            cache.move_to_end(key, last=True)
 
     def pop(self, key:str, default_row_id:int=-1) -> int:
         """Erase entry mappings tracking variables unlinking selected items across database layers maps tracks systems.
@@ -518,10 +520,11 @@ class KeyTable:
         if row_id >= 0:
             if self.with_cache:
                 while len(cache) >= jio._key_limit:
-                    old_key = next(iter(cache))
-                    cache.pop(old_key, None)
+                    cache.popitem(last=False)
 
                 cache[key] = row_id
+                cache.move_to_end(key, last=True)
+
             return row_id
 
         if not is_sync:
@@ -530,10 +533,11 @@ class KeyTable:
                     # clean up extra buffer
                     if self.with_cache:
                         while len(cache) >= jio._key_limit:
-                            old_key = next(iter(cache))
-                            cache.pop(old_key, None)
+                            cache.popitem(last=False)
 
                         cache[key] = row_id
+                        cache.move_to_end(key, last=True)
+
                     return row_id
 
         return default_row_id
@@ -1441,7 +1445,7 @@ class JIo:
             '_data_type', '_zip_type', '_key_limit', 'index_size',\
             'max_file_size', 'reserved_rate', 'api_ver', 'file_table',\
             'files_obj', 'key_table', 'window_size', 'min_value_size',\
-            '_KEY_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
+            '_KEY_rows', '_DEAD_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0')
 
@@ -1618,7 +1622,7 @@ class JIo:
                 - 'S+M' | 8  = KEY=msgpack  | VAL=Marshal
                 - 'S+J' | 9  = KEY=msgpack  | VAL=Json
                 - 'S+P' | 10 = KEY=msgpack  | VAL=Pickle
-                - 'J+Y' | 11 =  KEY=msgpack | VAL=YAML
+                - 'J+Y' | 11 = KEY=msgpack  | VAL=YAML
                 - 'S+Y' | 12 = KEY=msgpack  | VAL=YAML
 
             zip_type (Union[str, int, None], optional): Target row data level compression profile rules configuration.
@@ -1635,10 +1639,10 @@ class JIo:
 
             key_limit (Union[str, int, None], optional): Sizing operational constraint boundary parameters regulating index memory.
                 
-                - "no" | 0 = use DictKeyTable. (default). 
+                - "no" | 0 = use DictKeyTable (dict). (default). 
                 - "bt" | 0x100 = use BTreeKeyTable.
-                - "l0"-"l5" | -ve = use LiteKeyTable.
-                - "<{n}" | +ve = use PartialKeyTable.
+                - "l0"-"l5" | -ve = use LiteKeyTable (fast load_keys()). 
+                - "<{n}" | +ve = use PartialKeyTable (fast load_keys()).
 
             api_ver (Optional[int], optional): Logical physical structural schema edition categorization sequence index token.
 
@@ -1684,8 +1688,9 @@ class JIo:
         if api_ver is None:
             api_ver = API_LATEST
 
-        self._KEY_rows = {}
-        self._data_type = self._zip_type = self._key_limit = -1
+        self._KEY_rows      = OrderedDict()
+        self._DEAD_rows     = {}
+        self._data_type     = self._zip_type = self._key_limit = -1
         self.key_table      = DictKeyTable() # must before self.key_limit = key_limit
         self.sync_id        = sync_id
         self.swap_id        = swap_id
@@ -2043,6 +2048,7 @@ class JIo:
             self.key_table.clear()
             self.groups.clear()
             self._KEY_rows.clear()
+            self._DEAD_rows.clear()
             self._swap_id = self._remv_id = -1
             self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
             self.update_days()
@@ -2365,6 +2371,41 @@ class JIo:
         row_id = (self.n_lines + row_id) if row_id < 0 else row_id
         return fp.seek(HEADER_SIZE + row_id * self.index_size)
 
+    def get_dead_row(self, min_row_id:int, req_size:int) -> Tuple[int, int, int, int]:
+        """Get the matched dead row from DEAD_rows cache.
+
+        Args:
+            min_row_id (int): start row ID
+            req_size (int): requested row size
+
+        Returns:
+            Tuple[int, int, int, int]: row_id, file_id, offset, row_size
+        """
+        del_list = []
+        match_list = []
+        _DEAD_rows = self._DEAD_rows
+        n_records = self.n_records
+        for _row_id, (_file_id, _offset, _row_size) in _DEAD_rows.items():
+            if _row_id >= min_row_id:
+                if req_size == _row_size == 0 or _row_size >= req_size > 0:
+                    match_list.append((_row_size, _file_id, _offset, _row_id))
+                    if req_size == _row_size:
+                        break
+
+            elif _row_id < n_records:
+                del_list.append(_row_id)
+
+        for del_id in del_list:
+            _DEAD_rows.pop(del_id, None)
+
+        if match_list:
+            row_size, file_id, offset, row_id = sorted(match_list)[0] if len(match_list) > 1 else match_list[0]
+            _DEAD_rows.pop(row_id, None)
+        else:
+            row_id = file_id = offset = row_size = -1
+
+        return row_id, file_id, offset, row_size
+
     def write_key(self, fp:IO, row_id:int, key:str, file_id:int, offset:int, row_size:int, val_size:int=0, ver:Optional[int]=None, days:int=-1) -> int:
         """Commit structured individual key mapping elements definitions metadata straight into active tracking index slots.
 
@@ -2395,6 +2436,20 @@ class JIo:
         data_size = len(data)
         index_size = self.index_size
         pad_size = index_size - data_size - 1
+        if pad_size < 0:
+            if data_size+1 > MAX_INDEX_SIZE: # pragma: no cover
+                # strip the key length to match max index size
+                while True:
+                    key = key[:-pad_size]
+                    data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days)
+                    data_size = len(data)
+                    if data_size+1 <= MAX_INDEX_SIZE and key not in self.key_table:
+                        break
+
+                    pad_size = 1
+
+                pad_size = index_size - data_size - 1
+
         need_flush = False
         if pad_size < 0:
             need_flush = True
@@ -2411,13 +2466,18 @@ class JIo:
         if fp.tell() != pos:
             fp.seek(pos)
 
+        _DEAD_rows = self._DEAD_rows
+        _DEAD_rows.pop(row_id, None)
         _KEY_rows = self._KEY_rows
         _KEY_rows.pop(row_id, None)
         if row_id < self.n_records:
             _KEY_rows[row_id] = (key, file_id, offset, row_size, val_size, ver_i, days)
             while len(_KEY_rows) > TOTAL_KEY_ROWS:
-                _pop_id = next(iter(_KEY_rows))
-                _KEY_rows.pop(_pop_id, None)
+                _KEY_rows.popitem(last=False) # 1st item
+        else:
+            _DEAD_rows[row_id] = (file_id, offset, row_size)
+            while len(_DEAD_rows) > TOTAL_DEAD_ROWS:
+                _DEAD_rows.pop(next(iter(_DEAD_rows)), None)
 
         wr_size = fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
         if need_flush and wr_size > 0:
@@ -2435,6 +2495,8 @@ class JIo:
         Returns:
             Tuple[str,int,int,int,int,int,int]: Complete row structural metadata metrics (key, file_id, offset, row_size, val_size, ver, days).
         """
+        _DEAD_rows = self._DEAD_rows
+        _DEAD_rows.pop(row_id, None)
         _KEY_rows = self._KEY_rows
         _info = _KEY_rows.pop(row_id, None)
         if _info is not None:
@@ -2451,8 +2513,12 @@ class JIo:
         if row_id < self.n_records:
             _KEY_rows[row_id] = info
             while len(_KEY_rows) > TOTAL_KEY_ROWS:
-                _pop_id = next(iter(_KEY_rows))
-                _KEY_rows.pop(_pop_id, None)
+                _KEY_rows.popitem(last=False) # 1st item
+
+        else:
+            _DEAD_rows[row_id] = info[1:4]
+            while len(_DEAD_rows) > TOTAL_DEAD_ROWS:
+                _DEAD_rows.pop(next(iter(_DEAD_rows)))
 
         return info
 
@@ -2474,6 +2540,7 @@ class JIo:
         """
         if self.file_size <= 0 or self.sync_id != self._sync_id:
             self._KEY_rows.clear()
+            self._DEAD_rows.clear()
             return False
 
         return True
@@ -2495,6 +2562,7 @@ class JIo:
         self.key_table.clear()
         self.file_table.clear()
         self._KEY_rows.clear()
+        self._DEAD_rows.clear()
         self.update_days()
         self.row_bytes = self.index_size - self.min_value_size * (1 + self.reserved_rate)
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
@@ -2765,6 +2833,7 @@ class JIo:
             key_table.clear()
             file_table.clear()
             self._KEY_rows.clear()
+            self._DEAD_rows.clear()
         else:
             # swap+1 if swap record A and record B
             prev_swap_id = self._swap_id
@@ -2780,6 +2849,7 @@ class JIo:
 
             if sync_diff != 0:
                 self._KEY_rows.clear()
+                self._DEAD_rows.clear()
 
             # [A] no swapping
             if swap_diff == 0:
@@ -3018,8 +3088,8 @@ class JIo:
         Returns:
             Union[bytes, tuple, list]: Copied binary stream metadata chunk array, or unpacked items elements tuple.
         """
-        self._KEY_rows.pop(src_row, None)
         self._KEY_rows.pop(dst_row, None)
+        self._DEAD_rows.pop(dst_row, None)
 
         size = self.index_size
         src_pos = HEADER_SIZE + src_row * size
@@ -3055,9 +3125,11 @@ class JIo:
             n_blocks += 1
 
         _KEY_rows = self._KEY_rows
+        _DEAD_rows = self._DEAD_rows
         src_row = min(start+size, n_lines)
         for row_id in range(n_blocks):
             _KEY_rows.pop(row_id, None)
+            _DEAD_rows.pop(row_id, None)
 
             if src_row >= block_size:
                 rd_size = block_size * index_size

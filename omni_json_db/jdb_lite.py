@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines
 from __future__ import annotations
 from contextlib import contextmanager
+from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
 from re import compile as re_compile, search as re_search, findall as re_findall, match as re_match, Pattern, I as re_I, S as re_S
 from os.path import exists as path_exists # basename, dirname, join as path_join
@@ -37,8 +38,11 @@ def deepcopy(src):
     Returns:
         Any: A deeply copied instance of the source object.
     """
-    if src.__hash__:
+    if src is None or isinstance(src, (str, bytes, int, float, bool, JDbReader)):
         return src
+
+    if isinstance(src, tuple):
+        return tuple(deepcopy(v) for v in src)
 
     if isinstance(src, dict):
         return {key:deepcopy(val) for key, val in src.items()}
@@ -46,7 +50,7 @@ def deepcopy(src):
     if isinstance(src, set):
         return src.copy()
 
-    if isinstance(src, JDbReader):
+    if src.__hash__:
         return src
 
     return [deepcopy(val) for val in src]
@@ -1845,28 +1849,23 @@ class JDbReader:
             if not isinstance(max_wsize, int):
                 raise TypeError('max_wsize must be integer')
 
-        if flags is None:
-            flags = JFlag.REVERT
-        else:
-            flags = JFlag(flags)
-
         self.files_obj:JFilesBase = files_obj
-        self.file_lock:FileLock = FileLock(files_obj)
+        self.file_lock:FileLock = FileLock(rlock=files_obj.LCK_rlock, \
+                                        wlock=files_obj.LCK_wlock, \
+                                        unlock=files_obj.LCK_unlock, \
+                                        close=files_obj.LCK_close, \
+                                        remove=files_obj.LCK_remove)
         self.lock = RLock() # solve iter issue [cannot use Lock]
         self.fsize = self.safe_line = 0
         self.childs:Dict[str,JDbReader] = {}
         self.fp_table:Dict[int,dict] = {}
         self.th_table:Dict[int,int] = {}
         self.chg_keys:Set = set()
-        self._cache:Dict[str,Any] = {}
+        self._cache:Dict[str,Any] = OrderedDict()
         self._cache_limit = cache_limit
-        if JDbKey_obj is None:
-            self.keys:JDbKey = JDbKey(self)
-        else:
-            self.keys:JDbKey = JDbKey_obj
-
-        self.write_hook = write_hook
-        self.flags:JFlag = flags
+        self.keys:JDbKey = JDbKey(self) if JDbKey_obj is None else JDbKey_obj
+        self.write_hook:Callable[[str,Any],bool] = write_hook
+        self.flags:JFlag = JFlag.REVERT if flags is None else JFlag(flags)
         self.max_wsize:int = 4 if max_wsize is None else max_wsize
         self.io:JIo = JIo(
                 files_obj=files_obj,
@@ -2472,6 +2471,19 @@ class JDbReader:
             th_table[ident] = th_table.get(ident, 0) + 1
             try:
                 try:
+                    if file_lock.get_count(ident) > 1: # pragma: no cover
+                        if not read_only:
+                            for _id in list(fp_dict):
+                                fp = fp_dict[_id]
+                                if fp is None:
+                                    fp_dict.pop(_id, None)
+                                elif not fp.writable():
+                                    fp.close()
+                                    fp_dict.pop(_id, None)
+
+                        key_fp = fp_dict.get(-1, None)
+                        return fp_dict
+
                     if read_only:
                         if io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
@@ -2621,6 +2633,22 @@ class JDbReader:
             io = self.io
             try:
                 try:
+                    if file_lock.get_count(ident) > 1:
+                        if not read_only:
+                            for _id in list(fp_dict):
+                                fp = fp_dict[_id]
+                                if fp is None:
+                                    fp_dict.pop(_id, None)
+                                elif not fp.writable():
+                                    fp.close()
+                                    fp_dict.pop(_id, None)
+
+                        key_fp = fp_dict.get(-1, None)
+                        sync_id = io.sync_id
+                        fsize = io.file_size
+                        yield fp_dict
+                        return
+
                     if read_only:
                         if io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
@@ -4699,15 +4727,11 @@ class JDbReader:
                 pass
             else:
                 _size = len(_cache)
-                if cache_limit > _size:
-                    # cache capacity < upper limit
-                    pass
-
-                elif _size > 0:
-                    _key = next(iter(_cache))
-                    _cache.pop(_key, None)
+                if _size > 0 and cache_limit <= _size and key not in _cache:
+                    _cache.popitem(last=False)
 
             _cache[key] = deepcopy(val) if copy else val
+            _cache.move_to_end(key, last=True)
 
     def f_read_row(self, fp_dict:Dict[int,IO], row_id:int, with_value:bool=False) -> Optional[tuple]:
         """Low level data chunk stream parsing factory isolating specific physical slot blocks parameters.
@@ -4882,14 +4906,14 @@ class JDbReader:
         Returns:
             Any: Deserialized object.
         """
-        if not isinstance(key, str):
-            key = str(key)
+        key = str(key) if not isinstance(key, str) else key
 
         # Priority: cache > file
         _cache = self._cache
         if _cache and key in _cache:
             if row is None or self.io.key_table[key] == row:
-                _cache[key] = val = _cache.pop(key, None)
+                val = _cache.get(key, None)
+                _cache.move_to_end(key, last=True)
                 return deepcopy(val) if copy else val
 
         if row is None:
@@ -4911,7 +4935,8 @@ class JDbReader:
         _key, file_id, offset, row_size, val_size, _ver, _days = io.read_key(key_fp, row)
         if key != _key:
             if _cache and _key in _cache:
-                _cache[_key] = val = _cache.pop(_key, None)
+                val = _cache.get(_key, None)
+                _cache.move_to_end(_key, last=True)
                 return deepcopy(val) if copy else val
 
         if row_size == 0:
