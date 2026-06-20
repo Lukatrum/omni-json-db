@@ -185,7 +185,7 @@ INT_manager = INT_Handler()
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-class FileLockException(Exception):
+class FileLockException(BlockingIOError):
     """Custom exception class thrown when internal file locking resource allocations timeout or hit collision errors."""
     pass # pylint: disable=unnecessary-pass
 
@@ -416,13 +416,13 @@ class FileLock:
 
                             continue
 
-                        if not switch and _cnt > 0:
+                        if not switch and _cnt > 0: # pragma: no cover
                             _idents[ident] = _cnt
 
                     elif switch: # pragma: no cover
                         _idents[ident] = _cnt - 1
 
-                if _mode != '':
+                if _mode != '': # pragma: no cover
                     if not block:
                         raise FileLockException("Could not acquire lock") # pragma: no cover
 
@@ -445,6 +445,8 @@ class FileLock:
 
                 except BlockingIOError as e:
                     if not block: # pragma: no cover
+                        if ident in _idents:
+                            self._mode = 'r'
                         raise FileLockException("Could not acquire lock") from e
 
                     self._mode = 'p'

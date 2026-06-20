@@ -4994,6 +4994,69 @@ class TestJDb(unittest.TestCase):
                 finally:
                     jdb.f_close()
 
+            self.assertEqual(jdb.file_lock.mode, '')
+            ident1 = jdb.file_lock.acquire(read_only=True, block=True)
+            try:
+                self.assertEqual(jdb.file_lock.mode, 'r')
+                self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+                self.assertEqual(jdb1.file_lock.get_count(ident1), 0)
+
+                ident2 = jdb1.file_lock.acquire(read_only=True, block=False)
+                try:
+                    self.assertEqual(ident1, ident2)
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+                    self.assertEqual(jdb1.file_lock.get_count(ident2), 1)
+                    self.assertEqual(jdb.file_lock.mode, 'r')
+                    self.assertEqual(jdb1.file_lock.mode, 'r')
+
+                    with self.assertRaises(BlockingIOError):
+                        ident1a = jdb1.file_lock.acquire(read_only=False, block=False)
+
+                    self.assertEqual(jdb.file_lock.mode, 'r')
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+                    self.assertEqual(jdb1.file_lock.get_count(ident2), 1)
+
+                finally:
+                    jdb1.file_lock.release()
+                    self.assertEqual(jdb1.file_lock.mode, '')
+
+                self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+                self.assertEqual(jdb1.file_lock.get_count(ident1), 0)
+                self.assertEqual(jdb.file_lock.mode, 'r')
+
+                ident1a = jdb.file_lock.acquire(read_only=False, block=True, switch=True)
+                self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+                self.assertEqual(ident1, ident1a)
+                self.assertEqual(jdb.file_lock.mode, 'w')
+
+                ident1b = jdb.file_lock.acquire(read_only=True, block=True)
+                try:
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 2)
+                    self.assertEqual(ident1, ident1b)
+                    self.assertEqual(jdb.file_lock.mode, 'w')
+
+                    self.assertEqual(jdb1.file_lock.get_count(ident1), 0)
+                    with self.assertRaises(BlockingIOError):
+                        ident2 = jdb1.file_lock.acquire(read_only=True, block=False)
+
+                    with self.assertRaises(BlockingIOError):
+                        ident2 = jdb1.file_lock.acquire(read_only=False, block=False)
+
+                    self.assertEqual(jdb1.file_lock.mode, '')
+                    self.assertEqual(jdb1.file_lock.get_count(ident1), 0)
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 2)
+
+                finally:
+                    jdb.file_lock.release()
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 1)
+
+                self.assertEqual(jdb.file_lock.mode, 'w')
+            finally:
+                jdb.file_lock.release()
+
+            self.assertEqual(jdb.file_lock.get_count(ident1), 0)
+            self.assertEqual(jdb.file_lock.mode, '')
+
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
