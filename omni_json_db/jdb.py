@@ -4049,10 +4049,10 @@ class JDb(JDbReader):
         _safe_bytes = io.copy_key(key_fp, safe_h, dead_h) if dead_h > safe_h else None
 
         # new key -> SAFE[h] (= REC[t+1])
-        io.n_records += 1
         io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
         _cache.pop(key, None)
         io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
+        io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
         io.key_table[key] = safe_h
@@ -4389,8 +4389,7 @@ class JDb(JDbReader):
             else:
                 pass
 
-            # new key -> SAFE[h] (=REC[t+1]) | may io.resize_keys() -> io.load_keys()
-            io.n_records += 1
+            # new key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
             io.write_key(key_fp, safe_h, key, _type_id, _type_val, 0, _type_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
             if _type_id == 0x10 and isinstance(val, JDbReader):
                 self._set_child(key, val)
@@ -4428,14 +4427,14 @@ class JDb(JDbReader):
             else:
                 pass
 
-            # new key -> SAFE[h] (= REC[t+1]) | may io.resize_keys() -> io.load_keys()
-            io.n_records += 1
+            # new key -> SAFE[h] (= REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
             io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
             io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
 
         if cache_limit != 0:
             self._update_cache(key, val, copy=True)
 
+        io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
         io.key_table[key] = safe_h
@@ -4633,10 +4632,12 @@ class JDb(JDbReader):
             else: # pragma: no cover
                 pass
 
-        # del key -> SAFE[h] (=REC[t+1])
         self._cache.pop(key, None)
-        io.n_records += 1 # # must before write_key, after key_table
+
+        # undelete key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
         io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days)
+
+        io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
         io.key_table[key] = safe_h

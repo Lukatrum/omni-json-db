@@ -2474,7 +2474,7 @@ class JIo:
             _KEY_rows[row_id] = (key, file_id, offset, row_size, val_size, ver_i, days)
             while len(_KEY_rows) > TOTAL_KEY_ROWS:
                 _KEY_rows.popitem(last=False) # 1st item
-        else:
+        elif row_id >= self.n_records+1:
             _DEAD_rows[row_id] = (file_id, offset, row_size)
             while len(_DEAD_rows) > TOTAL_DEAD_ROWS:
                 _DEAD_rows.pop(next(iter(_DEAD_rows)), None)
