@@ -76,8 +76,9 @@ FIND_OPS = {
     'GT', 'LT', 'GTE', 'LTE',
     'SIZE', 'REGEX',
     # Not official
-    'GE', 'LE','RE', 'RE2',
-    'ANY', 'FUNC', 'HAS'
+    'GE', 'LE', 'RE', 'RE2',
+    'ANY', 'FUNC', 'HAS',
+    'NAND',
 }
 
 def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, verbose:int=0) -> TCPServer:
@@ -218,135 +219,108 @@ def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
             return False
 
     for cmd,rule in rules.items():
-        cmd = cmd.lower()
-        if cmd == '$re' or cmd == '$re2' or cmd == '$regex':
-            is_matched = False
-            key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
-            if isinstance(rule, Pattern):
-                is_matched = rule.search(key_s)
-
-            elif isinstance(rule, str):
-                is_matched = re_search(rule, key_s)
-
-            elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
-                # rule0 AND rule1 AND ...
-                for _rule in rule:
-                    if isinstance(_rule, Pattern):
-                        if not _rule.search(key_s):
-                            return False
-
-                        is_matched = True
-
-                    elif isinstance(_rule, str):
-                        if not re_search(_rule, key_s):
-                            return False
-
-                        is_matched = True
-
-                    else:
-                        return False
-
-            if is_matched:
-                continue
-
-        elif cmd == '$func':
-            if callable(rule): # pragma: no cover
-                arg_cnt = rule.__code__.co_argcount
-                try:
-                    if arg_cnt == 1 and rule(key):
-                        continue
-
-                except: # pragma: no cover
-                    return False
-
-        else:
+        is_matched = False
+        reverse_it = cmd.startswith('!')
+        cmd = cmd[1:] if reverse_it else cmd
+        if cmd and cmd[0] == '$':
+            cmd = cmd.lower()
             is_same_type = isinstance(rule, str)
             if cmd == '$gt':
-                if is_same_type and key > rule:
-                    continue
+                if is_same_type:
+                    is_matched = (key <= rule) if reverse_it else (key > rule)
 
             elif cmd == '$gte' or cmd == '$ge':
-                if is_same_type and key >= rule:
-                    continue
+                if is_same_type:
+                    is_matched = (key < rule) if reverse_it else (key >= rule)
 
             elif cmd == '$lt':
-                if is_same_type and key < rule:
-                    continue
+                if is_same_type:
+                    is_matched = (key >= rule) if reverse_it else (key < rule)
 
             elif cmd == '$lte' or cmd == '$le':
-                if is_same_type and key <= rule:
-                    continue
+                if is_same_type:
+                    is_matched = (key > rule) if reverse_it else (key <= rule)
 
-            elif cmd == '$eq':
-                if is_same_type and key == rule:
-                    continue
+            elif cmd == '$eq' or cmd == '$ne':
+                if is_same_type:
+                    reverse_it = reverse_it or cmd.startswith('$n')
+                    is_matched = (key != rule) if reverse_it else (key == rule)
 
-            elif cmd == '$ne':
-                if is_same_type and key != rule:
-                    continue
-
-            elif cmd == '$in':
+            elif cmd == '$in' or cmd == '$nin':
+                reverse_it = reverse_it or cmd.startswith('$n')
                 try:
-                    if key in rule:
-                        continue
+                    is_matched = (key not in rule) if reverse_it else (key in rule)
 
                 except TypeError: # pragma: no cover
-                    return False
-
-            elif cmd == '$nin':
-                try:
-                    if not key in rule:
-                        continue
-
-                except TypeError: # pragma: no cover
-                    return False
+                    pass
 
             elif cmd == '$has':
                 if isinstance(rule, str):
-                    if key.find(rule) >= 0:
-                        continue
+                    is_matched = (key.find(rule) < 0) if reverse_it else (key.find(rule) >= 0)
+
+            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+                key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
+                if isinstance(rule, Pattern):
+                    is_matched = (not rule.search(key_s)) if reverse_it else bool(rule.search(key_s))
+
+                elif isinstance(rule, str):
+                    is_matched = (not re_search(rule, key_s)) if reverse_it else bool(re_search(rule, key_s))
+
+                elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
+                    # rule0 AND rule1 AND ...
+                    for _rule in rule:
+                        if isinstance(_rule, Pattern):
+                            is_matched = bool(_rule.search(key_s))
+                        elif isinstance(_rule, str):
+                            is_matched = bool(re_search(_rule, key_s))
+
+                        if not is_matched:
+                            break
+
+                    is_matched = (not is_matched) if reverse_it else is_matched
+
+            elif cmd == '$func':
+                if callable(rule): # pragma: no cover
+                    arg_cnt = rule.__code__.co_argcount
+                    try:
+                        if arg_cnt == 1:
+                            is_matched = (not rule(key)) if reverse_it else rule(key)
+                    except: # pragma: no cover
+                        pass
 
             elif cmd == '$size':
                 _len = len(key)
                 if isinstance(rule, (float, int)):
-                    if _len == int(rule):
-                        continue
+                    is_matched = (_len != int(rule)) if reverse_it else (_len == int(rule))
 
                 elif isinstance(rule, (list, set, frozenset, tuple, range)):
-                    if _len in rule:
-                        continue
+                    is_matched = (_len not in rule) if reverse_it else (_len in rule)
 
             elif cmd == '$not':
-                if not _match_KEY_rules(key, rule, level=level+1):
-                    continue
+                is_matched = not _match_KEY_rules(key, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$or':
+            elif cmd == '$or' or cmd == '$nor':
                 if isinstance(rule, (list,tuple)):
-                    is_matched = False
+                    reverse_it = reverse_it or cmd.startswith('$n')
                     for _rule in rule:
-                        if _match_KEY_rules(key, _rule, level=level+1):
-                            is_matched = True
+                        is_matched = _match_KEY_rules(key, _rule, level=level+1)
+                        if is_matched:
                             break
 
-                    if is_matched:
-                        continue
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$nor':
+            elif cmd == '$and' or cmd == '$nand':
                 if isinstance(rule, (list,tuple)):
+                    reverse_it = reverse_it or cmd.startswith('$n')
                     for _rule in rule:
-                        if _match_KEY_rules(key, _rule, level=level+1):
-                            return False
-                    continue
+                        is_matched = _match_KEY_rules(key, _rule, level=level+1)
+                        if not is_matched:
+                            break
 
-            elif cmd == '$and':
-                if isinstance(rule, (list,tuple)):
-                    for _rule in rule:
-                        if not _match_KEY_rules(key, _rule, level=level+1):
-                            return False
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
-                    continue
-
-        return False
+        if not is_matched: return False
 
     return True
 
@@ -417,147 +391,118 @@ def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bo
     mdate_s = str(mdate)
     date_s = f'{cdate_s} {mdate_s}'
     for cmd,rule in rules.items():
-        cmd = cmd.lower()
-        if cmd == '$func':
-            if callable(rule):
-                arg_cnt = rule.__code__.co_argcount
-                try:
-                    if arg_cnt == 2 and rule(cdate, mdate):
-                        continue
-
-                except: # pragma: no cover
-                    return False
-
-        elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
-            is_matched = False
-            date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
-            if isinstance(rule, Pattern):
-                is_matched = rule.search(date_s)
-
-            elif isinstance(rule, str):
-                is_matched = re_search(rule, date_s)
-
-            elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
-                # rule0 AND rule1 AND ...
-                for _rule in rule:
-                    if isinstance(_rule, Pattern):
-                        if not _rule.search(date_s):
-                            return False
-
-                        is_matched = True
-
-                    elif isinstance(_rule, str):
-                        if not re_search(_rule, date_s):
-                            return False
-
-                        is_matched = True
-
-                    else:
-                        return False
-
-            if is_matched:
-                continue
-
-        else:
+        is_matched = False
+        reverse_it = cmd.startswith('!')
+        cmd = cmd[1:] if reverse_it else cmd
+        if cmd and cmd[0] == '$':
+            cmd = cmd.lower()
             is_cdate = isinstance(rule, datetime)
-            is_mdate = isinstance(rule, dt_date) and not isinstance(rule, datetime)
+            is_mdate = not is_cdate and isinstance(rule, dt_date)
             is_same_type = is_cdate or is_mdate
             if cmd == '$gt':
-                if is_same_type and (is_cdate and cdate > rule.date() or is_mdate and mdate > rule):
-                    continue
+                if is_same_type:
+                    is_matched = (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule) if reverse_it else \
+                            (is_cdate and cdate > rule.date() or is_mdate and mdate > rule)
 
             elif cmd == '$gte' or cmd == '$ge':
-                if is_same_type and (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule):
-                    continue
+                if is_same_type:
+                    is_matched = (is_cdate and cdate < rule.date() or is_mdate and mdate < rule) if reverse_it else \
+                            (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule)
 
             elif cmd == '$lt':
-                if is_same_type and (is_cdate and cdate < rule.date() or is_mdate and mdate < rule):
-                    continue
+                if is_same_type:
+                    is_matched = (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule) if reverse_it else \
+                            (is_cdate and cdate < rule.date() or is_mdate and mdate < rule)
 
-            elif cmd == '$lte' or cmd == '$le':
-                if is_same_type and (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule):
-                    continue
+            elif cmd == '$le' or cmd == '$lte':
+                if is_same_type:
+                    is_matched = (is_cdate and cdate > rule.date() or is_mdate and mdate > rule) if reverse_it else \
+                            (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule)
 
-            elif cmd == '$eq':
-                if is_same_type and (is_cdate and cdate == rule.date() or is_mdate and mdate == rule):
-                    continue
+            elif cmd == '$eq' or cmd == '$ne':
+                if is_same_type:
+                    reverse_it = reverse_it or cmd.startswith('$n')
+                    is_matched = (is_cdate and cdate != rule.date() or is_mdate and mdate != rule) if reverse_it else \
+                            (is_cdate and cdate == rule.date() or is_mdate and mdate == rule)
 
-            elif cmd == '$ne':
-                if is_same_type and (is_cdate and cdate != rule.date() or is_mdate and mdate != rule):
-                    continue
-
-            elif cmd == '$in':
+            elif cmd == '$in' or cmd == '$nin':
+                reverse_it = reverse_it or cmd.startswith('$n')
                 try:
-                    if isinstance(rule, set):
-                        if mdate in rule or mdate_s in rule:
-                            continue
-                    else:
-                        if cdate in rule or cdate_s in rule:
-                            continue
-
+                    is_matched = (mdate in rule or mdate_s in rule) if isinstance(rule, set) else \
+                                (cdate in rule or cdate_s in rule)
+                    is_matched = (not is_matched) if reverse_it else is_matched
                 except TypeError: # pragma: no cover
-                    return False
-
-            elif cmd == '$nin':
-                try:
-                    if isinstance(rule, set):
-                        if not (mdate in rule or mdate_s in rule):
-                            continue
-                    else:
-                        if not (cdate in rule or cdate_s in rule):
-                            continue
-
-                except TypeError: # pragma: no cover
-                    return False
+                    pass
 
             elif cmd == '$has':
                 if isinstance(rule, str):
-                    if date_s.find(rule) >= 0:
-                        continue
+                    is_matched = (date_s.find(rule) < 0) if reverse_it else (date_s.find(rule) >= 0)
 
                 elif isinstance(rule, datetime):
-                    if date_s.find(str(rule.date())) >= 0:
-                        continue
+                    is_matched = (date_s.find(str(rule.date())) < 0) if reverse_it else (date_s.find(str(rule.date())) >= 0)
 
                 elif isinstance(rule, dt_date):
-                    if date_s.find(str(rule)) >= 0:
-                        continue
+                    is_matched = (date_s.find(str(rule)) < 0) if reverse_it else (date_s.find(str(rule)) >= 0)
 
-            elif cmd == '$not':
-                if not _match_DATE_rules(cdate, mdate, rule, level=level+1):
-                    continue
+            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+                date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
+                if isinstance(rule, Pattern):
+                    is_matched = (not rule.search(date_s)) if reverse_it else bool(rule.search(date_s))
 
-            elif cmd == '$or':
-                if isinstance(rule, (list,tuple)):
-                    is_matched = False
+                elif isinstance(rule, str):
+                    is_matched = (not re_search(rule, date_s)) if reverse_it else bool(re_search(rule, date_s))
+
+                elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
+                    # rule0 AND rule1 AND ...
                     for _rule in rule:
-                        if _match_DATE_rules(cdate, mdate, _rule, level=level+1):
-                            is_matched = True
+                        if isinstance(_rule, Pattern):
+                            is_matched = bool(_rule.search(date_s))
+                        elif isinstance(_rule, str):
+                            is_matched = bool(re_search(_rule, date_s))
+
+                        if not is_matched:
                             break
 
-                    if is_matched:
-                        continue
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$nor':
+            elif cmd == '$func':
+                if callable(rule):
+                    arg_cnt = rule.__code__.co_argcount
+                    try:
+                        if arg_cnt == 2:
+                            is_matched = (not rule(cdate, mdate)) if reverse_it else rule(cdate, mdate)
+                    except: # pragma: no cover
+                        pass
+
+            elif cmd == '$not':
+                is_matched = not _match_DATE_rules(cdate, mdate, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
+
+            elif cmd == '$or' or cmd == '$nor':
                 if isinstance(rule, (list,tuple)):
+                    reverse_it = reverse_it  or cmd.startswith('$n')
                     for _rule in rule:
-                        if _match_DATE_rules(cdate, mdate, _rule, level=level+1):
-                            return False
-                    continue
+                        is_matched = _match_DATE_rules(cdate, mdate, _rule, level=level+1)
+                        if is_matched:
+                            break
 
-            elif cmd == '$and':
+                    is_matched = (not is_matched) if reverse_it else is_matched
+
+            elif cmd == '$and' or cmd == '$nand':
                 if isinstance(rule, (list,tuple)):
+                    reverse_it = reverse_it  or cmd.startswith('$n')
                     for _rule in rule:
-                        if not _match_DATE_rules(cdate, mdate, _rule, level=level+1):
-                            return False
+                        is_matched = _match_DATE_rules(cdate, mdate, _rule, level=level+1)
+                        if not is_matched:
+                            break
 
-                    continue
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
-        return False
+        if not is_matched: return False
 
     return True
 
-def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -> bool:
+def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int=0, ANY:bool=False) -> bool:
     """
     Evaluate if a value matches a given set of conditions or MongoDB-like operators.
 
@@ -568,6 +513,8 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
         key (str): The key associated with the value being evaluated.
         val (Any): The actual data value to be checked.
         rules (Any): The dictionary of rules/operators or a direct match condition.
+        cdate (date): KEY created date.
+        mdate (date): KEY modified date.        
         level (int, optional): The current recursion depth. Defaults to 0.
         ANY (bool, optional): If True, checks if any element in an iterable value matches. Defaults to False.
 
@@ -583,11 +530,11 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
     """
     if ANY and hasattr(val, '__iter__'): # pragma: no cover
         if isinstance(val, (list, set, frozenset, tuple)):
-            if any(_match_VAL_rules(key, _val, rules, level=level+1, ANY=True) for _val in val):
+            if any(_match_VAL_rules(key, _val, rules, cdate, mdate, level=level+1, ANY=True) for _val in val):
                 return True
 
         elif isinstance(val, dict):
-            if any(_match_VAL_rules(key, _val, rules, level=level+1, ANY=True) for _val in val.values()):
+            if any(_match_VAL_rules(key, _val, rules, cdate, mdate, level=level+1, ANY=True) for _val in val.values()):
                 return True
 
     if not isinstance(rules, dict): # pragma: no cover
@@ -604,7 +551,11 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
         else:
             return False
 
+    is_dict = isinstance(val, dict)
     for cmd,rule in rules.items():
+        is_matched = False
+        reverse_it = cmd.startswith('!')
+        cmd = cmd[1:] if reverse_it else cmd
         if cmd and cmd[0] == '$':
             cmd = cmd.lower()
             is_same_type = isinstance(val, type(rule)) \
@@ -613,108 +564,78 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
 
             if cmd == '$gt':
                 try:
-                    if not is_same_type or not val.__gt__ or not rule.__gt__ or not val > rule:
-                        return False
-                    continue
+                    if is_same_type and val.__gt__ and rule.__gt__:
+                        is_matched = (val <= rule) if reverse_it else (val > rule)
                 except TypeError: # pragma: no cover
-                    return False
+                    pass
 
             elif cmd == '$gte' or cmd == '$ge':
                 try:
-                    if not is_same_type or not val.__ge__ or not rule.__ge__ or not val >= rule:
-                        return False
-                    continue
+                    if is_same_type and val.__ge__ and rule.__ge__:
+                        is_matched = (val < rule) if reverse_it else (val >= rule)
                 except TypeError: # pragma: no cover
-                    return False
+                    pass
 
             elif cmd == '$lt':
                 try:
-                    if not is_same_type or not val.__lt__ or not rule.__lt__ or not val < rule:
-                        return False
-                    continue
+                    if is_same_type and val.__lt__ and rule.__lt__:
+                        is_matched = (val >= rule) if reverse_it else (val < rule)
                 except TypeError: # pragma: no cover
-                    return False
+                    pass
 
             elif cmd == '$lte' or cmd == '$le':
                 try:
-                    if not is_same_type or not val.__le__ or not rule.__le__ or not val <= rule:
-                        return False
-                    continue
+                    if is_same_type and val.__le__ and rule.__le__:
+                        is_matched = (val > rule) if reverse_it else (val <= rule)
                 except TypeError: # pragma: no cover
-                    return False
+                    pass
 
-            elif cmd == '$eq':
+            elif cmd == '$eq' or cmd == '$ne':
                 try:
-                    if not is_same_type or not val.__eq__ or not rule.__eq__ or not val == rule:
-                        return False
-                    continue
+                    if is_same_type and val.__eq__ and rule.__eq__:
+                        reverse_it = reverse_it or cmd.startswith('$n')
+                        is_matched = (val != rule) if reverse_it else (val == rule)
                 except TypeError: # pragma: no cover
-                    return False
+                    pass
 
-            elif cmd == '$ne':
-                try:
-                    if not is_same_type or not val.__ne__ or not rule.__ne__ or not val != rule:
-                        return False
-                    continue
-                except TypeError: # pragma: no cover
-                    return False
-
-            elif cmd == '$in':
+            elif cmd == '$in' or cmd == '$nin':
+                reverse_it = reverse_it or cmd.startswith('$n')
                 if hasattr(rule, '__contains__'):
                     try:
                         if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
-                            if val not in rule:
-                                return False
-                            continue
+                            is_matched = (val not in rule) if reverse_it else (val in rule)
 
-                        if val.__iter__:
+                        elif val.__iter__:
                             _set_a = set(rule) if not isinstance(rule, (set, frozenset)) else rule
                             _set_b = set(val) if not isinstance(val, (set, frozenset)) else val
-                            if _set_a.intersection(_set_b) == _set_a:
-                                continue
+                            _set_c = _set_a.intersection(_set_b)
+                            is_matched = (_set_c != _set_a) if reverse_it else (_set_c == _set_a)
 
                     except TypeError: # pragma: no cover
-                        return False
-
-            elif cmd == '$nin':
-                if hasattr(rule, '__contains__'):
-                    try:
-                        if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
-                            if val in rule:
-                                return False
-                            continue
-
-                        if val.__iter__:
-                            _set_a = set(rule) if not isinstance(rule, (set, frozenset)) else rule
-                            _set_b = set(val) if not isinstance(val, (set, frozenset)) else val
-                            if _set_a - _set_b:
-                                continue
-
-                    except TypeError: # pragma: no cover
-                        return False
+                        pass
 
             elif cmd == '$has':
                 if hasattr(val, '__contains__') and not isinstance(val, (str, bytes, bytearray)):
-                    if rule not in val:
-                        return False
-                    continue
+                    try:
+                        is_matched = (rule not in val) if reverse_it else (rule in val)
+                    except TypeError: # pragma: no cover
+                        pass
+                else:
+                    try:
+                        if isinstance(val, str):
+                            val_s = val
+                        elif isinstance(val, (bytes, bytearray)):
+                            val_s = val if isinstance(rule, bytes) else val.decode('utf8')
+                        else:
+                            val_s = json_dumps(val) if isinstance(val_s, bytes) else val_s.decode('utf8')
 
-                try:
-                    if isinstance(val, str):
-                        val_s = val
-                    elif isinstance(val, (bytes, bytearray)):
-                        val_s = val if isinstance(rule, bytes) else val.decode('utf8')
-                    else:
-                        val_s = json_dumps(val) if isinstance(val_s, bytes) else val_s.decode('utf8')
+                        if isinstance(val_s, bytes) and isinstance(rule, bytes) \
+                                or isinstance(val_s, str) and isinstance(rule, str):
 
-                except: # pragma: no cover
-                    return False
+                            is_matched = (val_s.find(rule) < 0) if reverse_it else (val_s.find(rule) >= 0)
 
-                if isinstance(val_s, bytes) and isinstance(rule, bytes) \
-                        or isinstance(val_s, str) and isinstance(rule, str):
-
-                    if val_s.find(rule) >= 0:
-                        continue
+                    except: # pragma: no cover
+                        pass
 
             elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
                 _rules = []
@@ -742,120 +663,117 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, level:int=0, ANY:bool=False) -
                                     val_s = val_s.decode('utf8')
 
                         except: # pragma: no cover
-                            return False
+                            val_s = None
 
                     else: # pragma: no cover
                         val_s = val
 
-                    val_s = JSON_RE_sub('', val_s) if cmd[-1] == '2' else val_s
-                    for _rule in _rules:
-                        if not _rule.search(val_s):
-                            return False
-                    continue
+                    if val_s is not None:
+                        val_s = JSON_RE_sub('', val_s) if cmd[-1] == '2' else val_s
+                        for _rule in _rules:
+                            is_matched = _rule.search(val_s)
+                            if not is_matched:
+                                break
+
+                        is_matched = (not is_matched) if reverse_it else is_matched
 
             elif cmd == '$func':
                 if callable(rule): # pragma: no cover
                     arg_cnt = rule.__code__.co_argcount
                     try:
-                        if arg_cnt == 2 and rule(key, val):
-                            continue
+                        if arg_cnt == 2:
+                            is_matched = (not rule(key, val)) if reverse_it else (rule(key, val))
 
-                        if arg_cnt == 1 and rule(val):
-                            continue
+                        elif arg_cnt == 1:
+                            is_matched = (not rule(val)) if reverse_it else (rule(val))
 
                     except: # pragma: no cover
-                        return False
+                        pass
 
             elif cmd == '$size':
                 if hasattr(val, '__iter__'):
                     _len = len(val)
                     if isinstance(rule, (float, int)):
-                        if _len == int(rule):
-                            continue
+                        is_matched = (_len != int(rule)) if reverse_it else (_len == int(rule))
 
-                    if isinstance(rule, (list, set, frozenset, tuple, range)):
-                        if _len in rule:
-                            continue
+                    elif isinstance(rule, (list, set, frozenset, tuple, range)):
+                        is_matched = (_len not in rule) if reverse_it else (_len in rule)
 
             elif cmd == '$not':
-                if not _match_VAL_rules(key, val, rule, level=level+1):
-                    continue
+                is_matched = not _match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$or':
+            elif cmd == '$or' or cmd == '$nor':
                 if isinstance(rule, (list,tuple)):
-                    is_matched = False
+                    reverse_it = reverse_it or cmd.startswith('$n')
                     for _rule in rule:
-                        if _match_VAL_rules(key, val, _rule, level=level+1):
-                            is_matched = True
+                        is_matched = _match_VAL_rules(key, val, _rule, cdate, mdate, level=level+1)
+                        if is_matched:
                             break
 
-                    if is_matched:
-                        continue
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$nor':
+            elif cmd == '$and' or cmd == '$nand':
                 if isinstance(rule, (list,tuple)):
+                    reverse_it = reverse_it or cmd.startswith('$n')
                     for _rule in rule:
-                        if _match_VAL_rules(key, val, _rule, level=level+1):
-                            return False
-                    continue
+                        is_matched = _match_VAL_rules(key, val, _rule, cdate, mdate, level=level+1)
+                        if not is_matched:
+                            break
 
-            elif cmd == '$and':
-                if isinstance(rule, (list,tuple)):
-                    for _rule in rule:
-                        if not _match_VAL_rules(key, val, _rule, level=level+1):
-                            return False
-                    continue
+                    is_matched = (not is_matched) if reverse_it else is_matched
 
             elif cmd == '$any':
-                is_matched = True
-                if isinstance(val, dict):
-                    if not any(_match_VAL_rules(key, _val, rule, ANY=True, level=level+1) for _val in val.values()):
-                        is_matched = False
+                if is_dict:
+                    is_matched = any(_match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in val.values())
 
                 elif not hasattr(val, '__iter__'):
-                    if not _match_VAL_rules(key, val, rule, level=level+1):
-                        is_matched = False
+                    is_matched = _match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
 
                 elif isinstance(val, (list, set, frozenset, tuple, range)):
-                    if not any(_match_VAL_rules(key, _val, rule, ANY=True, level=level+1) for _val in val):
-                        is_matched = False
+                    is_matched = any(_match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in val)
 
                 else: # pragma: no cover
-                    if not _match_VAL_rules(key, val, rule, level=level+1):
-                        is_matched = False
+                    is_matched = _match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
 
                 if not is_matched and isinstance(rule, dict):
                     _is_matched = False
-                    if isinstance(val, dict):
+                    if is_dict:
                         for _ref, _rule in rule.items():
-                            if _ref in val:
-                                if _match_VAL_rules(key, val[_ref], _rule, level=level+1):
-                                    _is_matched = True
+                            _reverse_it = _ref.startswith('!')
+                            _ref_l = _ref[1:] if _reverse_it else _ref
+                            if _ref_l in val:
+                                _is_matched = _match_VAL_rules(key, val[_ref_l], _rule, cdate, mdate, level=level+1)
+                                _is_matched = (not _is_matched) if _reverse_it else _is_matched
+                                if _is_matched:
                                     break
 
                     is_matched = True if _is_matched else is_matched
 
-                if is_matched:
-                    continue
+                is_matched = (not is_matched) if reverse_it else is_matched
 
             elif cmd[1:].isdigit():
                 if isinstance(val, (list, tuple)):
                     try:
-                        if _match_VAL_rules(key, val[int(cmd[1:])], rule, level=level+1):
-                            continue
+                        is_matched = _match_VAL_rules(key, val[int(cmd[1:])], rule, cdate, mdate, level=level+1)
+                        is_matched = (not is_matched) if reverse_it else is_matched
 
                     except IndexError: # pragma: no cover
-                        return False
+                        pass
 
-        elif isinstance(val, dict) and cmd in val:
-            if _match_VAL_rules(key, val[cmd], rule, level=level+1):
-                continue
+        elif is_dict and cmd in val:
+            is_matched = _match_VAL_rules(key, val[cmd], rule, cdate, mdate, level=level+1)
+            is_matched = (not is_matched) if reverse_it else is_matched
 
         elif cmd == '_id':
-            if _match_KEY_rules(key, rule, level=level):
-                continue
+            is_matched = _match_KEY_rules(key, rule, level=level)
+            is_matched = (not is_matched) if reverse_it else is_matched
 
-        return False
+        elif cmd == '_date':
+            is_matched = _match_DATE_rules(cdate, mdate, rule, level=level)
+            is_matched = (not is_matched) if reverse_it else is_matched
+
+        if not is_matched: return False
 
     return True
 
@@ -4035,12 +3953,13 @@ class JDbReader:
         """
         re_flags = kwargs.get('re_flags', re_I)
 
-        if not vals: vals = {}
+        vals = {} if not vals else dict(vals)
 
         for key,val in kwargs.items():
             if key in FIND_OPS:
                 vals[f'${key.lower()}'] = val
 
+        old_with_value = with_value
         if vals:
             with_value = True
 
@@ -4084,15 +4003,15 @@ class JDbReader:
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = bytes(keys) if isinstance(keys, bytearray) else keys
             try:
-                keys = {keys.decode('utf8')}
+                keys = {'$eq': keys.decode('utf8')}
             except (UnicodeDecodeError, ValueError):
-                keys = {str(keys)}
-
-        elif hasattr(keys, '__iter__'):
-            keys = {'$in': {key if isinstance(key, str) else str(key) for key in keys}}
+                keys = {'$eq': str(keys)}
 
         elif callable(keys):
             keys = {'$func': keys}
+
+        elif hasattr(keys, '__iter__'):
+            keys = {'$in': {key if isinstance(key, str) else str(key) for key in keys}}
 
         if not isinstance(keys, dict):  # pragma: no cover
             raise TypeError('invalid type')
@@ -4125,6 +4044,8 @@ class JDbReader:
                     cdate, mdate = io_conv_date(_days)
                     if not _match_DATE_rules(cdate, mdate, date):
                         continue
+                else:
+                    cdate = mdate = None
 
                 if not with_value:
                     yield key, None
@@ -4137,17 +4058,38 @@ class JDbReader:
                     value = cache.get(key, None)
                     value_b = None
 
+                if vals and isinstance(value, JDbReader):
+                    child = value
+                    _vals = deepcopy(vals)
+                    _keys = _vals.pop('$key', None)
+                    _date = _vals.pop('$date', date)
+                    child_limit = (limit-count) if limit > 0 else 0
+                    for _key,_val in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value):
+                        yield f'{key}{SEP_SYM}{_key}', _val
+                        count += 1
+                        if count >= limit > 0: # pragma: no cover
+                            break
+
+                    continue
+
+                if cdate is None:
+                    _key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row_id)
+                    cdate, mdate = io_conv_date(_days)
+
                 for cmd,rules in vals.items():
-                    cmd = cmd.lower()
+                    cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
+                    if cmd_l in ('$key', '$date'):
+                        continue
+
                     use_bytes = False
-                    if cmd == '$eq' or cmd == '$ne':
+                    if cmd_l == '$eq' or cmd_l == '$ne':
                         use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
 
-                    elif cmd == '$has':
+                    elif cmd_l == '$has':
                         use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
                                     or isinstance(rules, str) and data_type.endswith('J')
 
-                    elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+                    elif cmd_l == '$re' or cmd_l == '$re2' or cmd_l == '$regex':
                         use_bytes = data_type.endswith('J')
 
                     if use_bytes:
@@ -4161,7 +4103,7 @@ class JDbReader:
                     else:
                         _value = value
 
-                    if not _match_VAL_rules(key, _value, {cmd: rules}):
+                    if not _match_VAL_rules(key, _value, {cmd: rules}, cdate, mdate):
                         is_matched = False
                         break
 
@@ -4875,6 +4817,10 @@ class JDbReader:
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _days = io.read_key(key_fp, row)
+        if _key in io.groups or _key in self.childs:
+            val = self.f_get_child(fp_dict, _key)
+            return val, None
+
         if row_size == 0:
             val = self._decode_row(file_id, offset, key, val_size)
             val_bytes = io.VAL_dumps(val) # without zip
