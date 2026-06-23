@@ -514,6 +514,140 @@ Queries
 
 Let's initialize an in-memory JDb instance (``jdb = JDb()``) and populate it with some sample JSON-like data to demonstrate the querying capabilities.
 
+.. list-table::
+   :widths: 15 45 30
+   :header-rows: 1
+
+   * - Operator
+     - Description
+     - Example Usage
+   * - ``$0``, ``$1``...
+     - Matches the element exactly at the specified index (0, 1...) of an array.
+     - ``{'$0': 'python'}``
+   * - ``$date`` / ``_date``
+     - Targets the database record's internal date for condition matching.
+     - ``{'$date': {'$lt': date(2001, 1, 1)}}``, ``{'_date': date(2011,12,1)}``
+   * - ``$key`` / ``_id``
+     - Targets the database record's dictionary key/ID for condition matching.
+     - ``{'$key': 'user_1'}``, ``{'_id': 'user_1'}``   
+   * -
+     -
+     -
+   * - ``$not`` / ``!..``
+     - Inverts the effect of a query expression (Logical NOT).
+     - ``{'$not': {'tags': {'$has': 'linux'}}}``, ``{'!tags': {'$has': 'linux'}}``, ``{'tags': {'!$has': 'linux'}}``
+   * - ``$and``
+     - Joins query clauses with a logical AND.
+     - ``{'$and': [{'$has':'python'}, {'$has':'linux'}]}``
+   * - ``$nand`` / ``!$and``
+     - Joins query clauses with a logical NAND (Not AND).
+     - ``{'$nand': [{'$has':'python'}, {'$has':'linux'}]}``
+   * - ``$or``
+     - Joins query clauses with a logical OR.
+     - ``{'$or': [{'$eq': 2000}, {'$eq': 2010}]}``
+   * - ``$nor`` / ``!$or``
+     - Joins query clauses with a logical NOR.
+     - ``{'$nor': [{'$eq': 2000}, {'$eq': 2010}]}``
+   * -
+     -
+     -      
+   * - ``$all``
+     - Matches if ALL elements in the value array/iterable match the condition.
+     - ``{'$all': {'$ne': 0}}``
+   * - ``$any``
+     - Matches if ANY element in the value array/iterable matches the condition.
+     - ``{'$any': 'python'}``
+   * - ``$none`` / ``!$any``
+     - Matches if NO elements in the value array/iterable match the condition.
+     - ``{'$none': {'age': 30}}``
+   * - ``$func``
+     - Evaluates a custom lambda function on the field to determine match.
+     - ``{'$func': lambda x: x > 0}``   
+   * -
+     -
+     -
+   * - ``$eq``
+     - Matches values that are exactly equal to the specified value.
+     - ``{'$eq': 28}``
+   * - ``!$eq`` / ``$ne``
+     - Matches values that are not equal to the specified value.
+     - ``{'$ne': 30}``,  ``{'!$eq': 30}``
+   * - ``$gt``
+     - Matches values strictly greater than the specified value.
+     - ``{'$gt': 25}``
+   * - ``$gte`` / ``$ge``
+     - Matches values greater than or equal to the specified value.
+     - ``{'$gte': 30}``
+   * - ``$lt``
+     - Matches values strictly less than the specified value.
+     - ``{'$lt': 30}``
+   * - ``$lte`` / ``$le``
+     - Matches values less than or equal to the specified value.
+     - ``{'$lte': 40}``
+   * -
+     -
+     -
+   * - ``$in``
+     - Matches if the value is any of the elements specified in an array/set.
+     - ``{'$in': ['admin', 'designer']}``
+   * - ``!$in`` / ``$nin``
+     - Matches if the value does NOT exist in the specified array/set.
+     - ``{'$nin': ['python', 'db']}``, ``{'!$in': ['python', 'db']}``
+   * - ``$between``
+     - Matches values within a specified inclusive range (min, max).
+     - ``{'$between': (26, 40)}``
+   * - ``!$between``
+     - Matches values strictly outside a specified range.
+     - ``{'!$between': (26, 40)}``
+   * - ``$near``
+     - Matches numeric/date values within a tolerance range (target, offset).
+     - ``{'$near': (20, 9)}``
+   * - ``$mod``
+     - Matches values where value % divisor == remainder (passed as a tuple).
+     - ``{'$mod': (10, 5)}``
+   * -
+     -
+     -
+   * - ``$has``
+     - Matches arrays or strings containing the specified element/substring.
+     - ``{'$has': 'python'}``
+   * - ``!$has`` / ``$nhas``
+     - Matches if the specified element or substring is NOT contained.
+     - ``{'$nhas': 'r_1'}``, ``{'!$has': 'r_1'}``
+   * - ``$ihas``
+     - Case-insensitive match for arrays or strings containing the specified element/substring.
+     - ``{'$ihas': 'UseR_'}``   
+   * - ``$re`` / ``$regex``
+     - Matches string values using a Regular Expression.
+     - ``{'$re': r'li[a-z]'}``, ``{'$re': re.compile(r'li[a-z]')}``
+   * - ``$re2``
+     - Matches using Regex after stripping JSON formatting symbols (``[]{}""``) from the string.
+     - ``{'$re2': r'role:admin'}``
+   * - ``$ew``
+     - Matches string values that end with a specified substring.
+     - ``{'$ew': '_suffix'}``
+   * - ``$sw``
+     - Matches string values that start with a specified substring.
+     - ``{'$sw': 'prefix_'}``
+   * - 
+     -
+     -
+   * - ``$exists``
+     - Matches documents that have the specified field/key.
+     - ``{'$exists': ['age', 'tags']}``
+   * - ``!$exists``
+     - Matches documents that lack the specified field/key.
+     - ``{'!$exists': ['age']}``
+   * - ``$size``
+     - Matches if the size/length of an array/string equals the specified value.
+     - ``{'$size': [1,2,3]}``
+   * - ``!$size``
+     - Matches if the size/length does NOT equal the specified value(s).
+     - ``{'!$size': [1,2,3]}``
+   * - ``$type``
+     - Matches if the value is of the specified Python variable type.
+     - ``{'$type': list}``   
+
 .. code-block:: python
 
     from omni_json_db import JDb
