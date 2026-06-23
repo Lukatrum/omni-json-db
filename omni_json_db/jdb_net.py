@@ -960,7 +960,7 @@ class ServerHandler(BaseRequestHandler):
                     break
 
                 except ValueError as e: # pragma: no cover
-                    if verbose >= 0: 
+                    if verbose >= 0:
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', yellow=1, bright=1))
                     continue
 

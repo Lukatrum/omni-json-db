@@ -1528,7 +1528,7 @@ class JIo:
         Returns:
             int: Calculated absolute day index spacing number integer.
         """
-        if isinstance(timestamp, datetime):
+        if isinstance(timestamp, datetime): # before dt_date
             timestamp = timestamp.date()
 
         if isinstance(timestamp, dt_date):

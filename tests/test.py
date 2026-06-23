@@ -391,6 +391,40 @@ class TestJDb(unittest.TestCase):
             self.assertEqual({f'users:::{kk}' for kk in res}, set(res1))
 
             # --------------------------------------------
+            res = jdb.find(date={'$sw': '2005'})
+            self.assertEqual(set(res), {'user_2'})
+
+            res2 = jdb.find(date={'$ew': str(prev_date1)})
+            self.assertEqual(res, res2)
+
+            # modified date == tuesday (0 = monday, ... 5 = saturday, 6 = sunday)
+            res = jdb.find(date={'$mod': (7, today.weekday())})
+            self.assertEqual(set(res), {'user_1'})
+
+            # created date == saturday
+            res = jdb.find(date={'$mod': (7., 5)})
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # created date near 2005-05-01 +/- 10 days
+            res = jdb.find(date={'$near': (dt.datetime(2005, 5, 1), 10)})
+            self.assertEqual(set(res), {'user_2'})
+
+            # modified date near today() +/- 1 days
+            res = jdb.find(date={'$near': (today, 1)})
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # 2005-05-05 <= created date <= 2010-10-10
+            res = jdb.find(date={'$between': (dt_2005, dt_2010)})
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            # (today - 2 ) <= modified date <= yesterday
+            res2 = jdb.find(date={'$between': (prev_date2, prev_date1)})
+            self.assertEqual(res, res2)
+
+            # '2005-01' <= modified/created date <= '2010-12'
+            res2 = jdb.find(date={'$between': ('2005-01', '2010-12')})
+            self.assertEqual(res, res2)
+
             res = jdb.find(date=dt_2005)
             self.assertEqual(set(res), {'user_2'})
 
@@ -460,7 +494,7 @@ class TestJDb(unittest.TestCase):
             res1 = jmem.find(vals={'$date':{'$not': {'$has': '201'}}})
             self.assertEqual(set(res1), {'users:::user_1', 'users:::user_2'})
 
-            res2 = jmem.find(vals={'$date':{'!$has': '201'}})
+            res2 = jmem.find(vals={'$date':{'$nhas': '201'}})
             self.assertEqual(res1, res2)
 
             res = jdb.find(date={'$has': today})
@@ -549,6 +583,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res, res2)
 
             #------------------------------------
+            # KEY.endswith('_3')
+            res = jdb.find({'$ew': '_3'})
+            self.assertEqual(set(res), {'user_3'})
+
+            # 'user_2' <= KEY <= 'user_4'
+            res = jdb.find({'$between': ('user_2', 'user_4')})
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
             res = jdb.find(r'_[12]', with_value=True) # == jdb.find(keys=...)
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
@@ -645,14 +687,39 @@ class TestJDb(unittest.TestCase):
             res = jdb.find({'$has': 'r_1'})
             self.assertEqual(set(res), {'user_1'})
 
+            res = jdb.find({'$nhas': 'r_1'})
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            res2 = jdb.find({'!$has': 'r_1'})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find({'!$ihas': 'USER_1'})
+            self.assertEqual(res, res2)
+
             res = jdb.find({'$has': 'user_'})
             self.assertEqual(set(res),set(users))
 
-            # 1. Exact Match & Global Search (ANY, RE, RE2)
+            res2 = jdb.find({'$ihas': 'UseR_'})
+            self.assertEqual(res, res2)
+
             #----------------------------------------------------------
+            # VAL['name'].endswith('e')
+            res = jdb.find(vals={'name': {'$ew': 'e'}})
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # 'Aa' <= VAL['name'] <= 'Bz'
+            res = jdb.find(vals={'name': {'$between': ('Aa', 'Bz')}})
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # not 'Aa' <= VAL['name'] <= 'Bz'
+            res = jdb.find(vals={'name': {'!$between': ('Aa', 'Bz')}})
+            self.assertEqual(set(res), {'user_3', 'user_4'})
+
+            # 1. Exact Match & Global Search (ANY, RE, RE2)
+            #----------------------------------------------------------            
             # Find users where any attribute exactly matches 'Alice'
             res = jdb.find(ANY='Alice')
-            self.assertTrue(set(res) == {'user_1'})
+            self.assertEqual(set(res), {'user_1'})
 
             res2 = jdb.find(vals={'name':'Alice'}) # vals['name'] == 'Alice'
             self.assertEqual(res, res2)
@@ -698,6 +765,9 @@ class TestJDb(unittest.TestCase):
 
             # 2. Relational & Conditional Operators (vals)
             #----------------------------------------------------------
+            res = jdb.find(vals={'age': {'$mod': (10, 5)}})
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
             # Age is greater than or equal to 30
             res = jdb.find(vals={'age': {'$gte': 30}})
             self.assertEqual(set(res), {'user_1', 'user_3'})
@@ -709,12 +779,21 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'age': {'$lt': 30}})
             self.assertEqual(set(res), {'user_2', 'user_4'})
 
+            # age near 20 +/- 9
+            res2 = jdb.find(vals={'age' : {'$near': (20, 9)}})
+            self.assertEqual(res, res2)
+
             # Not Age >= 30
             res2 = jdb.find(vals={'!age': {'$ge': 30}})
             self.assertEqual(res, res2)
 
+            # any(Value[k] <= 30 for k in Value)
             res = jdb.find(ANY={'$lt': 30})
             self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            # not any(Value['age'] == 30 for k in Value)
+            res = jdb.find(NONE={'age': 30}) # vals={'$none':{'age':30}}
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
 
             # Role is either 'admin' or 'designer'
             res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
@@ -746,6 +825,9 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'tags': {'$has': 'python'}})
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
+            res2 = jdb.find(vals={'tags': {'$ihas': 'Python'}})
+            self.assertEqual(res, res2)
+
             res2 = jdb.find(vals={'tags': {'$any': 'python'}})
             self.assertEqual(res, res2)
 
@@ -767,8 +849,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_3'})
 
             # ANY contains 'Bo'
-            res= jdb.find(ANY={'$has': 'Bo'})
+            res = jdb.find(ANY={'$has': 'Bo'})
             self.assertEqual(set(res), {'user_2'})
+
+            res2 = jdb.find(ANY={'$ihas': 'bo'})
+            self.assertEqual(res, res2)
 
             # Age is NOT 30
             res = jdb.find(vals={'age': {'$ne': 30}})
@@ -799,6 +884,13 @@ class TestJDb(unittest.TestCase):
             # 40 >= Age > 25
             res = jdb.find(vals={'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'user_1', 'user_3', 'user_4'})
+
+            # 26 <= Age <= 40
+            res2 = jdb.find(ANY={'$between': (26, 40)})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'age': {'$between': (26, 40)}})
+            self.assertEqual(res, res2)
 
             # 40 > Age > 25 and KEY in ['user_1', 'user_4']
             res = jdb.find(vals={'_id': ['user_1', 'user_4'], 'age': {'$gt': 25, '$lte':40}})
@@ -933,7 +1025,7 @@ class TestJDb(unittest.TestCase):
             # Users don't have email
             res = jdb.find(NOT={'email': lambda v: v != ''})
             self.assertEqual(set(res), {'user_2', 'user_3'})
-            
+
             del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
                         {'name': 'Bob', 'age': 25, 'role': 'helper'},
@@ -941,6 +1033,15 @@ class TestJDb(unittest.TestCase):
 
             jdb += users
             self.assertEqual(len(jdb), 3)
+
+            matches = jdb.find(EXISTS='email')
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
+
+            matches = jdb.find(EXISTS=['age', 'tags'])
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice', 'Charlie'})
+
+            matches = jdb.find(vals={'!$exists': ['age', 'tags']})
+            self.assertEqual({vv['name'] for vv in matches.values()}, {'Bob'})
 
             matches = jdb.find(ANY={'name': 'Alice'})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Alice'})
@@ -1108,6 +1209,45 @@ class TestJDb(unittest.TestCase):
             jdb[matches_2] = lambda key,val: add_tag(key, val, 'database') #pylint: disable=cell-var-from-loop
             matches = jdb.find(ANY={'$2': 'database'})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
+
+            jmem1 = jmem.add_group('other')
+            jmem1 += {'key1':[1, 2, 3, 4], 'key2':[0, 9, 8, 7, 6], 'key3':[0, 2, 4, 6]}
+            matches = jmem1.find(ALL={'$ne':0})
+            self.assertEqual(set(matches), {'key1'})
+
+            matches = jmem1.find('key', ANY={'$ne':0})
+            self.assertEqual(set(matches), {'key1', 'key2', 'key3'})
+
+            # 2 in Value
+            matches = jmem1.find(HAS=2)
+            self.assertEqual(set(matches), {'key1', 'key3'})
+
+            # 2 not in Value
+            matches = jmem1.find(NHAS=2)
+            self.assertEqual(set(matches), {'key2'})
+
+            jmem1 += {str(v):v for v in range(10)}
+
+            # int(KEY) % 3 == 1
+            matches = jmem1.find({'$mod': (3, 1)})
+            self.assertEqual(set(matches), {'1', '4', '7'})
+
+            # 2 <= int(KEY) <= 4
+            matches = jmem1.find({'$between': (2, 4)})
+            self.assertEqual(set(matches), {'2', '3', '4'})
+
+            # int(KEY) near 3 +/- 1
+            matches_2 = jmem1.find({'$near': (3, 1)})
+            self.assertEqual(matches, matches_2)
+
+            matches = jmem1.find(TYPE='list')
+            self.assertEqual(set(matches), {'key1', 'key2', 'key3'})
+
+            matches = jmem1.find(AND=[{'$type':list}, {'$size': 4}])
+            self.assertEqual(set(matches), {'key1', 'key3'})
+
+            matches = jmem1.find(AND=[{'!$type':list}, {'$ge': 8}])
+            self.assertEqual(set(matches), {'8', '9'})
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0

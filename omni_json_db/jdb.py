@@ -52,7 +52,7 @@ class JDbKey2(JDbKey):
         if isinstance(val, str): # pragma: no cover
             val = JIo.z_conv_str_to_days(val)
 
-        elif isinstance(val, datetime):
+        elif isinstance(val, datetime): # before dt_date
             val = JIo.z_conv_days(val)
 
         elif isinstance(val, dt_date):
