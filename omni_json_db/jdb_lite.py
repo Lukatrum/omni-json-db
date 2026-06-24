@@ -3,28 +3,24 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
-from re import compile as re_compile, search as re_search, findall as re_findall, match as re_match, Pattern, I as re_I, S as re_S
+from re import compile as re_compile, search as re_search, findall as re_findall, \
+            match as re_match, Pattern, I as re_I, S as re_S
 from os.path import exists as path_exists # basename, dirname, join as path_join
 from threading import RLock, get_ident, Thread
 from socketserver import TCPServer
 from struct import Struct
 from enum import IntFlag
 from unicodedata import east_asian_width
-from typing import Any, Union, Optional, Tuple, Set, Dict, Callable, Generator, IO
-# from os import makedirs, stat as os_stat, getcwd
-# from time import time
+from typing import Any, List, Union, Optional, Tuple, Set, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, json_dumps, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles, ThreadedTCPServer, ServerHandler
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JTypeError
-# from .utils import debug_break
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-# from copy import deepcopy
-#  __hash__ if type is immutable
 def deepcopy(src):
     """
     Create a deep copy of the given object, optimized for immutable types.
@@ -65,6 +61,7 @@ _UInt64_x2_pack = Struct("QQ").pack # thread-safe
 _UInt64_x2_unpack = Struct("QQ").unpack
 
 JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_I|re_S).sub
+PATH_sub = re_compile(r'(?<!\W)\*+|\*+(?!\W|$)').sub
 
 SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
@@ -318,9 +315,12 @@ def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                         pass
 
             elif cmd == '$sw' or cmd == '$ew':
-                if isinstance(rule, str):
-                    is_matched = key.startswith(rule) if cmd[1] == 's' else key.endswith(rule)
-                    is_matched = (not is_matched) if reverse_it else is_matched
+                if isinstance(rule, (tuple, str)):
+                    try:
+                        is_matched = key.startswith(rule) if cmd[1] == 's' else key.endswith(rule)
+                        is_matched = (not is_matched) if reverse_it else is_matched
+                    except (TypeError, ValueError): # pragma: no cover
+                        pass
 
             elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
@@ -548,9 +548,12 @@ def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bo
                             pass
 
             elif cmd == '$sw' or cmd == '$ew':
-                if isinstance(rule, str):
-                    is_matched = date_s.startswith(rule) if cmd[1] == 's' else date_s.endswith(rule)
-                    is_matched = (not is_matched) if reverse_it else is_matched
+                if isinstance(rule, (tuple, str)):
+                    try:
+                        is_matched = date_s.startswith(rule) if cmd[1] == 's' else date_s.endswith(rule)
+                        is_matched = (not is_matched) if reverse_it else is_matched
+                    except TypeError: # pragma: no cover
+                        pass
 
             elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
@@ -769,7 +772,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                             (val if isinstance(rule, bytes) else val.decode('utf8')) if isinstance(val, (bytes, bytearray)) else \
                             (json_dumps(val) if isinstance(rule, bytes) else val.decode('utf8'))
 
-                    if isinstance(val_s, bytes) and isinstance(rule, bytes) or isinstance(val_s, str) and isinstance(rule, str):
+                    if isinstance(val_s, bytes) and isinstance(rule, (bytes,tuple)) or isinstance(val_s, str) and isinstance(rule, (str, tuple)):
                         is_matched = val_s.startswith(rule) if cmd[1] == 's' else val_s.endswith(rule)
                         is_matched = (not is_matched) if reverse_it else is_matched
 
@@ -803,7 +806,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                         _set_r = {vv.lower() for vv in _set_r} if cmd[1] == 'i' else _set_r
                         _set_v = set(val) if not isinstance(val, (set, frozenset)) else val
                         _set_v = {vv.lower() for vv in _set_v} if cmd[1] == 'i' else _set_v
-                        is_matched = _set_v.issuperset(_set_r) and len(_set_r - _set_v) == 0
+                        is_matched = _set_r.issubset(_set_v)
                         is_matched = (not is_matched) if reverse_it else is_matched
 
                     except (TypeError, ValueError, AttributeError): # pragma: no cover
@@ -995,10 +998,15 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
             is_matched = (not is_matched) if reverse_it else is_matched
 
         elif is_dict:
-            for sep in (SEP_SYM, '/', '.'):
+            for sep in '|/\\.':
                 idx = cmd.find(sep)
                 if idx < 0: continue
                 parts = cmd.split(sep)
+                if any('*' in part for part in parts): # any wildcard in parts
+                    is_matched = _match_PATH(parts, key, val, rule, cdate, mdate, level=level+1)
+                    is_matched = (not is_matched) if reverse_it else is_matched
+                    break
+
                 try:
                     _val = val
                     for part in parts:
@@ -1006,7 +1014,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                             _val = _val[part]
                         elif isinstance(_val, (list, tuple)):
                             _val = _val[int(part)]
-                        else: # pragam: no cover
+                        else: # pragma: no cover
                             raise TypeError
 
                     is_matched = _match_VAL_rules(key, _val, rule, cdate, mdate, level=level+1)
@@ -1019,6 +1027,73 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
         if not is_matched: return False
 
     return True
+
+def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int) -> bool:
+    """
+    Recursively navigate val following path segments (parts).
+    Supports '*' wildcard and glob patterns (e.g. 'addr*', '*city').
+    ANY semantics: returns True if any matching path satisfies the rule.
+
+    Args:
+        key_parts (List[str]): Ordered list of remaining path segments to traverse, produced by splitting a separator-delimited path string (e.g. 'addr*.city' becomes ['addr*', 'city']). Each element is consumed one level per recursive call. Accepted forms for each segment are:
+            - Literal string  : exact dict key lookup (e.g. 'meta', 'address').
+            - Integer string  : zero-based index for list/tuple access (e.g. '0', '2').
+            - Bare wildcard   : '*' expands to every dict value or every sequence element.
+            - Glob pattern    : a string containing '*' matched against dict key names
+                                (e.g. 'addr*', '*city', 'a*z'); only supported on dicts.
+            An empty list is the base case: the filter rule is applied directly to the current val without further navigation.
+        key (str): The key associated with the value being evaluated.
+        val (Any): The actual data value to be checked.
+        rules (Any): The dictionary of rules/operators or a direct match condition.
+        cdate (date): KEY created date.
+        mdate (date): KEY modified date.        
+        level (int, optional): The current recursion depth. Defaults to 0.
+        
+    Returns:
+        bool: True if the value satisfies all specified rules, False otherwise.
+
+    Examples:
+        key_parts=['addr*','city'] -> match any key starting with 'addr', check .city
+        key_parts=['*','0']        -> any child's element at index 0
+        key_parts=['tags','*']     -> any element inside .tags        
+    """
+
+    if not key_parts:
+        return _match_VAL_rules(key, val, rules, cdate, mdate, level=level+1)
+
+    child_key, rest_parts = key_parts[0], key_parts[1:]
+    if '*' in child_key:
+        if isinstance(val, dict):
+            if child_key == '*':
+                child_vals = list(val.values()) # any field
+            else:
+                # Glob -> regex : 'addr*' -> r'^addr.*$'
+                rx = re_compile('^'+PATH_sub('.*', child_key)+'$')
+                child_vals = [v for k,v in val.items() if rx.match(k)]
+
+        elif isinstance(val, (list, tuple)):
+            child_vals = list(val) if child_key == '*' else [] # only bare * on sequences
+
+        else:
+            child_vals = []
+
+        return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
+
+    else:
+        try:
+            if isinstance(val, dict):
+                child_val = val[child_key]
+            elif isinstance(val, (list, tuple)):
+                child_val = val[int(child_key)]
+            else: # pragma: no cover
+                raise TypeError
+
+            return _match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level)
+
+        except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
+            pass
+
+        return False
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -4197,6 +4272,7 @@ class JDbReader:
             >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$lte':100}}]) # 100 >= age >= 0
             >>> jdb.find_iter(vals={'$not: {'$eq':'value1'})
             >>> jdb.find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
+            >>> jdb.find_iter(EXISTS='role')            
         """
         re_flags = kwargs.get('re_flags', re_I)
 
@@ -4241,8 +4317,13 @@ class JDbReader:
                         if not (key_rule and not key_rule.search(child_name)):
                             child = f_get_child(fp, child_name)
                             if isinstance(child, JDbReader):
-                                for kk,vv in child.find_iter(next_keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
-                                    yield child_name+SEP_SYM+kk,vv
+                                for _match in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, **kwargs):
+                                    if with_date:
+                                        _key, _val, _cdate, _mdate = _match
+                                        yield f'{child_name}{SEP_SYM}{_key}', _val, _cdate, _mdate
+                                    else:
+                                        _key, _val = _match
+                                        yield f'{child_name}{SEP_SYM}{_key}', _val
                 return
 
             keys = {'$re': re_compile(keys, flags=re_flags)}
@@ -4346,14 +4427,14 @@ class JDbReader:
 
                 for cmd,rules in vals.items():
                     cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
-                    if cmd_l in ('$key', '$date'):
+                    if cmd_l == '$key' or cmd_l == '$date':
                         continue
 
                     use_bytes = False
                     if cmd_l == '$eq' or cmd_l == '$ne':
                         use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
 
-                    elif cmd_l == '$has':
+                    elif cmd_l == '$has' or cmd_l == '$nhas' or cmd_l == '$ihas':
                         use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
                                     or isinstance(rules, str) and data_type.endswith('J')
 

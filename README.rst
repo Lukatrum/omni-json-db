@@ -809,6 +809,12 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - Operator
      - Description
      - Example Usage
+   * - ``.``  ``|``  ``/``
+     - Accesses nested fields within a document using a deep path.
+     - ``{'user.profile.age': {'$gt': 20}}``, ``{'user|tags|0': 'db'}``
+   * - ``*`` (Wildcard) 
+     - Matches any key at the current level in the document structure. 
+     - ``{'users.*.role': 'admin'}``, ``{'user*|ad*r|city': 'HK'}``
    * - ``$0``, ``$1``...
      - Matches the element exactly at the specified index (0, 1...) of an array.
      - ``{'$0': 'python'}``
@@ -821,7 +827,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * -
      -
      -
-   * - ``$not`` / ``!..``
+   * - ``$not`` / ``!``
      - Inverts the effect of a query expression (Logical NOT).
      - ``{'$not': {'tags': {'$has': 'linux'}}}``, ``{'!tags': {'$has': 'linux'}}``, ``{'tags': {'!$has': 'linux'}}``
    * - ``$and``
@@ -881,6 +887,9 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - ``!$in`` / ``$nin``
      - Matches if the value does NOT exist in the specified array/set.
      - ``{'$nin': ['python', 'db']}``, ``{'!$in': ['python', 'db']}``
+   * - ``$anyin``
+     - Matches if ANY element in the value array/iterable exists in the specified array/set.
+     - ``{'$anyin': ['admin', 'manager']}``
    * - ``$between``
      - Matches values within a specified inclusive range (min, max).
      - ``{'$between': (26, 40)}``

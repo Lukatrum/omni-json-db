@@ -1075,6 +1075,87 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(NOT={'email': lambda v: v != ''})
             self.assertEqual(set(res), {'user_2', 'user_3'})
 
+            #----------------------------------------------------------
+            jdb += {
+                'user_5': {
+                    'name': 'Eva','age': 32, 'email': 'eva@company_a.com', 'role': 'officer',
+                    'addr_home': {'city': 'NYC', 'zip': 10001}, 'addr_work': {'city': 'LA'},
+                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85, 90, 78]},
+                'user_6': {
+                    'name': 'Fiona', 'age': 44, 'email': 'fiona@company_b.com', 'role': 'CEO',
+                    'addr_home': {'city': 'Tokyo', 'zip':4000}, 'addr_work': {'city': 'HK', 'zip': 5001},
+                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92, 95, 99]}
+            }
+
+            # city name == 'NYC'
+            res = jdb.find(vals={'addr*.city': 'NYC'})
+            self.assertEqual(set(res), {'user_5'})
+
+            # city name start with 'L'
+            res2 = jdb.find(vals={'addr*.city': {'$sw': 'L'}})
+            self.assertEqual(res, res2)
+
+            # 'meta' exists and not city == Tokyo
+            res = jdb.find(vals={'!addr*.city': 'Tokyo'}, EXISTS='meta')
+            self.assertEqual(set(res), {'user_5'})
+
+            # 'email' exists
+            res = jdb.find(EXISTS='email')
+            self.assertEqual(set(res), {'user_1', 'user_4', 'user_5', 'user_6'})
+
+            # both 'email' and 'meta' exist
+            res = jdb.find(EXISTS=('email', 'meta'))
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # city name start with 'L' or 'H'
+            res = jdb.find(vals={'addr*.city': {'$sw': ('L', 'H')}})
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            res2 = jdb.find(vals={'addr*|ci*': {'$sw': ('L', 'H')}})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'addr*/ci*': {'$sw': ('L', 'H')}})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'addr*\\ci*': {'$sw': ('L', 'H')}})
+            self.assertEqual(res, res2)
+
+            # zip code >= 5000
+            res2 = jdb.find(vals={'addr*.zip': {'$ge': 5000}})
+            self.assertEqual(res, res2)
+
+            # addr_home.zip >= 5000
+            res = jdb.find(vals={'addr_home.zip': {'$ge': 5000}})
+            self.assertEqual(set(res), {'user_5'})
+
+            # meta.tags[0] == 'python' or meta.labels[0] == 'python'
+            res = jdb.find(vals={'meta.*.0': 'python'})
+            self.assertEqual(set(res), {'user_6'})
+
+            # meta.tags[-1] == 'api' or meta.labels[-1] == 'api'
+            res = jdb.find(vals={'meta.*.-1': 'api'})
+            self.assertEqual(set(res), {'user_5'})
+
+            # meta.tags[0].endswith(('b', 'i')) or meta.labels[0].endswith(('b', 'i'))
+            res = jdb.find(vals={'meta.*.0': {'$ew': ('b', 'i')}})
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # 'db' in meta.tags
+            res = jdb.find(vals={'meta.tags.*': 'db'})
+            self.assertEqual(set(res), {'user_5'})
+
+            res = jdb.find(vals={'meta.tags.*': {'$ew': ('b', 'i')}})
+            self.assertEqual(set(res), {'user_5'})
+
+            # any(socre >= 90 for score in scores)
+            res = jdb.find(vals={'scores.*': {'$gte': 90}})
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # any(score > 95 for score in scores)
+            res = jdb.find(vals={'scores.*': {'$gt': 95}})
+            self.assertEqual(set(res), {'user_6'})
+
+            #----------------------------------------------------------
             del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
                         {'name': 'Bob', 'age': 25, 'role': 'helper'},
@@ -1258,7 +1339,7 @@ class TestJDb(unittest.TestCase):
             jdb[matches_2] = lambda key,val: add_tag(key, val, 'database') #pylint: disable=cell-var-from-loop
             matches = jdb.find(ANY={'$2': 'database'})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
-
+            # --------------------------------------
             jmem1 = jmem.add_group('other')
             jmem1 += {'key1':[1, 2, 3, 4], 'key2':[0, 9, 8, 7, 6], 'key3':[0, 2, 4, 6]}
             matches = jmem1.find(ALL={'$ne':0})

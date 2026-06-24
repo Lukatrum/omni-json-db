@@ -805,6 +805,12 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - 運算符 (Operator)
      - 說明 (Description)
      - 範例用法 (Example Usage)
+   * - ``.``  ``|``  ``/``
+     - 透過深度路徑存取文檔內的巢狀深層欄位。
+     - ``{'user.profile.age': {'$gt': 20}}``, ``{'user|tags|0': 'db'}``
+   * - ``*`` (萬用字元) 
+     - 在文檔結構中，比對當前層級的任何鍵（Key）。 
+     - ``{'users.*.role': 'admin'}``, ``{'user*|ad*r|city': 'HK'}``
    * - ``$0``, ``$1``...
      - 精確比對陣列中指定索引（0, 1...）的元素。
      - ``{'$0': 'python'}``
@@ -817,7 +823,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * -
      -
      -
-   * - ``$not`` / ``!..``
+   * - ``$not`` / ``!``
      - 反轉查詢表達式的效果（邏輯 NOT）。
      - ``{'$not': {'tags': {'$has': 'linux'}}}``, ``{'!tags': {'$has': 'linux'}}``, ``{'tags': {'!$has': 'linux'}}``
    * - ``$and``
@@ -877,6 +883,9 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - ``!$in`` / ``$nin``
      - 當值「不」存在於指定的陣列/集合中時即成立。
      - ``{'$nin': ['python', 'db']}``, ``{'!$in': ['python', 'db']}``
+   * - ``$anyin``
+     - 當值陣列/可迭代物件中有「任何」元素存在於指定的陣列/集合中時即成立。
+     - ``{'$anyin': ['admin', 'manager']}``
    * - ``$between``
      - 比對落在指定包含範圍（最小值, 最大值）內的值。
      - ``{'$between': (26, 40)}``
