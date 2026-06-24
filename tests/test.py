@@ -733,6 +733,9 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'name': {'$ew': 'e'}})
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
+            res = jmem.show(r'users:::user_', vals={'name': {'$ew': 'e'}}, with_date=True)
+            self.assertEqual(set(res), {'users:::user_1', 'users:::user_3'})
+
             # 'Aa' <= VAL['name'] <= 'Bz'
             res = jdb.find(vals={'name': {'$between': ('Aa', 'Bz')}})
             self.assertEqual(set(res), {'user_1', 'user_2'})

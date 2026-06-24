@@ -1063,6 +1063,7 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
 
     child_key, rest_parts = key_parts[0], key_parts[1:]
     if '*' in child_key:
+        child_vals = None
         if isinstance(val, dict):
             if child_key == '*':
                 child_vals = list(val.values()) # any field
@@ -1073,9 +1074,6 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
 
         elif isinstance(val, (list, tuple)):
             child_vals = list(val) if child_key == '*' else [] # only bare * on sequences
-
-        else:
-            child_vals = []
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
 
@@ -4427,7 +4425,7 @@ class JDbReader:
 
                 for cmd,rules in vals.items():
                     cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
-                    if cmd_l == '$key' or cmd_l == '$date':
+                    if cmd_l in ('$key', '$date'): # pragma: no cover
                         continue
 
                     use_bytes = False
