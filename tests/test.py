@@ -384,10 +384,10 @@ class TestJDb(unittest.TestCase):
             jdb.keys['user_4'] = prev_date3 = today - dt.timedelta(days=3) # change modified date
             self.assertEqual(jdb, users)
 
-            res = jdb.show(limit=0) # display all
+            res = jdb.show(limit=0, with_date=True) # display all
             self.assertEqual(res, users)
 
-            res1 = jmem.show(vals={'$key':None, '$date':None}, limit=0)
+            res1 = jmem.show(vals={'$key':None, '$date':None}, limit=0, with_date=True)
             self.assertEqual({f'users:::{kk}' for kk in res}, set(res1))
 
             # --------------------------------------------
@@ -412,6 +412,12 @@ class TestJDb(unittest.TestCase):
             # modified date near today() +/- 1 days
             res = jdb.find(date={'$near': (today, 1)})
             self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res = jdb.find(date={'$near': (today, 1)}, limit=1)
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(date={'$near': (today, 1)}, skip=1)
+            self.assertEqual(set(res), {'user_2'})
 
             # 2005-05-05 <= created date <= 2010-10-10
             res = jdb.find(date={'$between': (dt_2005, dt_2010)})
@@ -509,23 +515,33 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(date=-1)
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
+            # check modified date in set()
             res = jdb.find(date={'$in': {prev_date3, prev_date1}})
             self.assertEqual(set(res), {'user_2', 'user_4'})
 
             res2 = jdb.find(date={prev_date3, prev_date1})
             self.assertEqual(res, res2)
 
-            #  check created date in tuple or list
+            res2 = jdb.find(date={'$anyin': [prev_date3, prev_date1]})
+            self.assertEqual(res, res2)
+
+            # check created date in tuple or list
             res2 = jdb.find(date=(dt_2005.date(), dt_2015.date()))
             self.assertEqual(res, res2)
 
             res2 = jdb.find(date=[dt_2015.date(), dt_2005.date()])
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(date={'$anyin': {dt_2015.date(), dt_2005.date()}})
+            self.assertEqual(res, res2)
+
             res = jdb.find(date={'$nin': {prev_date3, prev_date1}}, with_value=True)
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
             res2 = jdb.find(date={'!$in': {prev_date3, prev_date1}}, with_value=True)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(date={'!$anyin': {prev_date3, prev_date1}}, with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jdb.find(date={'$nin': (dt_2005.date(), dt_2015.date())}, with_value=True)
@@ -570,10 +586,10 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}, with_value=True)
             self.assertEqual(res, res2)
 
-            res2 = jdb.show(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]})
+            res2 = jdb.show(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}, with_date=True)
             self.assertEqual(res, res2)
 
-            res1 = jmem.show(vals={'$date': {'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}})
+            res1 = jmem.show(vals={'$date': {'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}}, with_date=True)
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res1)
 
             res = jdb.find(date=lambda cdate,mdate: cdate < today and mdate >= prev_date1) # pylint: disable=W0640
@@ -586,6 +602,9 @@ class TestJDb(unittest.TestCase):
             # KEY.endswith('_3')
             res = jdb.find({'$ew': '_3'})
             self.assertEqual(set(res), {'user_3'})
+
+            res2 = jdb.find_iter({'$ew': '_3'}, with_date=True)
+            self.assertEqual({k[0]:k[1] for k in res2 if len(k) == 4}, res)
 
             # 'user_2' <= KEY <= 'user_4'
             res = jdb.find({'$between': ('user_2', 'user_4')})
@@ -666,6 +685,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find({'!$in': ['user_3', 'user_4']}, with_value=True) # not in ['user_3', 'user_4']
             self.assertEqual(res, res2)
 
+            res2 = jdb.find({'!$anyin': ['user_3', 'user_4']}, with_value=True)
+            self.assertEqual(res, res2)
+
             res = jdb.find({'$size': [4,5,6]})
             self.assertEqual(set(res), set(users))
 
@@ -702,6 +724,10 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find({'$ihas': 'UseR_'})
             self.assertEqual(res, res2)
 
+            for skip in range(len(jdb)):
+                res = jdb.find('', limit=1, skip=skip)
+                self.assertEqual(res, {f'user_{skip+1}':None})
+
             #----------------------------------------------------------
             # VAL['name'].endswith('e')
             res = jdb.find(vals={'name': {'$ew': 'e'}})
@@ -716,7 +742,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_3', 'user_4'})
 
             # 1. Exact Match & Global Search (ANY, RE, RE2)
-            #----------------------------------------------------------            
+            #----------------------------------------------------------
             # Find users where any attribute exactly matches 'Alice'
             res = jdb.find(ANY='Alice')
             self.assertEqual(set(res), {'user_1'})
@@ -754,7 +780,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(RE2=r'role:designer') # find(vals={'$re2': r'role:designer'})
             self.assertEqual(set(res), {'user_4'})
 
-            res2 = jdb.show(RE2=r'role:designer')
+            res2 = jdb.show(RE2=r'role:designer', with_date=True)
             self.assertEqual(res, res2)
 
             res2 = jmem.show(RE2=r'role:designer')
@@ -831,9 +857,20 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'tags': {'$any': 'python'}})
             self.assertEqual(res, res2)
 
+            # Value['tags'][0] == 'python'
+            res2 = jdb.find(vals={'tags.0': 'python'})
+            self.assertEqual(res, res2)
+
+            # Value['tags'][-1] == 'aws'
+            res = jdb.find(vals={'tags.-1': 'aws'})
+            self.assertEqual(set(res), {'user_3'})
+
             res = jdb.find(vals={'tags': {'$in': ['python', 'database']}})
             self.assertNotEqual(res, res2)
             self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(vals={'tags': {'$anyin': ['linux', 'database']}})
+            self.assertEqual(set(res), {'user_1', 'user_3'})
 
             res = jdb.find(vals={'tags': {'$nin': ['python', 'database']}})
             self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
@@ -903,6 +940,12 @@ class TestJDb(unittest.TestCase):
             res = jmem.find(vals={'$key': ['user_1', 'user_4'], '$date': {'$lt': dt_2010}, 'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'users:::user_1'})
 
+            res2 = jmem.find(vals={'$key': ''}, limit=1)
+            self.assertEqual(res, res2)
+
+            res = jmem.find(vals={'$key': ''}, limit=1, skip=1)
+            self.assertNotEqual(set(res), {'users:::user_1'})
+
             # not 40 >= Age > 25
             res = jdb.find(NOT={'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'user_2'})
@@ -911,10 +954,13 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]})
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
+            res2 = jdb.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]}, skip=1)
+            self.assertEqual(set(res2), {'user_2'})
+
             res2 = jdb.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]})
             self.assertEqual(res, res2)
 
-            res2 = jmem.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]})
+            res2 = jmem.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]}, with_date=True)
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res2)
 
             # 3. Logical Grouping (AND, OR, NOR, NOT)
@@ -922,6 +968,9 @@ class TestJDb(unittest.TestCase):
             # Age >= 25 AND Age <= 30
             res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
             self.assertEqual(set(res), {'user_1', 'user_2', 'user_4'})
+
+            res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}], limit=1, skip=1)
+            self.assertEqual(set(res), {'user_2'})
 
             # Role is 'admin' OR Age > 30
             res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
@@ -984,10 +1033,10 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(re.compile(r'^user_[1-2]$'), with_value=True)
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
-            res2 = jdb.show(re.compile(r'^user_[1-2]$'))
+            res2 = jdb.show(re.compile(r'^user_[1-2]$'), with_date=True)
             self.assertEqual(res, res2)
 
-            res2 = jmem.show(vals={'$key': re.compile(r'^user_[1-2]$')})
+            res2 = jmem.show(vals={'$key': re.compile(r'^user_[1-2]$')}, with_date=True)
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res2)
 
             # 5. Array / List Operations
@@ -1003,7 +1052,7 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.show(vals={'tags': {'$0': 'python'}})
             self.assertEqual(res, res2)
 
-            res2 = jmem.show(vals={'tags': {'$0': 'python'}})
+            res2 = jmem.show(vals={'tags': {'$0': 'python'}}, with_date=True)
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res2)
 
             res = jdb.find(vals={'tags': {'!$0': 'python'}})
@@ -1249,6 +1298,10 @@ class TestJDb(unittest.TestCase):
             matches = jmem1.find(AND=[{'!$type':list}, {'$ge': 8}])
             self.assertEqual(set(matches), {'8', '9'})
 
+            jmem1 += {f'1st_{v}':{f'2nd_{vv}':{f'3rd_{vvv}':vvv for vvv in range(vv+2)} for vv in range(v+1)} for v in range(8)}
+            matches = jmem1.show('1st_', vals={'2nd_4.3rd_3': range(6)})
+            self.assertEqual(set(matches), {'1st_4', '1st_5', '1st_6', '1st_7'})
+
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
@@ -1272,7 +1325,7 @@ class TestJDb(unittest.TestCase):
             with open(csv_file, 'rt', encoding='utf8') as fp:
                 print(fp.read())
 
-            jdb.show()
+            jdb.show(with_date=True)
 
             jmem2 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jmem2.from_csv(csv_file)
@@ -4552,6 +4605,12 @@ class TestJDb(unittest.TestCase):
 
             matches = jdb.find(HAS='洲')
             self.assertEqual(set(matches), {'美國'})
+
+            matches_2 = jdb.find(EXISTS='洲')
+            self.assertEqual(matches, matches_2)
+
+            matches = jdb.show(vals={'國旗.1':'黃色'})
+            self.assertEqual(set(matches), {'中國', '德國'})
 
             matches = jdb.find(RE=r'英文')
             self.assertEqual(set(matches), {'美國', '英國', '澳洲', '加拿大'})

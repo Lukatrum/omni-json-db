@@ -82,8 +82,8 @@ FIND_OPS = {
     'NOT',          # {'$not': A}                           # not A
     'OR',           # {'$or': [A, B, ..]}                   # (A or B or ..)
     'NOR',          # {'$nor': [A, B, ..]} == {'!$or': [A, B, ..]} # not (A or B or ..)
-    'IN',           # {'$in': [...] or {...} or (...)} == [...] == {...} == (...) # Value in [...]
-    'NIN',          # {'$nin': [...] or {...} or (...)} == {'!$in': ... } # Value not in [...]
+    'IN',           # {'$in': {...}}                        # Value in {...}/[...]/(...)
+    'NIN',          # {'$nin': {...}} == {'!$in': {...}}    # Value not in {...}/[...]/(...)
     'EQ',           # {'$eq': chk } == chk                  # Value == chk
     'NE',           # {'$ne': chk } == {'!$eq': chk}        # Value != chk
     'GT',           # {'$gt': chk }                         # Value > chk
@@ -104,6 +104,7 @@ FIND_OPS = {
     'NHAS',         # {'$nhas': chk} == {'!$has': chk}      # Value.find(chk) < 0  or chk not in Value
     'SW',           # {'$sw': chk}                          # Value.startswith(chk)
     'EW',           # {'$ew': chk}                          # Value.endswith(chk)
+    'ANYIN',        # {'$anyin': {...}}                     # any(kk in Value for kk in chk)
     'NAND',         # {'$nand': [A, B, ..]} == {'!$and': [A, B, ..]} # not (A and B and ..)
     'BETWEEN',      # {'$between': (low, high)}             # low <= Value <= high
     'NEAR',         # {'$near': (target, tol)}              # abs(Value - target) <= tol
@@ -321,7 +322,7 @@ def _match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                     is_matched = key.startswith(rule) if cmd[1] == 's' else key.endswith(rule)
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$in' or cmd == '$nin':
+            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 try:
                     is_matched = (key not in rule) if reverse_it else (key in rule)
@@ -551,10 +552,11 @@ def _match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bo
                     is_matched = date_s.startswith(rule) if cmd[1] == 's' else date_s.endswith(rule)
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$in' or cmd == '$nin':
+            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 try:
-                    is_matched = (mdate in rule or mdate_s in rule) if isinstance(rule, set) else \
+                    is_matched = (mdate in rule or mdate_s in rule or cdate in rule or cdate_s in rule) if cmd.endswith('anyin') else \
+                                (mdate in rule or mdate_s in rule) if isinstance(rule, set) else \
                                 (cdate in rule or cdate_s in rule)
                     is_matched = (not is_matched) if reverse_it else is_matched
                 except TypeError: # pragma: no cover
@@ -672,7 +674,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
             rules = {'$re': rules}
         elif callable(rules):
             rules = {'$func': rules}
-        elif isinstance(rules, (list, set, tuple, frozenset)):
+        elif isinstance(rules, (list, set, tuple, frozenset, range)):
             rules = {'$in': set(rules)}
         elif isinstance(rules, (dt_date, datetime)):
             rules = {'$eq': rules}
@@ -774,18 +776,20 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                 except (TypeError, ValueError, AttributeError): # pragma: no cover
                     pass
 
-            elif cmd == '$in' or cmd == '$nin':
+            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 if hasattr(rule, '__contains__'):
                     try:
                         if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
-                            is_matched = (val not in rule) if reverse_it else (val in rule)
+                            is_matched = val in rule
 
                         elif val.__iter__:
-                            _set_a = set(rule) if not isinstance(rule, (set, frozenset)) else rule
-                            _set_b = set(val) if not isinstance(val, (set, frozenset)) else val
-                            _set_c = _set_a.intersection(_set_b)
-                            is_matched = (_set_c != _set_a) if reverse_it else (_set_c == _set_a)
+                            _set_r = set(rule) if not isinstance(rule, (set, frozenset)) else rule
+                            _set_v = set(val) if not isinstance(val, (set, frozenset)) else val
+                            is_matched = len(_set_r & _set_v) > 0 if cmd.endswith('anyin') else \
+                                        _set_r.issubset(_set_v)
+
+                        is_matched = (not is_matched) if reverse_it else is_matched
 
                     except TypeError: # pragma: no cover
                         pass
@@ -794,9 +798,14 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 if hasattr(val, '__contains__') and not isinstance(val, (str, bytes, bytearray)):
                     try:
-                        val_l = {vv.lower() for vv in val} if cmd[1] == 'i' else val
-                        rule_l = rule.lower() if cmd[1] == 'i' else rule
-                        is_matched = (rule_l not in val_l) if reverse_it else (rule_l in val_l)
+                        _set_r = rule if isinstance(rule, (set, frozenset)) else \
+                                set(rule) if isinstance(rule, (list, tuple)) else {rule}
+                        _set_r = {vv.lower() for vv in _set_r} if cmd[1] == 'i' else _set_r
+                        _set_v = set(val) if not isinstance(val, (set, frozenset)) else val
+                        _set_v = {vv.lower() for vv in _set_v} if cmd[1] == 'i' else _set_v
+                        is_matched = _set_v.issuperset(_set_r) and len(_set_r - _set_v) == 0
+                        is_matched = (not is_matched) if reverse_it else is_matched
+
                     except (TypeError, ValueError, AttributeError): # pragma: no cover
                         pass
                 else:
@@ -957,7 +966,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                             if _ref_l in val:
                                 _is_matched = _match_VAL_rules(key, val[_ref_l], _rule, cdate, mdate, level=level+1)
                                 _is_matched = (not _is_matched) if _reverse_it else _is_matched
-                                if not _is_matched:
+                                if not _is_matched: # pragma: no cover
                                     break
 
                     is_matched = True if _is_matched else is_matched
@@ -978,12 +987,34 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
             is_matched = (not is_matched) if reverse_it else is_matched
 
         elif cmd == '_id':
-            is_matched = _match_KEY_rules(key, rule, level=level)
+            is_matched = _match_KEY_rules(key, rule, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
 
         elif cmd == '_date':
-            is_matched = _match_DATE_rules(cdate, mdate, rule, level=level)
+            is_matched = _match_DATE_rules(cdate, mdate, rule, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
+
+        elif is_dict:
+            for sep in (SEP_SYM, '/', '.'):
+                idx = cmd.find(sep)
+                if idx < 0: continue
+                parts = cmd.split(sep)
+                try:
+                    _val = val
+                    for part in parts:
+                        if isinstance(_val, dict):
+                            _val = _val[part]
+                        elif isinstance(_val, (list, tuple)):
+                            _val = _val[int(part)]
+                        else: # pragam: no cover
+                            raise TypeError
+
+                    is_matched = _match_VAL_rules(key, _val, rule, cdate, mdate, level=level+1)
+                    is_matched = (not is_matched) if reverse_it else is_matched
+                    break
+
+                except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
+                    pass
 
         if not is_matched: return False
 
@@ -4095,7 +4126,7 @@ class JDbReader:
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -4132,7 +4163,9 @@ class JDbReader:
                 
             date (Optional[Any], optional): Timeline constraint for record modifications.
             limit (int, optional): Max results to return. 0 means unlimited. Defaults to 0.
+            skip (int, optional): skip number of matched records, Defaults to 0.
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
+            with_date (bool, optional): Whether to return the actual value + created date + modified date Defaults to False.
             **kwargs: Extra filter configurations (e.g., regex flags).
 
         Yields:
@@ -4238,6 +4271,7 @@ class JDbReader:
             io_conv_date = io.z_conv_date
             data_type = io.data_type_str
             cache = self._cache
+            skipped = 0
             for key,row_id in io.sorted_key_table_items():
                 if count >= limit > 0:
                     break
@@ -4253,16 +4287,24 @@ class JDbReader:
                 if not is_matched:
                     continue
 
-                if date is not None:
+                if date is not None or with_date:
                     key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row_id)
                     cdate, mdate = io_conv_date(_days)
-                    if not _match_DATE_rules(cdate, mdate, date):
+                    if date is not None and not _match_DATE_rules(cdate, mdate, date):
                         continue
                 else:
                     cdate = mdate = None
 
                 if not with_value:
-                    yield key, None
+                    if skipped < skip:
+                        skipped += 1
+                        continue
+
+                    if with_date:
+                        yield key, None, cdate, mdate
+                    else:
+                        yield key, None
+
                     count += 1
                     continue
 
@@ -4280,8 +4322,18 @@ class JDbReader:
                     _keys = _vals.pop('$key', None)
                     _date = _vals.pop('$date', date)
                     child_limit = (limit-count) if limit > 0 else 0
-                    for _key,_val in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value):
-                        yield f'{key}{SEP_SYM}{_key}', _val
+                    for _match in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value, with_date=with_date):
+                        if skipped < skip:
+                            skipped += 1
+                            continue
+
+                        if with_date:
+                            _key, _val, _cdate, _mdate = _match
+                            yield f'{key}{SEP_SYM}{_key}', _val, _cdate, _mdate
+                        else:
+                            _key, _val = _match
+                            yield f'{key}{SEP_SYM}{_key}', _val
+
                         count += 1
                         if count >= limit > 0: # pragma: no cover
                             break
@@ -4324,9 +4376,18 @@ class JDbReader:
                         break
 
                 if is_matched:
+                    if skipped < skip:
+                        skipped += 1
+                        continue
+
                     if move_to_end: # pragma: no cover
                         cache.move_to_end(key)
-                    yield (key, value)
+
+                    if with_date:
+                        yield key, value, cdate, mdate
+                    else:
+                        yield key, value
+
                     count += 1
 
     def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Union[str,datetime,dt_date,int,None]=None, sort:int=0, **kwargs) -> list:
@@ -4347,16 +4408,17 @@ class JDbReader:
         if not callable(map_func):
             raise TypeError('not callable')
 
+        sort_func = kwargs.get('sort_func', None)
+        if sort_func is not None and not callable(sort_func): # pragma: no cover
+            raise TypeError('invalid sorted function')
+
         matches = []
         for key,val in self.find_iter(keys=keys, vals=vals, date=date, with_value=True, **kwargs):
             matches.append(map_func(key, val))
 
-        if sort:
-            return sorted(matches, reverse=sort<0, **kwargs)
+        return sorted(matches, reverse=sort<0, key=sort_func) if sort else matches
 
-        return matches
-
-    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, with_value:Optional[bool]=None, sort:int=0, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, sort:int=0, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -4365,6 +4427,7 @@ class JDbReader:
             vals (Optional[Dict[str, Any]], optional): Condition for value filtering using operators.
             date (Optional[Any], optional): Date filters.
             limit (int, optional): Maximum item cap. Defaults to 0.
+            skip (int, optional): skip number of matched records, Defaults to 0.
             with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.
             sort (int, optional): Sorting direction (1 for ascending, -1 for descending, 0 for unsorted). Defaults to 0.
 
@@ -4375,7 +4438,7 @@ class JDbReader:
             with_value = not (not vals and not kwargs and sort == 0)
 
         matches = {}
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=with_value, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=False, **kwargs):
             matches[key] = val
 
         if len(matches) > 1 and sort != 0:
@@ -4383,7 +4446,7 @@ class JDbReader:
 
         return matches
 
-    def show(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=20, **kwargs) -> Dict[str,Any]:
+    def show(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=50, skip:int=0, with_date:bool=False, **kwargs) -> Dict[str,Any]:
         """
         show matched key+value in table.
 
@@ -4391,7 +4454,9 @@ class JDbReader:
             keys (Optional[Any], optional): Condition for key filtering.
             vals (Optional[Dict[str, Any]], optional): Condition for value filtering using operators.
             date (Optional[Any], optional): Date filters.
-            limit (int, optional): +ve matched item. 0=all matched items (default=20)
+            limit (int, optional): +ve matched item. 0=all matched items (default=50)
+            skip (int, optional): skip number of matched records, Defaults to 0.
+
 
         Example:
             >>> jdb = JDb()
@@ -4418,12 +4483,17 @@ class JDbReader:
         """
 
         data_rows = []
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, with_value=True, **kwargs):
-            data_rows.append((key, val))
+        for match in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=with_date, **kwargs):
+            data_rows.append(match)
 
         fields = ['_id']
         patterns = {'_id'}
-        for _key, val in data_rows:
+        if with_date:
+            fields.append('_date')
+            patterns.add('_date')
+
+        for match in data_rows:
+            _key, val = match[:2]
             if isinstance(val, dict):
                 kk = '|'.join(val)
                 if kk not in patterns:
@@ -4470,8 +4540,15 @@ class JDbReader:
 
         col_widths = {field: _get_display_width(field) for field in fields}
         matrix = []
-        for key, val in data_rows:
+        for match in data_rows:
             row_data = {field:'' for field in fields}
+            if with_date:
+                key, val, cdate, mdate = match
+                row_data['_date'] = _date = f'{cdate} {mdate}'
+                col_widths['_date'] = max(col_widths['_date'], _get_display_width(_date))
+            else:
+                key, val = match
+
             row_data['_id'] = key
             col_widths['_id'] = max(col_widths['_id'], _get_display_width(key))
             if isinstance(val, dict):
@@ -4502,7 +4579,7 @@ class JDbReader:
         for row_data in matrix:
             print("|" + "|".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "|")
         print(border)
-        return dict(data_rows) if data_rows else {}
+        return {vv[0]:vv[1] for vv in data_rows} if data_rows else {}
 
     def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:
         """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.
