@@ -76,42 +76,67 @@ TYPE_MAP = {
 FIND_OPS = {
     # --- MongoDB syntax
     'AND',          # {'$and': [A, B, ..]}                  # (A and B and ..)
-    'NOT',          # {'$not': A}                           # not A
+                    # {A, B, ...}                           # {$gt:.., $lt:100, ...}
+    'NOT',          # {'$not': A}                           # not A                    
     'OR',           # {'$or': [A, B, ..]}                   # (A or B or ..)
-    'NOR',          # {'$nor': [A, B, ..]} == {'!$or': [A, B, ..]} # not (A or B or ..)
+    'NOR',          # {'$nor': [A, B, ..]}                  # not (A or B or ..)
+                    # {'!$or': [A, B, ..]}
     'IN',           # {'$in': {...}}                        # Value in {...}/[...]/(...)
-    'NIN',          # {'$nin': {...}} == {'!$in': {...}}    # Value not in {...}/[...]/(...)
-    'EQ',           # {'$eq': chk } == chk                  # Value == chk
-    'NE',           # {'$ne': chk } == {'!$eq': chk}        # Value != chk
+                    # {...} / [...] / (...)
+    'NIN',          # {'$nin': {...}}                       # Value not in {...}/[...]/(...)
+                    # {'!$in': {...}}
+    'EQ',           # {'$eq': chk }                         # Value == chk
+                    # chk
+    'NE',           # {'$ne': chk }                         # Value != chk
+                    # {'!$eq': chk}
     'GT',           # {'$gt': chk }                         # Value > chk
     'LT',           # {'$lt': chk }                         # Value < chk
     'GTE',          # {'$gte': chk }                        # Value >= chk
     'LTE',          # {'$lte': chk }                        # Value <= chk
     'SIZE',         # {'$size': chk }                       # len(Value) == chk
-    'REGEX',        # {'$regex': Pattern or string}         # re.search(chk, Value)
+    'REGEX',        # {'$regex': re.Pattern(...)}           # pattern.search(chk, Value)
+                    # {'$regex': r'...'}                    # re.search(chk, Value)
+                    # re.Pattern(...)
     # --- Not official
-    'GE',           # {'$ge': chk } == {'$gte': chk }       # Value >= chk
-    'LE',           # {'$le': chk } == {'$gte': chk }       # Value <= chk
-    'RE',           # {'$re': re.Pattern or string}         # re.search(chk, Value)
-    'RE2',          # {'$re2': re.Pattern or string}        # re.search(chk, JSON_RE_sub('', Value))
-    'FUNC',         # {'$func': lambda k,v: ..} or {'$func': lambda k: ..} or lambda k,v: .. or lambda k: ..
-    'HAS',          # {'$has': chk}                         # Value.find(chk) >= 0 or chk in Value
+    'GE',           # {'$ge': chk }                         # Value >= chk
+                    # {'$gte': chk }
+    'LE',           # {'$le': chk }                         # Value <= chk
+                    # {'$gte': chk }
+    'RE',           # {'$re': re.Pattern(...)}              # pattern.search(chk, Value)
+                    # {'$re': r'...'}                       # re.search(chk, Value)
+                    # re.Pattern(...)
+    'RE2',          # {'$re2': re.Pattern(...)}             # pattern.search(chk, JSON_RE_sub('', Value))
+                    # {'$re2': r'...'}                      # re.search(chk, JSON_RE_sub('', Value))
+    'FUNC',         # {'$func': lambda key,val: ..}         # bool(func(Key, Value))
+                    # {'$func': lambda val: ..}             # bool(func(Value))
+                    # lambda key,val: ...
+                    # lambda val: ...
+    'HAS',          # {'$has': chk}                         # Value.find(chk) >= 0
+                    # {'$has': {...}                        # {...}.issubset(Value)
     # ---
     'IHAS',         # {'$ihas': chk}                        # Value.lower().find(chk.lower()) >= 0  
-    'NHAS',         # {'$nhas': chk} == {'!$has': chk}      # Value.find(chk) < 0  or chk not in Value
+                    # {'$ihas': [...]}                      # {lower(...)}.issubset(Value.lower())
+    'NHAS',         # {'$nhas': chk}                        # Value.find(chk) < 0  or chk not in Value
+                    # {'$nhas' : {...}}                     # not {...}.issubset(Value)
+                    # {'!$has' : chk}
     'SW',           # {'$sw': chk}                          # Value.startswith(chk)
+                    # {'$sw': (...)}                        # Value.startswith((...))
     'EW',           # {'$ew': chk}                          # Value.endswith(chk)
-    'ANYIN',        # {'$anyin': {...}}                     # any(kk in Value for kk in chk)
-    'NAND',         # {'$nand': [A, B, ..]} == {'!$and': [A, B, ..]} # not (A and B and ..)
+                    # {'$sw': (...)}                        # Value.endswith((...))
+    'ANYIN',        # {'$anyin': {...}}                     # any(kk in Value for kk in {...})
+    'NAND',         # {'$nand': [A, B, ..]}                 # not (A and B and ..)
+                    # {'!$and': [A, B, ..]}
     'BETWEEN',      # {'$between': (low, high)}             # low <= Value <= high
     'NEAR',         # {'$near': (target, tol)}              # abs(Value - target) <= tol
     'MOD',          # {'$mod': (divisor, remainder))        # (Value % divisor) == remainder
     # --- Only support VAL (not KEY and DATE)
     'ANY',          # {'$any': ... }                        # any(...)
     'ALL',          # {'$all': ... }                        # all(...)
-    'NONE',         # {'$none': ... } == {'!$any': ...}     # not any(...)
+    'NONE',         # {'$none': ... }                       # not any(...)
+                    # {'!$any': ... }
     'TYPE',         # {'$type': chk}                        # type(Value) == chk
     'EXISTS',       # {'$exists': chk}                      # chk in Value
+                    # {'$exists': {...}}                    # all(chk in Value for chk in {...})
 }
 
 def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, verbose:int=0) -> TCPServer:
@@ -998,31 +1023,42 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
             is_matched = (not is_matched) if reverse_it else is_matched
 
         elif is_dict:
+            _cnt = 0
             for sep in '|/\\.':
                 idx = cmd.find(sep)
                 if idx < 0: continue
                 parts = cmd.split(sep)
                 if any('*' in part for part in parts): # any wildcard in parts
+                    _cnt += 1
                     is_matched = _match_PATH(parts, key, val, rule, cdate, mdate, level=level+1)
                     is_matched = (not is_matched) if reverse_it else is_matched
                     break
 
                 try:
                     _val = val
-                    for part in parts:
-                        if isinstance(_val, dict):
-                            _val = _val[part]
+                    _size = len(parts)
+                    for ii,part in enumerate(parts):
+                        part_s = part.lstrip(' ')
+                        if ii+1 == _size and part.startswith(('!$', '$')):
+                            rule = {part_s:rule}
+                        elif isinstance(_val, dict):
+                            _val = _val[part_s]
                         elif isinstance(_val, (list, tuple)):
-                            _val = _val[int(part)]
+                            _val = _val[int(part_s)]
                         else: # pragma: no cover
                             raise TypeError
 
+                    _cnt += 1
                     is_matched = _match_VAL_rules(key, _val, rule, cdate, mdate, level=level+1)
                     is_matched = (not is_matched) if reverse_it else is_matched
                     break
 
                 except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
                     pass
+
+            if _cnt == 0 and '*' in cmd:
+                is_matched = _match_PATH([cmd], key, val, rule, cdate, mdate, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
         if not is_matched: return False
 
@@ -1062,27 +1098,31 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
         return _match_VAL_rules(key, val, rules, cdate, mdate, level=level+1)
 
     child_key, rest_parts = key_parts[0], key_parts[1:]
-    if '*' in child_key:
+    child_key_s = child_key.lstrip(' ')
+    if '*' in child_key_s:
         child_vals = None
         if isinstance(val, dict):
             if child_key == '*':
                 child_vals = list(val.values()) # any field
             else:
                 # Glob -> regex : 'addr*' -> r'^addr.*$'
-                rx = re_compile('^'+PATH_sub('.*', child_key)+'$')
+                rx = re_compile('^'+PATH_sub('.*', child_key_s)+'$')
                 child_vals = [v for k,v in val.items() if rx.match(k)]
 
         elif isinstance(val, (list, tuple)):
-            child_vals = list(val) if child_key == '*' else [] # only bare * on sequences
+            child_vals = list(val) if child_key_s == '*' else [] # only bare * on sequences
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
 
     else:
         try:
-            if isinstance(val, dict):
-                child_val = val[child_key]
+            if not rest_parts and child_key.startswith(('!$', '$')):
+                rules = {child_key_s:rules}
+                child_val = val
+            elif isinstance(val, dict):
+                child_val = val[child_key_s]
             elif isinstance(val, (list, tuple)):
-                child_val = val[int(child_key)]
+                child_val = val[int(child_key_s)]
             else: # pragma: no cover
                 raise TypeError
 
@@ -4609,7 +4649,10 @@ class JDbReader:
             if isinstance(val, (int, float, bool, bytes, bytearray)):
                 return str(val)
 
-            return f"<{type(val).__name__}>"
+            try:
+                return f"<{type(val).__name__}:{len(val)}>"
+            except TypeError: # pragma: no cover
+                return f"<{type(val).__name__}>"
 
         def _get_display_width(s_str:str) -> int:
             width = 0

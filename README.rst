@@ -814,7 +814,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
      - ``{'user.profile.age': {'$gt': 20}}``, ``{'user|tags|0': 'db'}``
    * - ``*`` (Wildcard) 
      - Matches any key at the current level in the document structure. 
-     - ``{'users.*.role': 'admin'}``, ``{'user*|ad*r|city': 'HK'}``
+     - ``{'users.*.role': 'admin'}``, ``{'user*|t*gs|*': 'db'}``
    * - ``$0``, ``$1``...
      - Matches the element exactly at the specified index (0, 1...) of an array.
      - ``{'$0': 'python'}``
@@ -931,10 +931,10 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
      -
    * - ``$exists``
      - Matches documents that have the specified field/key.
-     - ``{'$exists': ['age', 'tags']}``
+     - ``{'$exists': ['age', 'tags']}``, ``{'$exists': 'tags'}``
    * - ``!$exists``
      - Matches documents that lack the specified field/key.
-     - ``{'!$exists': ['age']}``
+     - ``{'!$exists': 'age'}``
    * - ``$size``
      - Matches if the size/length of an array/string equals the specified value.
      - ``{'$size': [1,2,3]}``

@@ -586,6 +586,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}, with_value=True)
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(date={'$ne': dt_2005, '!$eq': dt_2015}, with_value=True)
+            self.assertEqual(res, res2)
+
             res2 = jdb.show(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}, with_date=True)
             self.assertEqual(res, res2)
 
@@ -655,6 +658,8 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find({'$and': [{'$ne':'user_4'}, {'$ne':'user_3'}]}, with_value=True)
             self.assertEqual(res, res2)
 
+            res2 = jdb.find({'$ne':'user_4', '!$eq':'user_3'}, with_value=True)
+
             res2 = jdb.find({'$nor': ['user_3', 'user_4']}, with_value=True)
             self.assertEqual(res, res2)
 
@@ -662,6 +667,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res, res2)
 
             res2 = jdb.find({'$and': [{'$ge':'user_1'}, {'$le':'user_2'}]}, with_value=True)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find({'$ge':'user_1', '$le':'user_2'}, with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jdb.find({'$not': {'$or':[{'$gt':'user_2'}, {'$lt':'user_1'}]}}, with_value=True)
@@ -809,7 +817,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_2', 'user_4'})
 
             # age near 20 +/- 9
-            res2 = jdb.find(vals={'age' : {'$near': (20, 9)}})
+            res2 = jdb.find(vals={'age': {'$near': (20, 9)}})
             self.assertEqual(res, res2)
 
             # Not Age >= 30
@@ -888,6 +896,12 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'tags': {'$and' : [{'$has':'python'}, {'$has':'linux'}]}})
             self.assertEqual(set(res), {'user_3'})
 
+            res2 = jdb.find(vals={'tags.$has':'python', 'tags.!$nhas':'linux'})
+            self.assertEqual(set(res), {'user_3'})
+
+            res2 = jdb.find(vals={'tags.$has':'python', ' tags.$has':'linux'})
+            self.assertEqual(set(res), {'user_3'})
+
             # ANY contains 'Bo'
             res = jdb.find(ANY={'$has': 'Bo'})
             self.assertEqual(set(res), {'user_2'})
@@ -925,11 +939,17 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'user_1', 'user_3', 'user_4'})
 
+            res2 = jdb.find(vals={'age.$gt': 25, 'age.$le':40})
+            self.assertEqual(res, res2)
+
             # 26 <= Age <= 40
             res2 = jdb.find(ANY={'$between': (26, 40)})
             self.assertEqual(res, res2)
 
             res2 = jdb.find(vals={'age': {'$between': (26, 40)}})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'age.$between': (26, 40)})
             self.assertEqual(res, res2)
 
             # 40 > Age > 25 and KEY in ['user_1', 'user_4']
@@ -939,6 +959,9 @@ class TestJDb(unittest.TestCase):
             # 40 > Age > 25 and key in ['user_1', 'user_4'] and created date <= date(2010, 1, 1)
             res = jdb.find(vals={'_id': ['user_1', 'user_4'], '_date': {'$lt': dt_2010}, 'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'user_1'})
+
+            res2 = jdb.find({'$ew': ('_1', '_4')}, date={'$lt': dt_2010}, vals={'age.$between': (26, 40)})
+            self.assertEqual(res, res2)
 
             res = jmem.find(vals={'$key': ['user_1', 'user_4'], '$date': {'$lt': dt_2010}, 'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'users:::user_1'})
@@ -953,9 +976,15 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(NOT={'age': {'$gt': 25, '$lte':40}})
             self.assertEqual(set(res), {'user_2'})
 
+            res2 = jdb.find(vals={'!age.$between': (26, 40)})
+            self.assertEqual(res, res2)
+
             # name in ['Alice', 'Bob'] AND age in [30, 25]
             res = jdb.find(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]})
             self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res2 = jdb.find(vals={'n*e':re.compile(r'Alice|Bob'), 'age':[30, 25]})
+            self.assertEqual(res, res2)
 
             res2 = jdb.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]}, skip=1)
             self.assertEqual(set(res2), {'user_2'})
@@ -1098,9 +1127,15 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'addr*.city': {'$sw': 'L'}})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'*.city.$sw': 'L'})
+            self.assertEqual(res, res2)
+
             # 'meta' exists and not city == Tokyo
             res = jdb.find(vals={'!addr*.city': 'Tokyo'}, EXISTS='meta')
             self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(vals={'!*.city.$eq': 'Tokyo', '$exists':'meta'})
+            self.assertEqual(res, res2)
 
             # 'email' exists
             res = jdb.find(EXISTS='email')
@@ -1113,6 +1148,9 @@ class TestJDb(unittest.TestCase):
             # city name start with 'L' or 'H'
             res = jdb.find(vals={'addr*.city': {'$sw': ('L', 'H')}})
             self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            res2 = jdb.find(vals={'*.city.!$sw': ('A', 'B')})
+            self.assertEqual(res, res2)
 
             res2 = jdb.find(vals={'addr*|ci*': {'$sw': ('L', 'H')}})
             self.assertEqual(res, res2)
@@ -1127,9 +1165,15 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'addr*.zip': {'$ge': 5000}})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'a*|zip|$ge': 5000})
+            self.assertEqual(res, res2)
+
             # addr_home.zip >= 5000
             res = jdb.find(vals={'addr_home.zip': {'$ge': 5000}})
             self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(vals={'a*_h*|z*|!$lt': 5000})
+            self.assertEqual(res, res2)
 
             # meta.tags[0] == 'python' or meta.labels[0] == 'python'
             res = jdb.find(vals={'meta.*.0': 'python'})
@@ -1143,6 +1187,9 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'meta.*.0': {'$ew': ('b', 'i')}})
             self.assertEqual(set(res), {'user_5', 'user_6'})
 
+            res2 = jdb.find(vals={'m*a.*.0.$ew': ('b', 'i')})
+            self.assertEqual(res, res2)
+
             # 'db' in meta.tags
             res = jdb.find(vals={'meta.tags.*': 'db'})
             self.assertEqual(set(res), {'user_5'})
@@ -1150,13 +1197,22 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'meta.tags.*': {'$ew': ('b', 'i')}})
             self.assertEqual(set(res), {'user_5'})
 
+            res2 = jdb.find(vals={'me*.tags.*.$ew': ('b', 'i')})
+            self.assertEqual(res, res2)
+
             # any(socre >= 90 for score in scores)
             res = jdb.find(vals={'scores.*': {'$gte': 90}})
             self.assertEqual(set(res), {'user_5', 'user_6'})
 
+            res2 = jdb.find(vals={'sco*.*.$ge': 90})
+            self.assertEqual(res, res2)
+
             # any(score > 95 for score in scores)
             res = jdb.find(vals={'scores.*': {'$gt': 95}})
             self.assertEqual(set(res), {'user_6'})
+
+            res2 = jdb.find(vals={'*ores.*.!$le': 95})
+            self.assertEqual(res, res2)
 
             #----------------------------------------------------------
             del jdb[:]
@@ -4719,6 +4775,16 @@ class TestJDb(unittest.TestCase):
 
             matches = jdb.find(FUNC=lambda v: isinstance(v, dict) and v.get('語言', '') == '英文')
             self.assertEqual(set(matches), {'美國', '英國', '加拿大', '澳洲'})
+
+            # 國旗 is exists and (語言 is not 英文 and (len(國旗) == 3 and 國旗[1] == '白色'))
+            matches = jdb.show(EXISTS='國旗', vals={'!語言': '英文', '國旗':{'$size': 3, '$1':'白色'}}, with_date=True)
+            self.assertEqual(set(matches), {'法國', '意大利'})
+
+            matches_2 = jdb.show(vals={'!語言.$eq':'英文', '國旗.$size':3, '國旗.1':'白色'}, with_date=True)
+            self.assertEqual(matches, matches_2)
+
+            matches_2 = jdb.show(vals={'!*言.$eq':'英文', '國*.$size':3, '*旗.1':'白色'}, with_date=True)
+            self.assertEqual(matches, matches_2)
 
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
