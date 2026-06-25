@@ -872,6 +872,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'tags.0': 'python'})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'t?gs.?': 'python'})
+            self.assertEqual(res, res2)
+
             # Value['tags'][-1] == 'aws'
             res = jdb.find(vals={'tags.-1': 'aws'})
             self.assertEqual(set(res), {'user_3'})
