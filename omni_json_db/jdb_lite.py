@@ -61,7 +61,7 @@ _UInt64_x2_pack = Struct("QQ").pack # thread-safe
 _UInt64_x2_unpack = Struct("QQ").unpack
 
 JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_I|re_S).sub
-PATH_sub = re_compile(r'(?<!\W)\*+|\*+(?!\W|$)').sub
+PATH_RE_sub = re_compile(r'(?<!\W)\*+|\*+(?!\W|$)').sub
 
 SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
@@ -1028,7 +1028,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                 idx = cmd.find(sep)
                 if idx < 0: continue
                 parts = cmd.split(sep)
-                if any('*' in part for part in parts): # any wildcard in parts
+                if any('*' in part or '?' in part for part in parts): # any wildcard in parts
                     _cnt += 1
                     is_matched = _match_PATH(parts, key, val, rule, cdate, mdate, level=level+1)
                     is_matched = (not is_matched) if reverse_it else is_matched
@@ -1056,7 +1056,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
                 except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
                     pass
 
-            if _cnt == 0 and '*' in cmd:
+            if _cnt == 0 and ('*' in cmd or '?' in cmd):
                 is_matched = _match_PATH([cmd], key, val, rule, cdate, mdate, level=level+1)
                 is_matched = (not is_matched) if reverse_it else is_matched
 
@@ -1074,7 +1074,9 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
         key_parts (List[str]): Ordered list of remaining path segments to traverse, produced by splitting a separator-delimited path string (e.g. 'addr*.city' becomes ['addr*', 'city']). Each element is consumed one level per recursive call. Accepted forms for each segment are:
             - Literal string  : exact dict key lookup (e.g. 'meta', 'address').
             - Integer string  : zero-based index for list/tuple access (e.g. '0', '2').
+            - Single wilcard  ? '?' expands to every dict value
             - Bare wildcard   : '*' expands to every dict value or every sequence element.
+            - Recursive wildcard   : '**' expands to every dict value or every sequence element recursively.
             - Glob pattern    : a string containing '*' matched against dict key names
                                 (e.g. 'addr*', '*city', 'a*z'); only supported on dicts.
             - Operator segment : a segment starting with '$' or '!$' (no leading space), applied as a query operator at the leaf (e.g. '$has', '!$eq'). 
@@ -1102,7 +1104,7 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
 
     child_key, rest_parts = key_parts[0], key_parts[1:]
     child_key_s = child_key.lstrip(' ') # if map's key starts with '$', child_key must add ' ' before '$'
-    if '*' in child_key_s:
+    if '*' in child_key_s or '?' in child_key_s:
         if child_key == '**':
             def _collect_all(node):
                 yield node
@@ -1121,11 +1123,17 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
                 child_vals = list(val.values()) # any field
             else:
                 # Glob -> regex : 'addr*' -> r'^addr.*$'
-                rx = re_compile('^'+PATH_sub('.*', child_key_s)+'$')
+                _child_key = child_key_s.replace('?', '.')
+                rx = re_compile('^'+PATH_RE_sub('.*', _child_key)+'$')
                 child_vals = [v for k,v in val.items() if rx.match(k)]
 
         elif isinstance(val, (list, tuple)):
-            child_vals = list(val) if child_key_s == '*' else [] # only bare * on sequences
+            if child_key_s == '*':
+                child_vals = list(val)
+            elif child_key_s.startswith('?'):
+                _cnt = child_key_s.count('?')
+                if _cnt == len(child_key_s):
+                    child_vals = [val for ii,val in enumerate(val) if (ii//10)+1 == _cnt]
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
 

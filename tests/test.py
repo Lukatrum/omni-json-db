@@ -986,6 +986,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'n*e':re.compile(r'Alice|Bob'), 'age':[30, 25]})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'n??e':re.compile(r'Alice|Bob'), 'age':[30, 25]})
+            self.assertEqual(res, res2)
+
             res2 = jdb.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]}, skip=1)
             self.assertEqual(set(res2), {'user_2'})
 
@@ -1130,6 +1133,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'*.city.$sw': 'L'})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'*.c???.$sw': 'L'})
+            self.assertEqual(res, res2)
+
             # find frontend in meta field
             res = jdb.find(vals={'meta.**': 'frontend'})
             self.assertEqual(set(res), {'user_6'})
@@ -1202,6 +1208,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_5'})
 
             res2 = jdb.find(vals={'me*.tags.*.$ew': ('b', 'i')})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'?et*.tag?.*.$ew': ('b', 'i')})
             self.assertEqual(res, res2)
 
             # any(socre >= 90 for score in scores)
