@@ -11,7 +11,7 @@ omni\_json\_db.jdb\_lite
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: JDbReader, JFlag, JSON_RE_sub, SET_RE_finditer, deepcopy
+   :exclude-members: JDbReader, JFlag, JSON_RE_sub, SET_RE_finditer, deepcopy, PATH_sub, run_files_server
 
 omni\_json\_db.jdb
 ------------------------
@@ -45,7 +45,7 @@ omni\_json\_db.jdb\_io
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: br_compress, json_dumps, lz4_compress, msg_dumps, msg_loads, zs1_compress, zs2_compress, zstd_compress, KeyTable, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y
+   :exclude-members: br_compress, json_dumps, lz4_compress, msg_dumps, msg_loads, zs1_compress, zs2_compress, zstd_compress, KeyTable, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, gzip_compress
 
 omni\_json\_db.utils
 ---------------------
@@ -54,5 +54,5 @@ omni\_json\_db.utils
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: INT_Handler, Style
+   :exclude-members: INT_Handler, Style, JError, JKeyError, JTypeError, JValueError
 

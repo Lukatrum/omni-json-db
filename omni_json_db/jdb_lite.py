@@ -1024,7 +1024,7 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
 
         elif is_dict:
             _cnt = 0
-            for sep in '|/\\.':
+            for sep in './|\\':
                 idx = cmd.find(sep)
                 if idx < 0: continue
                 parts = cmd.split(sep)
@@ -1077,6 +1077,8 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
             - Bare wildcard   : '*' expands to every dict value or every sequence element.
             - Glob pattern    : a string containing '*' matched against dict key names
                                 (e.g. 'addr*', '*city', 'a*z'); only supported on dicts.
+            - Operator segment : a segment starting with '$' or '!$' (no leading space), applied as a query operator at the leaf (e.g. '$has', '!$eq'). 
+                                Add a leading space to treat it as a literal dict key instead.
             An empty list is the base case: the filter rule is applied directly to the current val without further navigation.
         key (str): The key associated with the value being evaluated.
         val (Any): The actual data value to be checked.
@@ -1089,17 +1091,30 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
         bool: True if the value satisfies all specified rules, False otherwise.
 
     Examples:
-        key_parts=['addr*','city'] -> match any key starting with 'addr', check .city
-        key_parts=['*','0']        -> any child's element at index 0
-        key_parts=['tags','*']     -> any element inside .tags        
+        key_parts=['addr*','city']          -> match any key starting with 'addr', check .city
+        key_parts=['*','0']                 -> any child's element at index 0
+        key_parts=['tags','*']              -> any element inside .tags
+        key_parts=['addr*', 'c*y', '$eq']   -> key_parts=['addr*', 'c*y'], rules={'$eq':rules}
     """
 
     if not key_parts:
         return _match_VAL_rules(key, val, rules, cdate, mdate, level=level+1)
 
     child_key, rest_parts = key_parts[0], key_parts[1:]
-    child_key_s = child_key.lstrip(' ')
+    child_key_s = child_key.lstrip(' ') # if map's key starts with '$', child_key must add ' ' before '$'
     if '*' in child_key_s:
+        if child_key == '**':
+            def _collect_all(node):
+                yield node
+                if isinstance(node, dict):
+                    for v in node.values():
+                        yield from _collect_all(v)
+                elif isinstance(node, (list, tuple)):
+                    for v in node:
+                        yield from _collect_all(v)
+
+            return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in _collect_all(val))
+
         child_vals = None
         if isinstance(val, dict):
             if child_key == '*':
@@ -2716,7 +2731,7 @@ class JDbReader:
 
         elif chk_days:
             _start = 0
-            _stop  = n_lines if chk_new_date else n_records
+            _stop  = n_records
             _step = 1
 
         return slice(_start, _stop, _step), max_ver, min_ver, max_days, min_days, filter_re, chk_new_date
@@ -4248,8 +4263,9 @@ class JDbReader:
                 
                 >>> jdb.find(re.compile(r'Jo(e|hn)')) == jdb.find(r'Jo(e|hn)')
                 >>> jdb.find(lambda k: k[-1] == 'n')
+                >>> fdb.find({'$sw:': 'Jo'})
 
-            vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).                
+            vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).
                 
                 >>> jdb.find(GT=12) == dict(jdb.find_iter(vals={'$gt':12})) # value > 12
                 >>> jdb.find(GTE=12) == dict(jdb.find_iter(vals={'$gte':12})) # value >= 12
@@ -4273,8 +4289,16 @@ class JDbReader:
                 >>> jdb.find(NOR=[{'name':'A'}, {'age':{'$gte':20}}]) # value['name'] != 'A' and value['age'] < 20
                 >>> jdb.find(NOT={'name':'A'}}]) # not value['name] == 'A'
                 >>> jdb.find(ANY='A')  # any record's value equal to  'A'
+                >>> jdb.find(vals={'name.$has': 'ice'})
+                >>> jdb.find(vals={'!name.$ihas': 'ice'})
+                >>> jdb.find(vals={'tags.0': ['db', 'c++']})
+                >>> jdb.find(vals={'country.city': ['US', 'UK']})
+                >>> jdb.find(vals={'c*t*y.c*y': ['US', 'UK']})
                 
             date (Optional[Any], optional): Timeline constraint for record modifications.
+
+                >>> jdb.find(date={'$ne': date(2011,1)})
+
             limit (int, optional): Max results to return. 0 means unlimited. Defaults to 0.
             skip (int, optional): skip number of matched records, Defaults to 0.
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
@@ -4310,7 +4334,10 @@ class JDbReader:
             >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$lte':100}}]) # 100 >= age >= 0
             >>> jdb.find_iter(vals={'$not: {'$eq':'value1'})
             >>> jdb.find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
-            >>> jdb.find_iter(EXISTS='role')            
+            >>> jdb.find_iter(EXISTS='role')
+            >>> jdb.find_iter(vals={'name.$has': 'ice'})      # $has as query operator
+            >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
+
         """
         re_flags = kwargs.get('re_flags', re_I)
 

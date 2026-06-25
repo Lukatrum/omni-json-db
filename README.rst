@@ -681,14 +681,20 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(ANY='Alice')
    assert list(res) == ['user_1']
 
+   res2 = jdb.find(vals={'name': 'Alice'})
+   assert res == res2
+
    # RE/RE2 convert value into JSON string format for searching.
    # Find any record that has the string 'designer' inside it
    res = jdb.find(RE=r'designer')
    assert list(res) == ['user_4']
-   
+
    # RE2 remove some JSON symbol (,[]{}") before searching
    res = jdb.find(RE2=r'role:designer')
    assert list(res) == ['user_4']
+
+   res2 = jdb.show(vals={'role.$re': r'd.+ner'})
+   assert res == res2
    
    # 2. Relational & Conditional Operators (vals)
    #----------------------------------------------------------
@@ -696,39 +702,66 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(vals={'age': {'$gte': 30}}) # find(ANY={'$gte': 30})
    assert list(res) == ['user_1', 'user_3']
 
+   res2 = jdb.find(vals={'age.$ge': 30})
+   assert res == res2
+
    # Age is strictly less than 30
    res = jdb.find(vals={'age': {'$lt': 30}}) # find(ANY={'$lt': 30})
    assert list(res) == ['user_2', 'user_4']
+
+   res2 = jdb.find(vals={'age.$lt': 30})
+   assert res == res2
 
    # Role is either 'admin' or 'designer'
    res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
    assert list(res) == ['user_1', 'user_4']
 
+   res2 = jdb.find(vals={'role': ['admin', 'designer']})
+   assert res == res2
+
    # tags contains 'python'
    res = jdb.find(vals={'tags': {'$has': 'python'}})
    assert list(res) == ['user_1', 'user_3']
+
+   res2 = jdb.find(vals={'tags.$has': 'python'})
+   assert res == res2
 
    # Age is NOT 30
    res = jdb.find(vals={'age': {'$ne': 30}}) # find(ANY={'$ne': 30})
    assert list(res) == ['user_2', 'user_3', 'user_4']
 
+   res2 = jdb.find(vals={'!age': 30})
+   assert res == res2
+
    # Age is 28
    res = jdb.find(vals={'age': {'$eq': 28}}) # find(ANY={'$eq': 28})
    assert list(res) == ['user_4']
 
+   res2 = jdb.find(vals={'age': 28})
+   assert res == res2
+
    # 40 >= Age > 25
    res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}})
    assert list(res) == ['user_1', 'user_3', 'user_4']
+
+   res2 = jdb.show(vals={'age.$between': (26, 40)})
+   assert res == res2
 
    # 3. Logical Grouping (AND, OR, NOR, NOT)
    #----------------------------------------------------------
    # Age >= 25 AND Age <= 30
    res = jdb.find(AND=[{'age': {'$gte': 25}}, {'age': {'$lte': 30}}])
    assert list(res) == ['user_1', 'user_2', 'user_4']
+
+   res2 = jdb.find(vals={'age.$ge': 25, 'age.$le': 30})
+   assert res == res2
    
    # Role is 'admin' OR Age > 30
    res = jdb.find(OR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
    assert list(res) == ['user_1', 'user_3']
+
+   res2 = jdb.find(OR=[{'r*e': 'admin'}, {'age.$gt': 30}])
+   assert res == res2
 
    # Role is not 'admin' AND Age <= 30
    res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
@@ -737,6 +770,9 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    # User is NOT a developer
    res = jdb.find(NOT={'role': 'developer'})
    assert list(res) == ['user_1', 'user_4']
+
+   res2 = jdb.find(vals={'!role': 'developer'})
+   assert res == res2
 
    # (Role is 'admin' OR Age > 30) AND 'linux' not in tags
    res = jdb.find(AND=[
@@ -747,6 +783,9 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
       {'$not': {'tags': {'$has': 'linux'}}}
    ])
    assert list(res) == ['user_1']
+
+   res2 = jdb.show(vals={'$or': [{'role': 'admin'}, {'age.$gt': 30}], '!tags.$has': 'linux'})
+   assert res == res2
 
    # 4. Regular Expressions (RE, RE2, re.compile)
    #----------------------------------------------------------
@@ -763,7 +802,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    assert list(res) == ['user_1', 'user_3']
 
    # Match specific Database Keys using compiled regex (e.g., matching 'user_1', 'user_2')
-   res = jdb.find(re.compile(r'^user_[1-2]$'))
+   res = jdb.show(re.compile(r'^user_[1-2]$'))
    assert list(res) == ['user_1', 'user_2']
 
    # 5. Array / List Operations
@@ -772,9 +811,15 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(vals={'tags': {'$size': 2}})
    assert list(res) == ['user_1', 'user_2', 'user_4']
 
+   res2 = jdb.find(vals={'tags.$size': 2})
+   assert res == res2
+
    # Users whose FIRST tag (index 0) is 'python'
    res = jdb.find(vals={'tags': {'$0': 'python'}})
    assert list(res) == ['user_1', 'user_3']
+
+   res2 = jdb.show(vals={'tags.0': 'python'})
+   assert res == res2
 
    # 6. Lambda / Custom Functions (FUNC) & Pagination (limit)
    #----------------------------------------------------------
@@ -786,20 +831,29 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    )
    assert list(res) == ['user_1']
 
+   res2 = jdb.find(vals={'age.$mod': (2, 0)}, limit=1)
+   assert res == res2
+
    # Users has email
    res = jdb.find(vals={'email': lambda v: v != ''})
    assert list(res) == ['user_1', 'user_4']
 
+   res2 = jdb.find(EXISTS='email')
+   assert res == res2
+
    # Users don't have email
    res = jdb.find(NOT={'email': lambda v: v != ''})
    assert list(res) == ['user_2', 'user_3']
+
+   res2 = jdb.find(vals={'!$exists': 'email'})
+   assert res == res2
 
    # For primitive stored values (non-nested), you can use quick keyword arguments:
    jdb['simple_counter'] = 50
    res = jdb.find(EQ=50)       # Equals 50
    assert list(res) == ['simple_counter']
 
-   res = jdb.find(IN=[40, 50]) # Value in list
+   res = jdb.show(IN=[40, 50]) # Value in list
    assert list(res) == ['simple_counter']
 
 .. list-table::
@@ -815,6 +869,9 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - ``*`` (Wildcard) 
      - Matches any key at the current level in the document structure. 
      - ``{'users.*.role': 'admin'}``, ``{'user*|t*gs|*': 'db'}``
+   * - ``**`` (Recursive wildcard)
+     - Matches any key in the document structure. 
+     - ``{'**.role': 'admin'}``, ``{'meta.**': 'database'}``
    * - ``$0``, ``$1``...
      - Matches the element exactly at the specified index (0, 1...) of an array.
      - ``{'$0': 'python'}``

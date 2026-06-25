@@ -1130,6 +1130,10 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'*.city.$sw': 'L'})
             self.assertEqual(res, res2)
 
+            # find frontend in meta field
+            res = jdb.find(vals={'meta.**': 'frontend'})
+            self.assertEqual(set(res), {'user_6'})
+
             # 'meta' exists and not city == Tokyo
             res = jdb.find(vals={'!addr*.city': 'Tokyo'}, EXISTS='meta')
             self.assertEqual(set(res), {'user_5'})
