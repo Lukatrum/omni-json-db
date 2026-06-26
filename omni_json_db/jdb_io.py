@@ -22,7 +22,7 @@ gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from bitarray import bitarray
 
-from .utils import Style
+from .utils import Style, JIoBase
 # from .utils import debug_break
 
 try:
@@ -168,11 +168,12 @@ except ImportError:
     zs2_compress = ZstdCompressor(level=11).compress
     zstd_decompress = ZstdDecompressor().decompress
 
+BZ_Error = OSError
+LZ_Error = RuntimeError
+
 #-----------------------------------------------------------------------------
 from .jdb_file import JFilesBase
 
-BZ_Error = OSError
-LZ_Error = RuntimeError
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1437,7 +1438,7 @@ g_VAL_P = JIoVAL_P()
 g_VAL_Y = JIoVAL_Y()
 g_HEAD = JIoHEAD()
 
-class JIo:
+class JIo(JIoBase):
     # reduce memory usage --> __dict__, but child class cannot have member
     __slots__ = ('days', 'sync_id', 'swap_id', 'remv_id', 'min_days',\
             '_sync_id', '_swap_id', '_remv_id', '_n_records',\

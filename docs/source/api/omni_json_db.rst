@@ -36,7 +36,7 @@ omni\_json\_db.jdb\_lite
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: JDbReader, JFlag, JSON_RE_sub, SET_RE_finditer, deepcopy, PATH_RE_sub
+   :exclude-members: JDbReader, JFlag
 
 omni\_json\_db.jdb\_net
 ------------------------------------
@@ -45,6 +45,15 @@ omni\_json\_db.jdb\_net
    :members:
    :show-inheritance:
    :undoc-members:
+
+omni\_json\_db.jdb\_query
+------------------------------------
+
+.. automodule:: omni_json_db.jdb_query
+   :members:
+   :show-inheritance:
+   :undoc-members: 
+   :exclude-members: JSON_RE_sub, PATH_RE_sub
 
 omni\_json\_db.jdb\_server
 ------------------------------------
@@ -55,7 +64,6 @@ omni\_json\_db.jdb\_server
    :undoc-members:
    :exclude-members: run_files_server
 
-
 omni\_json\_db.utils
 ------------------------------------
 
@@ -63,5 +71,5 @@ omni\_json\_db.utils
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: INT_Handler, Style, JError, JKeyError, JTypeError, JValueError
+   :exclude-members: INT_Handler, Style, JError, JKeyError, JTypeError, JValueError, JDbBase, JIoBase
 

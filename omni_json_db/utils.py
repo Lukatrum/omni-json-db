@@ -1,9 +1,11 @@
-from __future__ import annotations # pylint: disable=too-many-lines
+# pylint: disable=too-many-lines
+from __future__ import annotations
 from collections import defaultdict
 from contextlib import contextmanager
+from abc import ABCMeta
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
-from typing import Callable
+from typing import Callable, Any
 #-----------------------------------------------------------------------------
 try:
     import ipdb
@@ -23,6 +25,45 @@ class JValueError(JError, ValueError):
 
 class JTypeError(JError, TypeError):
     pass
+
+#-----------------------------------------------------------------------------
+# pylint: disable=too-few-public-methods
+class JDbBase(metaclass=ABCMeta): # pragma: no cover
+    pass
+
+# pylint: disable=too-few-public-methods
+class JIoBase(metaclass=ABCMeta): # pragma: no cover
+    pass
+
+def deepcopy(src:Any) -> Any:
+    """
+    Create a deep copy of the given object, optimized for immutable types.
+    
+    If the object has a valid `__hash__` (is immutable), it returns the object itself.
+    Otherwise, it recursively copies dictionaries, sets, lists, and JDbBase instances.
+
+    Args:
+        src (Any): The source object to be deeply copied.
+
+    Returns:
+        Any: A deeply copied instance of the source object.
+    """
+    if src is None or isinstance(src, (str, bytes, int, float, bool, JDbBase)):
+        return src
+
+    if isinstance(src, tuple):
+        return tuple(deepcopy(v) for v in src)
+
+    if isinstance(src, dict):
+        return {key:deepcopy(val) for key, val in src.items()}
+
+    if isinstance(src, set):
+        return src.copy()
+
+    if src.__hash__:
+        return src
+
+    return [deepcopy(val) for val in src]
 
 #-----------------------------------------------------------------------------
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):

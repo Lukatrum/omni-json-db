@@ -9,7 +9,6 @@ from os.path import basename, dirname, join as path_join, exists as path_exists
 from datetime import datetime
 from threading import Lock, Condition
 #-----------------------------------------------------------------------------
-
 try:
     from os import open as os_open, close as os_close, O_APPEND, O_CREAT
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
@@ -697,7 +696,7 @@ class JMemFiles(JFilesBase):
         """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
 
         Args:
-            KEY_file (Union[str,JFileBase]): Allocation identifier tracking targeted structural maps files context.
+            KEY_file (Union[str,JFilesBase]): Allocation identifier tracking targeted structural maps files context.
             name (str): Label matching targeted workspace cluster boundaries text.
 
         Returns:
