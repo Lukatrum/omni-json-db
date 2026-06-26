@@ -397,6 +397,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(date={'$ew': str(prev_date1)})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(['user_1', 'user_2'], date={'$ew': str(prev_date1)})
+            self.assertEqual(res, res2)
+
             # modified date == tuesday (0 = monday, ... 5 = saturday, 6 = sunday)
             res = jdb.find(date={'$mod': (7, today.weekday())})
             self.assertEqual(set(res), {'user_1'})

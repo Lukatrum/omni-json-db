@@ -862,17 +862,23 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 
    * - Operator
      - Description
-     - Example Usage
+     - Example Usage     
    * - ``.``  ``|``  ``/``
      - Accesses nested fields within a document using a deep path.
      - ``{'user.profile.age': {'$gt': 20}}``, ``{'user|tags|0': 'db'}``
-   * - ``*`` (Wildcard) 
-     - Matches any key at the current level in the document structure. 
+   * - ``?``
+     - [Single-char Wildcard] Matches exactly one single character within a key name.
+     - ``{'user?.prof???.?ge': {'$gt': 20}}``, ``{'user?.tags.?': 'db'}``
+   * - ``*``
+     - [Wildcard] Matches any key at the current level in the document structure. 
      - ``{'users.*.role': 'admin'}``, ``{'user*|t*gs|*': 'db'}``
-   * - ``**`` (Recursive wildcard)
-     - Matches any key in the document structure. 
+   * - ``**``
+     - [Recursive Wildcard] Recursively searches and matches the specified key or field at any depth level within the document.
      - ``{'**.role': 'admin'}``, ``{'meta.**': 'database'}``
-   * - ``$0``, ``$1``...
+   * -
+     -
+     -
+   * - ``$0``, ``$1``, ...
      - Matches the element exactly at the specified index (0, 1...) of an array.
      - ``{'$0': 'python'}``
    * - ``$date`` / ``_date``

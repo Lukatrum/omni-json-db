@@ -515,7 +515,7 @@ Queries
 Let's initialize an in-memory JDb instance (``jdb = JDb()``) and populate it with some sample JSON-like data to demonstrate the querying capabilities.
 
 .. list-table::
-   :widths: 15 45 30
+   :widths: 10 35 35
    :header-rows: 1
 
    * - Operator
@@ -524,10 +524,19 @@ Let's initialize an in-memory JDb instance (``jdb = JDb()``) and populate it wit
    * - ``.``  ``|``  ``/``
      - Accesses nested fields within a document using a deep path.
      - ``{'user.profile.age': {'$gt': 20}}``, ``{'user|tags|0': 'db'}``
-   * - ``*`` (Wildcard) 
-     - Matches any key at the current level in the document structure. 
-     - ``{'users.*.role': 'admin'}``, ``{'user*|ad*r|city': 'HK'}``
-   * - ``$0``, ``$1``...
+   * - ``?``
+     - [Single-char Wildcard] Matches exactly one single character within a key name.
+     - ``{'user?.prof???.?ge': {'$gt': 20}}``, ``{'user?.tags.?': 'db'}``
+   * - ``*``
+     - [Wildcard] Matches any key at the current level in the document structure. 
+     - ``{'users.*.role': 'admin'}``, ``{'user*|t*gs|*': 'db'}``
+   * - ``**``
+     - [Recursive Wildcard] Recursively searches and matches the specified key or field at any depth level within the document.
+     - ``{'**.role': 'admin'}``, ``{'meta.**': 'database'}``
+   * -
+     -
+     -
+   * - ``$0``, ``$1``, ...
      - Matches the element exactly at the specified index (0, 1...) of an array.
      - ``{'$0': 'python'}``
    * - ``$date`` / ``_date``
@@ -539,7 +548,7 @@ Let's initialize an in-memory JDb instance (``jdb = JDb()``) and populate it wit
    * -
      -
      -
-   * - ``$not`` / ``!..``
+   * - ``$not`` / ``!``
      - Inverts the effect of a query expression (Logical NOT).
      - ``{'$not': {'tags': {'$has': 'linux'}}}``, ``{'!tags': {'$has': 'linux'}}``, ``{'tags': {'!$has': 'linux'}}``
    * - ``$and``

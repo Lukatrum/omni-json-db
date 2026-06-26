@@ -6,8 +6,7 @@ from datetime import date as dt_date, datetime, timedelta
 from re import compile as re_compile, search as re_search, findall as re_findall, \
             match as re_match, Pattern, I as re_I, S as re_S
 from os.path import exists as path_exists # basename, dirname, join as path_join
-from threading import RLock, get_ident, Thread
-from socketserver import TCPServer
+from threading import RLock, get_ident
 from struct import Struct
 from enum import IntFlag
 from unicodedata import east_asian_width
@@ -16,13 +15,13 @@ from typing import Any, List, Union, Optional, Tuple, Set, Dict, Callable, Gener
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, json_dumps, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
-from .jdb_net import JNetFiles, ThreadedTCPServer, ServerHandler
+from .jdb_net import JNetFiles
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JTypeError
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-def deepcopy(src):
+def deepcopy(src:Any) -> Any:
     """
     Create a deep copy of the given object, optimized for immutable types.
     
@@ -139,60 +138,6 @@ FIND_OPS = {
     'EXISTS',       # {'$exists': chk}                      # chk in Value
                     # {'$exists': {...}}                    # all(chk in Value for chk in {...})
 }
-
-def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytearray,JFilesBase,JDbReader,None]=None, verbose:int=0) -> TCPServer:
-    """
-    Initialize and start a multi-threaded TCP server to allow external access to the JDb object.
-    
-    Args:
-        host (str, optional): The host address for the server to listen on. Defaults to '127.0.0.1'.
-        port (int, optional): The port number for the server to listen on. Defaults to 59898.
-        files (Union[str, bytearray, JFilesBase, JDbReader, None], optional):
-            The specified source for the database file:
-                - str: Uses JMemFiles() if empty; otherwise, parses as JDiskFiles(path).
-                - bytearray: Uses JMemFiles(KEY_file).
-                - JFilesBase: Various file objects (JDiskFiles, JMemFiles, JNetFiles).
-                - JDbReader: An existing JDbReader object.
-                - None: Defaults to JMemFiles().
-        verbose (int, optional): Logging verbosity level (-1: Off, 0: Limited, 1: Error, 2: Warning, 3: Info, 4: Debug). Defaults to 0.
-    
-    Returns
-        TCPServer: The started TCP server instance.
-
-    Raises:
-        TypeError: Raised when the provided type for the files parameter is invalid.
-
-    Examples
-        >>> server = run_files_server(host='127.0.0.1', port=8080)
-        >>> server.shutdown()
-    """
-    if files is None or isinstance(files, bytearray):
-        files_obj = JMemFiles(files)
-    elif isinstance(files, JDbReader): # pragma: no cover
-        files_obj = files.files_obj
-    elif isinstance(files, JFilesBase): # pragma: no cover
-        files_obj = files
-    elif isinstance(files, str):
-        if re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', files): # pragma: no cover
-            server_ip, server_port = files.split(':')
-            server_port = int(server_port)
-            if not 65535 >= server_port > 0 or not all(255 > int(vv) >= 0 for vv in server_ip.split('.')):
-                raise TypeError
-
-            files_obj = JNetFiles((server_ip, server_port))
-        else:
-            files_obj = JDiskFiles(files) if files else JMemFiles()
-    else:
-        raise TypeError
-
-    if not isinstance(files_obj, JFilesBase):
-        raise TypeError
-
-    print(f'staring server at {host}:{port} -> {files_obj} (files={type(files)})')
-    server = ThreadedTCPServer((host, port), ServerHandler, files_obj=files_obj, verbose=verbose)
-    thd = Thread(target=server.serve_forever, daemon=True)
-    thd.start()
-    return server
 
 class JFlag(IntFlag):
     """
@@ -1077,7 +1022,7 @@ def _iter_all_node(node:Any) -> Generator[Any]:
         for v in node:
             yield from _iter_all_node(v)
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=256)
 def _compile_path_glob(pattern: str) -> Pattern:
     """Compile and cache a glob path pattern to regex."""
     return re_compile(f'^{PATH_RE_sub(".*", pattern.replace("?", "."))}$')
