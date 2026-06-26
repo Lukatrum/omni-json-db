@@ -51,7 +51,7 @@
 
 * **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
 
-* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_ + `更多查詢示範`_]
+* **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_ + `更多查詢示範`_ + `Pythonic 查詢範例`_]
 
 * **記憶體快取**：可調整的 ``cache_limit`` 用以平衡記憶體使用率與 I/O 速度。 [參考 `快取種類`_]
 
@@ -150,9 +150,9 @@
    print(matches) # 輸出: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
 
 
-條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
+條件運算子包含: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``,  ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``NIN``, ``ANYIN``。
 
-了解 `更多查詢示範`_
+了解 `更多查詢示範`_ 或 `Pythonic 查詢範例`_
 
 救回
 ----
@@ -798,8 +798,11 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(IN=[40, 50]) # Value in list
    assert list(res) == ['simple_counter']
 
+Operators Reference
+^^^^^^^^^^^^^^^^^^^^^
+
 .. list-table::
-   :widths: 15 45 30
+   :widths: 20 30 30
    :header-rows: 1
 
    * - 運算符 (Operator)
@@ -949,6 +952,139 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - ``$type``
      - 當值屬於指定的 Python 變數型別時即成立。
      - ``{'$type': list}``
+
+Pythonic 查詢範例 
+-----------------
+對於偏好使用 Pythonic 及物件導向語法來過濾資料的開發者（類似 **TinyDB** 的體驗），``omni-json-db`` 提供了 ``Query`` 物件。您可以優雅地使用原生的 Python 運算子（例如 ``==``, ``>``, ``&``, ``|``, ``~``）以及串聯方法來建構複雜的搜尋條件。
+
+.. code-block:: python
+
+   from omni_json_db import JDb, Query
+
+   # 1. 初始化資料庫並加入測試資料
+   jdb = JDb()
+   jdb += {
+       'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+       'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+       'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+       'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+   }
+
+   # 2. 建立一個 Query 實例
+   User = Query()
+
+   # 基礎比較：尋找年齡大於 28 的用戶
+   res = jdb.find(User.age > 28)
+   # 輸出: {'user_1', 'user_3'}
+
+   # 邏輯組合 (AND & OR)：尋找 30 歲以下的開發者或管理員
+   res = jdb.find((User.role == 'developer') & (User.age < 30) | (User.role == 'admin'))
+   # 輸出: {'user_1', 'user_2'}
+
+   # 陣列查詢：尋找標籤中包含 'python' 的用戶
+   res = jdb.find(User.tags.has('python'))
+   # 輸出: {'user_1', 'user_3'}
+
+   # 路徑萬用字元：在所有欄位中遞迴執行正規表達式搜尋 (尋找包含 example.com 的電子郵件)
+   res = jdb.find(User['**'].matches(r'.@example\.com'))
+   # 輸出: {'user_1'}
+
+   # 進階過濾：尋找「沒有」'email' 欄位的用戶 (~ 為 NOT 運算子)
+   res = jdb.find(~User.exists('email'))
+   # 輸出: {'user_2', 'user_3'}
+
+   # Lambda 測試：尋找年齡為偶數的用戶
+   res = jdb.find(User.age.test(lambda age: age % 2 == 0))
+   # 輸出: {'user_1', 'user_4'}
+
+方法與運算子參考 
+^^^^^^^^^^^^^^^
+
+.. list-table::
+   :widths: 20 30 30
+   :header-rows: 1
+
+   * - 語法 / 運算子
+     - 說明
+     - 範例用法     
+   * - ``==``, ``!=``
+     - 等於 / 不等於
+     - ``User.name != 'Bob'``
+   * - ``>``, ``>=``, ``<``, ``<=``
+     - 數值比較
+     - ``User.age > 30``, ``User.age < 30``
+   * - ``&``
+     - 邏輯 AND (且)
+     - ``(User.age > 20) & (User.role == 'admin')``
+   * - ``|``
+     - 邏輯 OR (或)
+     - ``(User.name == 'Alice') | (User.age < 30)``
+   * - ``~``
+     - 邏輯 NOT (非)
+     - ``~ User.exists('email')``
+   * - ``.has(val)``
+     - 包含特定字串或陣列元素
+     - ``User.tags.has('database')``
+   * - ``.not_has(val)``
+     - 不包含特定字串或陣列元素
+     - ``User.name.not_has('ice')``
+   * - ``.ihas(val)``
+     - 忽略大小寫包含
+     - ``User.name.ihas('alice')``
+   * - ``.startswith(val)``
+     - 字串以前綴開頭
+     - ``User.city.startswith(('L', 'H'))``
+   * - ``.endswith(val)``
+     - 字串以後綴結尾
+     - ``User.name.endswith('b')``
+   * - ``.matches(pattern)``
+     - 正規表達式搜尋 (等同於 ``re.search``)
+     - ``User.name.matches(r'[bB]ob')``
+   * - ``.fullmatch(pattern)``
+     - 正規表達式完全匹配 (等同於 ``re.fullmatch``)
+     - ``User.name.fullmatch(r'.lic.')``
+   * - ``.one_of(col)``
+     - 數值包含於指定的集合中
+     - ``User.role.one_of(['admin', 'dev'])``
+   * - ``.not_in(col)``
+     - 數值不包含於指定的集合中
+     - ``User.role.not_in(['admin', 'dev'])``
+   * - ``.any_in(col)``
+     - 陣列中的任一元素包含於指定的集合中
+     - ``User.role.any_in(['admin', 'ceo'])``
+   * - ``.between(low, high)``
+     - 數值或字串在指定範圍內
+     - ``User.age.between(20, 30)``
+   * - ``.size_of(size)``     
+     - 陣列或字串長度匹配
+     - ``User.tags.size_of(2)``
+   * - ``.exists(fields)``
+     - 檢查指定的欄位是否存在
+     - ``User.exists('email')``
+   * - ``.type_of(type)``
+     - 檢查資料型態
+     - ``User.age.type_of(int)``
+   * - ``.mod(div, rem)``
+     - 取餘數條件 (除以 ``div`` 時餘數為 ``rem``)
+     - ``User._date.mod(7, 5)``
+   * - ``.near(target, tol)``
+     - 數值接近目標值，且在容差 ``tol`` 範圍內
+     - ``User._date.near(today, 1)``
+   * - ``.test(func)``
+     - 傳遞自訂的 Lambda 函數以進行條件評估
+     - ``User.age.test(lambda v: 40 >= v > 18)``
+   * - ``field['field']``
+     - 存取特定欄位
+     - ``User['addr'].city``, ``User.addr.city``
+   * - ``.field[0]`` 
+     - 陣列的特定索引 (支援如 ``User.tags[-1]`` 的負數索引)
+     - ``User.tags[1].has('db')``
+   * - ``'*'`` / ``'**'`` / ``'?'``
+     - 第一層萬用字元 / 遞迴多層萬用字元 / 單一字元萬用字元路徑搜尋
+     - ``User['*']``, ``User['**']``, ``User['ci?y']``, ``User['c*y']``
+   * - ``._id`` / ``._date``
+     - 系統保留鍵：分別存取文件 ID (主鍵) 與時間戳記
+     - ``User._id``, ``User._date``
 
 進階用法
 --------

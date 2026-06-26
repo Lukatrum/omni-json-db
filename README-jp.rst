@@ -57,7 +57,7 @@
 
 * **動的シリアライズと高度な圧縮**: JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle、YAML を自由に組み合わせ、LZ4、Zstandard (z1/z2/zs)、Brotli、Bzip2 などの高度な圧縮アルゴリズムと統合して、I/O 速度とディスク使用量の完璧なバランスを実現します。[参照: `フォーマットの変換`_ + `データタイプ`_ + `圧縮タイプ`_]
 
-* **強力なクエリエンジン**: 正規表現 (Regex)、Lambda フィルター（例: ``jdb[lambda k, v: v > 10]``）、および豊富な条件演算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）を使用して簡単に検索できます。[参照: `クエリエンジン`_ + `その他のクエリ例`_]
+* **強力なクエリエンジン**: 正規表現 (Regex)、Lambda フィルター（例: ``jdb[lambda k, v: v > 10]``）、および豊富な条件演算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）を使用して簡単に検索できます。[参照: `クエリエンジン`_ + `その他のクエリ例`_ + `Pythonic なクエリの例`_ ]
 
 * **メモリキャッシュ**: メモリ使用量と I/O 速度のバランスを調整できる ``cache_limit`` （または ``key_limit``）。[参照: `キャッシュタイプ`_]
 
@@ -157,9 +157,9 @@
    print(matches) # 出力: {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}} 
 
 
-条件演算子には以下のものが含まれます: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
+条件演算子には以下のものが含まれます: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``,  ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``NIN``, ``ANYIN``。 
 
-`その他のクエリ例`_ もご覧ください。
+`その他のクエリ例`_ + `Pythonic なクエリの例`_ もご覧ください。
 
 復元 / ロールバック
 -----------------
@@ -787,8 +787,11 @@ SQLite インポート
    res = jdb.find(IN=[40, 50]) # リスト内の値
    assert list(res) == ['simple_counter']
 
+Operators Reference
+^^^^^^^^^^^^^^^^^^^^^
+
 .. list-table::
-   :widths: 15 45 30
+   :widths: 20 30 30
    :header-rows: 1
 
    * - 演算子 (Operator)
@@ -939,6 +942,137 @@ SQLite インポート
      - 値が指定された Python 変数の型である場合に一致します。
      - ``{'$type': list}``
 
+Pythonic なクエリの例
+--------------------
+Pythonic でオブジェクト指向な構文によるデータフィルタリングを好む開発者のために（**TinyDB** のような使用感）、``omni-json-db`` は ``Query`` オブジェクトを提供しています。Python ネイティブの演算子（例: ``==``, ``>``, ``&``, ``|``, ``~``）やメソッドチェーンをエレガントに使用して、複雑な検索条件を構築できます。
+
+.. code-block:: python
+
+   from omni_json_db import JDb, Query
+
+   # 1. データベースを初期化し、テストデータを追加する
+   jdb = JDb()
+   jdb += {
+       'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+       'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+       'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+       'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+   }
+
+   # 2. Query インスタンスを作成する
+   User = Query()
+
+   # 基本的な比較：年齢が 28 より上のユーザーを検索
+   res = jdb.find(User.age > 28)
+   # 出力: {'user_1', 'user_3'}
+
+   # 論理結合 (AND & OR)：30歳未満の developer、または admin のユーザーを検索
+   res = jdb.find((User.role == 'developer') & (User.age < 30) | (User.role == 'admin'))
+   # 出力: {'user_1', 'user_2'}
+
+   # 配列クエリ：tags に 'python' が含まれるユーザーを検索
+   res = jdb.find(User.tags.has('python'))
+   # 出力: {'user_1', 'user_3'}
+
+   # パスワイルドカード：すべてのフィールドを再帰的に正規表現検索 (example.com を含む email を検索)
+   res = jdb.find(User['**'].matches(r'.@example\.com'))
+   # 出力: {'user_1'}
+
+   # 高度なフィルター：'email' フィールドを「持たない」ユーザーを検索 (~ は NOT 演算子)
+   res = jdb.find(~User.exists('email'))
+   # 出力: {'user_2', 'user_3'}
+
+   # Lambda テスト：年齢が偶数のユーザーを検索
+   res = jdb.find(User.age.test(lambda age: age % 2 == 0))
+   # 出力: {'user_1', 'user_4'}
+
+メソッドと演算子のリファレンス
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table::
+   :widths: 20 30 30
+   :header-rows: 1
+
+   * - 構文 / 演算子
+     - 説明
+     - 使用例     
+   * - ``==``, ``!=``
+     - 一致 / 不一致
+     - ``User.name != 'Bob'``
+   * - ``>``, ``>=``, ``<``, ``<=``
+     - 数値の大小比較
+     - ``User.age > 30``, ``User.age < 30``
+   * - ``&``
+     - 論理積 AND
+     - ``(User.age > 20) & (User.role == 'admin')``
+   * - ``|``
+     - 論理和 OR
+     - ``(User.name == 'Alice') | (User.age < 30)``
+   * - ``~``
+     - 否定 NOT
+     - ``~ User.exists('email')``
+   * - ``.has(val)``
+     - 特定の文字列または配列要素を含む
+     - ``User.tags.has('database')``
+   * - ``.not_has(val)``
+     - 特定の文字列または配列要素を含まない
+     - ``User.name.not_has('ice')``
+   * - ``.ihas(val)``
+     - 大文字小文字を区別せずに含む
+     - ``User.name.ihas('alice')``
+   * - ``.startswith(val)``
+     - 文字列が指定のプレフィックスで始まる
+     - ``User.city.startswith(('L', 'H'))``
+   * - ``.endswith(val)``
+     - 文字列が指定のサフィックスで終わる
+     - ``User.name.endswith('b')``
+   * - ``.matches(pattern)``
+     - 正規表現検索 (``re.search`` に相当)
+     - ``User.name.matches(r'[bB]ob')``
+   * - ``.fullmatch(pattern)``
+     - 正規表現の完全一致 (``re.fullmatch`` に相当)
+     - ``User.name.fullmatch(r'.lic.')``
+   * - ``.one_of(col)``
+     - 値が指定されたコレクションに含まれる
+     - ``User.role.one_of(['admin', 'dev'])``
+   * - ``.not_in(col)``
+     - 値が指定されたコレクションに含まれない
+     - ``User.role.not_in(['admin', 'dev'])``
+   * - ``.any_in(col)``
+     - 配列内のいずれかの要素が指定されたコレクションに含まれる
+     - ``User.role.any_in(['admin', 'ceo'])``
+   * - ``.between(low, high)``
+     - 値または文字列が指定された範囲内にある
+     - ``User.age.between(20, 30)``
+   * - ``.size_of(size)``     
+     - 配列または文字列の長さが一致する
+     - ``User.tags.size_of(2)``
+   * - ``.exists(fields)``
+     - 指定されたフィールドが存在するか確認する
+     - ``User.exists('email')``
+   * - ``.type_of(type)``
+     - データ型を確認する
+     - ``User.age.type_of(int)``
+   * - ``.mod(div, rem)``
+     - 剰余条件 (``div`` で割った余りが ``rem`` となる)
+     - ``User._date.mod(7, 5)``
+   * - ``.near(target, tol)``
+     - 数値が許容誤差 ``tol`` の範囲内で目標値に近い
+     - ``User._date.near(today, 1)``
+   * - ``.test(func)``
+     - 条件判定のためにカスタムの Lambda 関数を渡す
+     - ``User.age.test(lambda v: 40 >= v > 18)``
+   * - ``field['field']``
+     - 特定のフィールドにアクセスする
+     - ``User['addr'].city``, ``User.addr.city``
+   * - ``.field[0]`` 
+     - 配列の特定のインデックス (``User.tags[-1]`` のような負のインデックスもサポート)
+     - ``User.tags[1].has('db')``
+   * - ``'*'`` / ``'**'`` / ``'?'``
+     - 第1階層ワイルドカード / 再帰的な複数階層ワイルドカード / 単一文字ワイルドカードのパス検索
+     - ``User['*']``, ``User['**']``, ``User['ci?y']``, ``User['c*y']``
+   * - ``._id`` / ``._date``
+     - システム予約キー：それぞれドキュメントID (主キー) とタイムスタンプにアクセスする
+     - ``User._id``, ``User._date``
 
 高度な使い方
 ----------

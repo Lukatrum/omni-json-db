@@ -51,7 +51,7 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 * **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
 
-* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_ + `More Query Examples`_]
+* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
 
@@ -153,11 +153,11 @@ Query Engine
    
    # Use Regex to find record(s) matching the name 'John' or 'Bob'
    matches = jdb.find(RE='John|Bob')
-   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}   
+   print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}
 
-Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``IN``, ``NIN``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``SIZE``, ``ANY``.
+Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``,  ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``NIN``, ``ANYIN``.
 
-Know `More Query Examples`_.
+Know `More Query Examples`_ or `Pythonic Query Examples`_
 
 Unremove & Unmodify
 -------------------
@@ -856,8 +856,11 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.show(IN=[40, 50]) # Value in list
    assert list(res) == ['simple_counter']
 
+Operators Reference
+^^^^^^^^^^^^^^^^^^^^^
+
 .. list-table::
-   :widths: 15 45 30
+   :widths: 20 30 30
    :header-rows: 1
 
    * - Operator
@@ -1007,6 +1010,138 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    * - ``$type``
      - Matches if the value is of the specified Python variable type.
      - ``{'$type': list}``   
+
+Pythonic Query Examples
+-------------------------
+For developers who prefer a Pythonic and object-oriented syntax for filtering data (similar to the **TinyDB** experience), ``omni-json-db`` provides the ``Query`` object. You can elegantly use native Python operators (e.g., ``==``, ``>``, ``&``, ``|``, ``~``) and chained methods to construct complex search conditions.
+
+.. code-block:: python
+
+   from omni_json_db import JDb, Query
+
+   # 1. Initialize database and add test data
+   jdb = JDb()
+   jdb += {
+       'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+       'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+       'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+       'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+   }
+
+   # 2. Create a Query instance
+   User = Query()
+
+   # Basic Comparison: Find users older than 28
+   res = jdb.find(User.age > 28)
+   # Output: {'user_1', 'user_3'}
+
+   # Logical Combinations (AND & OR): Find developers under 30 OR admins
+   res = jdb.find((User.role == 'developer') & (User.age < 30) | (User.role == 'admin'))
+   # Output: {'user_1', 'user_2'}
+
+   # Array Query: Find users whose tags include 'python'
+   res = jdb.find(User.tags.has('python'))
+   # Output: {'user_1', 'user_3'}
+
+   # Path Wildcard: Regex search across all fields recursively (Find email containing example.com)
+   res = jdb.find(User['**'].matches(r'.@example\.com'))
+   # Output: {'user_1'}
+
+   # Advanced Filters: Find users who DO NOT have an 'email' field (~ is the NOT operator)
+   res = jdb.find(~User.exists('email'))
+   # Output: {'user_2', 'user_3'}
+
+   # Lambda Test: Find users whose age is an even number
+   res = jdb.find(User.age.test(lambda age: age % 2 == 0))
+   # Output: {'user_1', 'user_4'}
+
+Methods & Operators Reference
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table::
+   :widths: 20 40 30
+   :header-rows: 1
+
+   * - Syntax / Operator
+     - Description
+     - Example Usage     
+   * - ``==``, ``!=``
+     - Equals / Not equals
+     - ``User.name != 'Bob'``
+   * - ``>``, ``>=``, ``<``, ``<=``
+     - Numeric comparison 
+     - ``User.age > 30``, ``User.age < 30``
+   * - ``&``
+     - Logical AND
+     - ``(User.age > 20) & (User.role == 'admin')``
+   * - ``|``
+     - Logical OR
+     - ``(User.name == 'Alice') | (User.age < 30)``
+   * - ``~``
+     - Logical NOT
+     - ``~ User.exists('email')``
+   * - ``.has(val)``
+     -  Contains specific string or array element
+     - ``User.tags.has('database')``
+   * - ``.not_has(val)``
+     -  Does not contain specific string or array element
+     - ``User.name.not_has('ice')``
+   * - ``.ihas(val)``
+     - Case-insensitive contains
+     - ``User.name.ihas('alice')``
+   * - ``.startswith(val)``
+     - String starts with prefix
+     - ``User.city.startswith(('L', 'H'))``
+   * - ``.endswith(val)``
+     - String ends with suffix
+     - ``User.name.endswith('b')``
+   * - ``.matches(pattern)``
+     - Regular expression search (equivalent to ``re.search``)
+     - ``User.name.matches(r'[bB]ob')``
+   * - ``.fullmatch(pattern)``
+     - expression full match (equivalent to ``re.fullmatch``)
+     - ``User.name.fullmatch(r'.lic.')``
+   * - ``.one_of(col)``
+     - Value is within the specified collection
+     - ``User.role.one_of(['admin', 'dev'])``
+   * - ``.not_in(col)``
+     - Value is not within the specified collection
+     - ``User.role.not_in(['admin', 'dev'])``
+   * - ``.any_in(col)``
+     - Any element in the array is within the specified collection
+     - ``User.role.any_in(['admin', 'ceo'])``
+   * - ``.between(low, high)``
+     - Value or string is within the specified range
+     - ``User.age.between(20, 30)``
+   * - ``.size_of(size)``     
+     - Array or string length matches
+     - ``User.tags.size_of(2)``
+   * - ``.exists(fields)``
+     - Checks if specified fields exist
+     - ``User.exists('email')``
+   * - ``.type_of(type)``
+     - Checks the data type
+     - ``User.age.type_of(int)``
+   * - ``.mod(div, rem)``
+     - Modulo condition (remainder is ``rem`` when divided by ``div``)
+     - ``User._date.mode(7, 5)``
+   * - ``.near(target, tol)``
+     -  Numeric value is near the target within tolerance ``tol``
+     - ``User._date.near(toady, 1)``
+   * - ``.test(func)``
+     - Passes a custom Lambda function for condition evaluation
+     - ``User.age.test(lambda v: 40 >= v > 18)``
+   * - ``field['field']``
+     - Accesses a specific field
+     - ``User['addr'].city``, ``User.addr.city``
+   * - ``.field[0]`` 
+     - specific index of an array (supports negative index like ``User.tags[-1]``)
+     - ``User.tags[1].has('db')``
+   * - ``'*'`` / ``'**'`` / ``'?'``
+     - First-level wildcard / Recursive multi-level wildcard / Single-char wildcard path search
+     - ``User['*']``, ``User['**']``, ``User['ci?y']``, ``User['c*y']``
+   * - ``._id`` / ``._date``
+     - system reserved keys: access Document ID (Primary key) and Timestamp respectively
+     - ``User._id``, ``User._date``
 
 Advanced
 --------
