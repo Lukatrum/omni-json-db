@@ -1230,8 +1230,8 @@ class JIoKEY_M(JIoKEY):
             raise ValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
-        # nosemgrep
         try:
+            # nosemgrep
             args = marshal_loads(data) # nosec B302
             if isinstance(args, (list, tuple)):
                 return args

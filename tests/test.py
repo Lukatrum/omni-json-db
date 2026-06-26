@@ -2,7 +2,7 @@
 import unittest, time, random, threading, inspect, re, os, io
 import datetime as dt
 import sqlite3
-from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server, loads, dumps
+from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server, loads, dumps, Query
 
 _g_basetime = time.perf_counter()
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):
@@ -349,6 +349,382 @@ class TestJDb(unittest.TestCase):
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
+    def test_query(self):
+        user = Query()
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            # --------------------------------------------
+            # Sample user records
+            users = {
+               'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+               'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+               'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+               'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+            }
+
+            # Insert data
+            jdb += users
+            self.assertEqual(jdb, users)
+
+            jdb.keys['user_1'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
+            jdb.keys['user_2'] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
+            jdb.keys['user_3'] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
+            jdb.keys['user_4'] = dt_2015 = dt.datetime(2015, 12, 12) # change created date
+            jdb.keys['user_1'] = today = dt.date.today() # change modified date
+            jdb.keys['user_2'] = prev_date1 = today - dt.timedelta(days=1) # change modified date
+            jdb.keys['user_3'] = prev_date2 = today - dt.timedelta(days=2) # change modified date
+            jdb.keys['user_4'] = prev_date3 = today - dt.timedelta(days=3) # change modified date
+            self.assertEqual(jdb, users)
+
+            # --------------------------------------------
+            res = jdb.show(user._date.startswith('2005'))
+            self.assertEqual(set(res), {'user_2'})
+
+            # modified date == tuesday (0 = monday, ... 5 = saturday, 6 = sunday)
+            res = jdb.find(user._date.mod(7, today.weekday()), with_value=True)
+            self.assertEqual(set(res), {'user_1'})
+
+            res2 = jdb.find(user._date.mod(7, today.weekday()))
+            self.assertEqual(res, res2)
+
+            # created date == saturday
+            res = jdb.find(user._date.mod(7., 5))
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # created date near 2005-05-01 +/- 10 days
+            res = jdb.find(user._date.near(dt.datetime(2005, 5, 1), 10))
+            self.assertEqual(set(res), {'user_2'})
+
+            # modified date near today() +/- 1 days
+            res = jdb.find(user._date.near(today, 1))
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # 2005-05-05 <= created date <= 2010-10-10
+            res = jdb.find(user._date.between(dt_2005, dt_2010))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            res = jdb.find(user._date == dt_2005)
+            self.assertEqual(set(res), {'user_2'})
+
+            res = jdb.find(user._date != dt_2005)
+            self.assertEqual(set(res), {'user_1', 'user_3', 'user_4'})
+
+            res = jdb.find(user._date >= dt_2010)
+            self.assertEqual(set(res), {'user_3', 'user_4'})
+
+            res = jdb.find(user._date < dt_2015)
+            self.assertEqual(set(res), {'user_1', 'user_2', 'user_3'})
+
+            res = jdb.find(user._date <= dt_2000)
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(user._date > prev_date1)
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find((user._date >= prev_date1) & (user._date <= today))
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res = jdb.find(user._date < prev_date2)
+            self.assertEqual(set(res), {'user_4'})
+
+            res = jdb.find(user._date <= prev_date3)
+            self.assertEqual(set(res), {'user_4'})
+
+            res = jdb.find(user._date.has('201'))
+            self.assertEqual(set(res), {'user_3', 'user_4'})
+
+            res = jdb.find(user._date.not_has('201'))
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res = jdb.find(user._date.has(today))
+            self.assertEqual(set(res), {'user_1'})
+
+            # check modified date in set()
+            res = jdb.find(user._date.one_of({prev_date3, prev_date1}))
+            self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            res = jdb.find(user._date.not_in({prev_date3, prev_date1}), with_value=True)
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1)) # pylint: disable=W0640
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            #------------------------------------
+            # KEY.endswith('_3')
+            res = jdb.show(user._id.endswith(('_3', '_2')))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            res2 = jdb.find(user._id.endswith(('_3', '_2')))
+            self.assertEqual(res, res2)
+
+            # 'user_2' <= KEY <= 'user_4'
+            res = jdb.find(user._id.between('user_2', 'user_4'))
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            res = jdb.find(user._id.size_of([4,5,6]))
+            self.assertEqual(set(res), set(users))
+
+            res = jdb.find(user._id.size_of(6))
+            self.assertEqual(set(res), set(users))
+
+            res = jdb.find(user._id.has('r_1'))
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(user._id.not_has('r_1'))
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            res = jdb.find(user._date.any_in([prev_date3, prev_date1]))
+            self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            res2 = jdb.find(user._id.fullmatch(r'user_[24]'))
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user._date.any_in([prev_date3, prev_date1]) & user._id.matches(r'er_[24]'))
+            self.assertEqual(res, res2)
+            #----------------------------------------------------------
+            # VAL['name'].endswith('e')
+            res = jdb.find(user.name.endswith('e'))
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # 'Aa' <= VAL['name'] <= 'Bz'
+            res = jdb.find(user.name.between('Aa', 'Bz'))
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # not 'Aa' <= VAL['name'] <= 'Bz'
+            res = jdb.find(~user.name.between('Aa', 'Bz'))
+            self.assertEqual(set(res), {'user_3', 'user_4'})
+
+            #----------------------------------------------------------
+            res = jdb.find(user.name == 'Alice')
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(user['**'].matches(r'designer'))
+            self.assertEqual(set(res), {'user_4'})
+
+            res = jdb.find(user.role.ihas('designer'))
+            self.assertEqual(set(res), {'user_4'})
+
+            # 2. Relational & Conditional Operators (vals)
+            #----------------------------------------------------------
+            res = jdb.show(user.age.type_of(int))
+            self.assertEqual(res, users)
+
+            # Age % 10 == 5
+            res = jdb.find(user.age.mod(10, 5))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            # Age is greater than or equal to 30
+            res = jdb.find(user.age >= 30)
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # Age is strictly less than 30
+            res = jdb.find(user.age < 30)
+            self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            # not any(Value['age'] == 30 for k in Value)
+            res = jdb.find(~(user['**'].age == 30))
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            # Role is either 'admin' or 'designer'
+            res = jdb.find(user.role.one_of(['admin', 'designer']))
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # Role is not 'admin' and not 'designer'
+            res = jdb.find(user.role.not_in(['admin', 'designer']))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            # tags contains 'python'
+            res = jdb.find(user.tags.has('python'))
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # Value['tags'][-1] == 'aws'
+            res = jdb.find(user.tags.one_of(['python', 'database']))
+            self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(user.tags.any_in(['linux', 'database']))
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            res = jdb.find(user.tags.not_in(['python', 'database']))
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            # tags contains 'python' AND 'linux'
+            res = jdb.find(user.tags.has('python') & user.tags.has('linux'))
+            self.assertEqual(set(res), {'user_3'})
+
+            # ANY contains 'Bo'
+            res = jdb.find(user['*'].has('Bo'))
+            self.assertEqual(set(res), {'user_2'})
+
+            res2 = jdb.find(user['*'].ihas('bo'))
+            self.assertEqual(res, res2)
+
+            # Age is NOT 30
+            res = jdb.find(user.age != 30)
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            res = jdb.find(user['*'] !=  30)
+            self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
+
+            # Age is 28
+            res = jdb.find(user.age == 28)
+            self.assertEqual(set(res), {'user_4'})
+
+            # 40 >= Age > 25
+            res = jdb.find((user.age > 25) & (user.age <= 40))
+            self.assertEqual(set(res), {'user_1', 'user_3', 'user_4'})
+
+            # not 40 >= Age > 25
+            res = jdb.find(~(user.age > 25) | ~(user.age <= 40))
+            self.assertEqual(set(res), {'user_2'})
+
+            # name in ['Alice', 'Bob'] AND age in [30, 25]
+            res = jdb.find(user.name.matches(re.compile('Alice|Bob')) & user.age.one_of([30, 25]))
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # 3. Logical Grouping (AND, OR, NOR, NOT)
+            #----------------------------------------------------------
+            # Age >= 25 AND Age <= 30
+            res = jdb.find((user.age >= 25) & (user.age <= 30))
+            self.assertEqual(set(res), {'user_1', 'user_2', 'user_4'})
+
+            # Role is 'admin' OR Age > 30
+            res = jdb.find((user.role == 'admin') | (user.age > 30))
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # Role is not 'admin' AND Age <= 30
+            res = jdb.find(~((user.role == 'admin') | (user.age > 30)))
+            self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            # User is NOT a developer
+            res = jdb.find(user.role.not_has('developer'))
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # (Role is 'admin' OR Age > 30) AND 'linux' not in tags
+            res = jdb.find((((user.role == 'admin') | (user.age > 30)) & ~(user.tags.has('linux'))))
+            self.assertEqual(set(res), {'user_1'})
+
+            # 4. Regular Expressions (RE, RE2, re.compile)
+            #----------------------------------------------------------
+            # Values matching an email domain regex
+            res = jdb.find(user.email.matches(r'.@example.com'))
+            self.assertEqual(set(res), {'user_1'})
+
+            # Find users where any attribute exactly matches regex
+            res = jdb.find(user['*'].matches(r'.@example.com'))
+            self.assertEqual(set(res), {'user_1'})
+
+            # Global regex search for strings containing 'li' (matches 'Alice', 'Charlie', 'linux')
+            res = jdb.find(user['*'].matches('li[a-z]'))
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # 5. Array / List Operations
+            #----------------------------------------------------------
+            # Users with exactly 2 tags in their list
+            res = jdb.find(user.tags.size_of(2))
+            self.assertEqual(set(res), {'user_1', 'user_2', 'user_4'})
+
+            # Users whose FIRST tag (index 0) is 'python'
+            res = jdb.find(user.tags[0] == 'python')
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            # 6. Lambda / Custom Functions (FUNC) & Pagination (limit)
+            #----------------------------------------------------------
+            # Pass a lambda to evaluate both the key and the value dynamically
+            # Example: Find the first users whose age is an even number
+            res = jdb.find(user.test(lambda k,v: isinstance(v, dict) and v.get('age', 1) % 2 == 0), limit=1)
+            self.assertTrue(set(res), {'user_1'})
+
+            # Users has email
+            res = jdb.find(user.email.test(lambda v: v != ''))
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # Users don't have email
+            res = jdb.find(~user.email.test(lambda v: v != ''))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            res = jdb.find(~user.exists('email'))
+            self.assertEqual(set(res), {'user_2', 'user_3'})
+
+            #----------------------------------------------------------
+            jdb += {
+                'user_5': {
+                    'name': 'Eva','age': 32, 'email': 'eva@company_a.com', 'role': 'officer',
+                    'addr_home': {'city': 'NYC', 'zip': 10001}, 'addr_work': {'city': 'LA'},
+                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85, 90, 78]},
+                'user_6': {
+                    'name': 'Fiona', 'age': 44, 'email': 'fiona@company_b.com', 'role': 'CEO',
+                    'addr_home': {'city': 'Tokyo', 'zip':4000}, 'addr_work': {'city': 'HK', 'zip': 5001},
+                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92, 95, 99]}
+            }
+
+            res = jdb.show(user.exists('email'))
+            self.assertEqual(set(res), {'user_1', 'user_4', 'user_5', 'user_6'})
+
+            # city name == 'NYC'
+            res = jdb.find(user.addr_home.city == 'NYC')
+            self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(user['addr*'].city == 'NYC')
+            self.assertEqual(res, res2)
+
+            # find frontend in meta field
+            res = jdb.find(user.meta['**'].ihas('frontend'))
+            self.assertEqual(set(res), {'user_6'})
+
+            # 'meta' exists and not city == Tokyo
+            res = jdb.find(user.exists('meta') & ~(user['addr*'].city == 'Tokyo'))
+            self.assertEqual(set(res), {'user_5'})
+
+            # 'email' exists
+            res = jdb.find(user.exists('email'))
+            self.assertEqual(set(res), {'user_1', 'user_4', 'user_5', 'user_6'})
+
+            # both 'email' and 'meta' exist
+            res = jdb.find(user.exists(('email', 'meta')))
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # city name start with 'L' or 'H'
+            res = jdb.find(user['addr?*'].city.startswith(('L', 'H')))
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # addr_home.zip >= 5000
+            res = jdb.find(user.addr_home.zip >= 5000)
+            self.assertEqual(set(res), {'user_5'})
+
+            # meta.tags[0] == 'python' or meta.labels[0] == 'python'
+            res = jdb.find(user.meta['*'][0] == 'python')
+            self.assertEqual(set(res), {'user_6'})
+
+            # meta.tags[-1] == 'api' or meta.labels[-1] == 'api'
+            res = jdb.find(user.meta['*'][-1] == 'api')
+            self.assertEqual(set(res), {'user_5'})
+
+            # meta.tags[0].endswith(('b', 'i')) or meta.labels[0].endswith(('b', 'i'))
+            res = jdb.find(user.meta['*'][0].endswith(('b', 'i')))
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # 'db' in meta.tags
+            res = jdb.find(user.meta.tags['*'] == 'db')
+            self.assertEqual(set(res), {'user_5'})
+
+            # any(socre >= 90 for score in scores)
+            res = jdb.find(user.scores['*'] >= 90)
+            self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            # any(score > 95 for score in scores)
+            res = jdb.find(user.scores['*'] > 95)
+            self.assertEqual(set(res), {'user_6'})
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
     def test_nosql(self):
         for config in self.jdb_configs:
             st_time = time.perf_counter()
@@ -556,6 +932,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(date={'$re2': r'20\d0-'}, with_value=True)
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(date={'$match': r'20\d0-'}, with_value=True)
+            self.assertNotEqual(res, res2)
+
             res2 = jdb.find(date={'$re': [r'20\d[0-4]', r'20\d[6-9]']}, with_value=True)
             self.assertEqual(res, res2)
 
@@ -629,6 +1008,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res1, res2)
 
             res2 = jdb.find({'$re2':r'_[12]'}, with_value=True)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find({'$match':r'_[12]'}, with_value=True)
+            self.assertNotEqual(res, res2)
+
+            res2 = jdb.find({'$match':r'user_[12]'}, with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jdb.find(re.compile(r'_[12]'), with_value=True)
@@ -995,6 +1380,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'n??e':re.compile(r'Alice|Bob'), 'age':[30, 25]})
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'n?me.$match':re.compile(r'Alice|Bob'), 'age':[30, 25]})
+            self.assertEqual(res, res2)
+
             res2 = jdb.show(vals={'name':re.compile('Alice|Bob'), 'age':[30, 25]}, skip=1)
             self.assertEqual(set(res2), {'user_2'})
 
@@ -1023,11 +1411,14 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(NAND=[{'!role': 'admin'}, {'!age': {'$gt': 30}}])
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(NAND=[{'!role': 'admin'}, {'!age.$gt': 30}])
+            self.assertEqual(res, res2)
+
             # Role is not 'admin' AND Age <= 30
             res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
             self.assertEqual(set(res), {'user_2', 'user_4'})
 
-            res2 = jmem.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+            res2 = jmem.find(NOR=[{'role': 'admin'}, {'age.$gt': 30}])
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res2)
 
             # User is NOT a developer
@@ -1046,10 +1437,10 @@ class TestJDb(unittest.TestCase):
 
             res2 = jdb.find(AND=[
                 {'$or': [
-                  {'role': 'admin'},
-                  {'age': {'$gt': 30}}
-               ]},
-               {'!tags': {'$has': 'linux'}},
+                    {'role': 'admin'},
+                    {'age.$gt': 30}
+                ]},
+                {'!tags.$has': 'linux'},
             ])
             self.assertEqual(res, res2)
 

@@ -2,14 +2,13 @@
 from __future__ import annotations
 from functools import lru_cache
 from datetime import date as dt_date, datetime, timedelta
-from typing import Any, List, Generator
-from re import compile as re_compile, search as re_search, findall as re_findall, \
-            Pattern, I as re_I, S as re_S
+from typing import Any, List, Generator, Union, Callable, Tuple
+from re import compile as re_compile, findall as re_findall, Pattern, S as re_S
 #-----------------------------------------------------------------------------
 from .jdb_io import json_dumps
 #-----------------------------------------------------------------------------
 
-JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_I|re_S).sub
+JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_S).sub
 PATH_RE_sub = re_compile(r'(?<!\W)\*+|\*+(?!\W|$)').sub
 
 TYPE_MAP = {
@@ -53,6 +52,8 @@ QUERY_OPS = {
                     # re.Pattern(...)
     'RE2',          # {'$re2': re.Pattern(...)}             # pattern.search(chk, JSON_RE_sub('', Value))
                     # {'$re2': r'...'}                      # re.search(chk, JSON_RE_sub('', Value))
+    'MATCH',        # {'$match': re.Pattern(...)}           # pattern.fullmatch(chk, Value)
+                    # {'$match': r'...'}                    # re.fullmatch(chk, Value)
     'FUNC',         # {'$func': lambda key,val: ..}         # bool(func(Key, Value))
                     # {'$func': lambda val: ..}             # bool(func(Value))
                     # lambda key,val: ...
@@ -85,6 +86,124 @@ QUERY_OPS = {
                     # {'$exists': {...}}                    # all(chk in Value for chk in {...})
 }
 
+#-----------------------------------------------------------------------------
+
+class Condition(dict):
+    def copy(self) -> Condition:
+        return Condition(super().copy())
+
+    def __missing__(self, key:str) -> None: # pragma: no cover
+        return ''
+
+    def __and__(self, other:Condition) -> Condition:
+        left  = self['$and']  if '$and' in self and len(self) == 1 else [dict(self)]
+        right = other['$and'] if '$and' in other and len(other) == 1 else [dict(other)]
+        return Condition({'$and': left + right})
+
+    def __or__(self, other:Condition) -> Condition:
+        left  = self['$or']  if '$or' in self  and len(self) == 1 else [dict(self)]
+        right = other['$or'] if '$or' in other and len(other) == 1 else [dict(other)]
+        return Condition({'$or': left + right})
+
+    def __invert__(self) -> Condition:
+        return Condition({'$not': dict(self)})
+
+    def __repr__(self) -> str:
+        return f'Condition({dict.__repr__(self)})'
+
+class Query:
+    def __init__(self, _path:str = ''):
+        object.__setattr__(self, '_path', _path)
+
+    def __getattr__(self, name:str) -> Query:
+        path = self._path
+        return Query(f'{path}.{name}' if path else name)
+
+    def __getitem__(self, segment:Any) -> Query:
+        path = self._path
+        seg  = str(segment)
+        return Query(f'{path}.{seg}' if path else seg)
+
+    def _cond(self, op:str, val:Any) -> Condition:
+        path = self._path
+        return Condition({path: {op: val}} if path else {op: val})
+
+    def __eq__(self, val:Any) -> Condition:
+        path = self._path
+        return Condition({path: val} if path else {}) if path else NotImplemented
+
+    def __ne__(self, val:Any) -> Condition:
+        return self._cond('$ne', val)
+
+    def __gt__(self, val:Any) -> Condition:
+        return self._cond('$gt', val)
+
+    def __ge__(self, val:Any) -> Condition:
+        return self._cond('$gte', val)
+
+    def __lt__(self, val:Any) -> Condition:
+        return self._cond('$lt', val)
+
+    def __le__(self, val:Any) -> Condition:
+        return self._cond('$lte', val)
+
+    def has(self, val:Union[str,tuple]) -> Condition:
+        return self._cond('$has', val)
+
+    def ihas(self, val:Union[str,tuple]) -> Condition:
+        return self._cond('$ihas', val)
+
+    def not_has(self, val:Union[str,tuple]) -> Condition:
+        return self._cond('$nhas', val)
+
+    def startswith(self, prefix:Union[str,tuple]) -> Condition:
+        return self._cond('$sw', prefix)
+
+    def endswith(self, suffix:Union[str,tuple]) -> Condition:
+        return self._cond('$ew', suffix)
+
+    def between(self, lo:Union[str,int,float], hi:[Union[str,int,float]]) -> Condition:
+        return self._cond('$between', (lo, hi))
+
+    def near(self, target:Union[int,float], tol:Union[int,float]) -> Condition:
+        return self._cond('$near', (target, tol))
+
+    def mod(self, div:Union[int,float], rem:Union[int,float]) -> Condition:
+        return self._cond('$mod', (div, rem))
+
+    def size_of(self, size:Union[int,Tuple[int]]) -> Condition:
+        return self._cond('$size', size)
+
+    def exists(self, fields:Union[Any,Tuple[Any]]) -> Condition:
+        return self._cond('$exists', fields)
+
+    def type_of(self, _type:str) -> Condition:
+        return self._cond('$type', _type)
+
+    def any_in(self, col:Union[tuple,list,set]) -> Condition:
+        return self._cond('$anyin', col)
+
+    def matches(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
+        rx = re_compile(pattern, flags) if isinstance(pattern, str) else pattern
+        return self._cond('$re', rx)
+
+    def fullmatch(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
+        rx = re_compile(pattern, flags) if isinstance(pattern, str) else pattern
+        return self._cond('$match', rx)
+
+    def test(self, func:Union[Callable[[Any],bool],Callable[[str,Any],bool]]) -> Condition:
+        return self._cond('$func', func)
+
+    def one_of(self, collection:Any) -> Condition:
+        return self._cond('$in', collection)
+
+    def not_in(self, collection:Any) -> Condition:
+        return self._cond('$nin', collection)
+
+    def __repr__(self) -> str:
+        return f"Query('{self._path}')"
+
+#-----------------------------------------------------------------------------
 def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
     """
     Evaluate if a KEY matches a given set of conditions or MongoDB-like operators.
@@ -132,7 +251,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                 if is_same_type:
                     is_matched = (key <= rule) if reverse_it else (key > rule)
 
-            elif cmd == '$gte' or cmd == '$ge':
+            elif cmd in ('$gte', '$ge'):
                 if is_same_type:
                     is_matched = (key < rule) if reverse_it else (key >= rule)
 
@@ -140,11 +259,11 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                 if is_same_type:
                     is_matched = (key >= rule) if reverse_it else (key < rule)
 
-            elif cmd == '$lte' or cmd == '$le':
+            elif cmd in ('$lte', '$le'):
                 if is_same_type:
                     is_matched = (key > rule) if reverse_it else (key <= rule)
 
-            elif cmd == '$eq' or cmd == '$ne':
+            elif cmd in ('$eq', '$ne'):
                 if is_same_type:
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     is_matched = (key != rule) if reverse_it else (key == rule)
@@ -184,7 +303,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                     except (TypeError, ValueError): # pragma: no cover
                         pass
 
-            elif cmd == '$sw' or cmd == '$ew':
+            elif cmd in ('$sw', '$ew'):
                 if isinstance(rule, (tuple, str)):
                     try:
                         is_matched = key.startswith(rule) if cmd[1] == 's' else key.endswith(rule)
@@ -192,7 +311,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                     except (TypeError, ValueError): # pragma: no cover
                         pass
 
-            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
+            elif cmd in ('$in', '$nin', '$anyin'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 try:
                     is_matched = (key not in rule) if reverse_it else (key in rule)
@@ -200,29 +319,33 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                 except TypeError: # pragma: no cover
                     pass
 
-            elif cmd == '$has' or cmd == '$nhas' or cmd == '$ihas':
+            elif cmd in ('$has', '$nhas', '$ihas'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 if isinstance(rule, str):
                     key_l = key.lower() if cmd[1] == 'i' else key
                     rule_l = rule.lower() if cmd[1] == 'i' else rule
                     is_matched = (key_l.find(rule_l) < 0) if reverse_it else (key_l.find(rule_l) >= 0)
 
-            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
-                key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
+            elif cmd in ('$re', '$re2', '$regex', '$match'):
+                _rules = []
                 if isinstance(rule, Pattern):
-                    is_matched = (not rule.search(key_s)) if reverse_it else bool(rule.search(key_s))
+                    _rules.append(rule)
 
                 elif isinstance(rule, str):
-                    is_matched = (not re_search(rule, key_s)) if reverse_it else bool(re_search(rule, key_s))
+                    _rules.append(re_compile(rule))
 
                 elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
-                    # rule0 AND rule1 AND ...
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
-                            is_matched = bool(_rule.search(key_s))
+                            _rules.append(_rule)
                         elif isinstance(_rule, str):
-                            is_matched = bool(re_search(_rule, key_s))
+                            _rules.append(re_compile(_rule))
 
+                if _rules:
+                    key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
+                    use_fullmatch = cmd == '$match'
+                    for _rule in _rules:
+                        is_matched = _rule.fullmatch(key_s) if use_fullmatch else _rule.search(key_s)
                         if not is_matched:
                             break
 
@@ -234,8 +357,8 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                     try:
                         if arg_cnt == 1:
                             is_matched = (not rule(key)) if reverse_it else rule(key)
-                    except: # pragma: no cover
-                        pass
+                    except Exception as e: # pragma: no cover
+                        print(e)
 
             elif cmd == '$size':
                 _len = len(key)
@@ -249,7 +372,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                 is_matched = not match_KEY_rules(key, rule, level=level+1)
                 is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$or' or cmd == '$nor':
+            elif cmd in ('$or', '$nor'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -259,7 +382,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$and' or cmd == '$nand':
+            elif cmd in ('$and', '$nand'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -268,6 +391,10 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                             break
 
                     is_matched = (not is_matched) if reverse_it else is_matched
+
+        elif cmd == '_id':
+            is_matched = match_KEY_rules(key, rule, level=level+1)
+            is_matched = (not is_matched) if reverse_it else is_matched
 
         if not is_matched: return False
 
@@ -324,6 +451,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     return False
             else:
                 return False
+
         elif isinstance(rules, (int, float)):
             today = dt_date.today() if isinstance(rules, int) else datetime.now()
             days = int(rules)
@@ -353,7 +481,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     is_matched = (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule) if reverse_it else \
                             (is_cdate and cdate > rule.date() or is_mdate and mdate > rule)
 
-            elif cmd == '$gte' or cmd == '$ge':
+            elif cmd in ('$gte', '$ge'):
                 if is_same_type:
                     is_matched = (is_cdate and cdate < rule.date() or is_mdate and mdate < rule) if reverse_it else \
                             (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule)
@@ -363,12 +491,12 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     is_matched = (is_cdate and cdate >= rule.date() or is_mdate and mdate >= rule) if reverse_it else \
                             (is_cdate and cdate < rule.date() or is_mdate and mdate < rule)
 
-            elif cmd == '$le' or cmd == '$lte':
+            elif cmd in ('$le', '$lte'):
                 if is_same_type:
                     is_matched = (is_cdate and cdate > rule.date() or is_mdate and mdate > rule) if reverse_it else \
                             (is_cdate and cdate <= rule.date() or is_mdate and mdate <= rule)
 
-            elif cmd == '$eq' or cmd == '$ne':
+            elif cmd in ('$eq', '$ne'):
                 if is_same_type:
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     is_matched = (is_cdate and cdate != rule.date() or is_mdate and mdate != rule) if reverse_it else \
@@ -417,7 +545,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                         except TypeError: # pragma: no cover
                             pass
 
-            elif cmd == '$sw' or cmd == '$ew':
+            elif cmd in ('$sw', '$ew'):
                 if isinstance(rule, (tuple, str)):
                     try:
                         is_matched = date_s.startswith(rule) if cmd[1] == 's' else date_s.endswith(rule)
@@ -425,7 +553,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     except TypeError: # pragma: no cover
                         pass
 
-            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
+            elif cmd in ('$in', '$nin', '$anyin'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 try:
                     is_matched = (mdate in rule or mdate_s in rule or cdate in rule or cdate_s in rule) if cmd.endswith('anyin') else \
@@ -435,7 +563,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                 except TypeError: # pragma: no cover
                     pass
 
-            elif cmd == '$has' or cmd  == '$nhas' or cmd == '$ihas':
+            elif cmd in ('$has', '$nhas', '$ihas'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 date_s = date_s.lower() if cmd[1] == 'i' else date_s
                 if isinstance(rule, str):
@@ -448,22 +576,27 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                 elif isinstance(rule, dt_date):
                     is_matched = (date_s.find(str(rule)) < 0) if reverse_it else (date_s.find(str(rule)) >= 0)
 
-            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
-                date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
+            elif cmd in ('$re', '$re2', '$regex', '$match'):
+                _rules = []
                 if isinstance(rule, Pattern):
-                    is_matched = (not rule.search(date_s)) if reverse_it else bool(rule.search(date_s))
+                    _rules.append(rule)
 
                 elif isinstance(rule, str):
-                    is_matched = (not re_search(rule, date_s)) if reverse_it else bool(re_search(rule, date_s))
+                    _rules.append(re_compile(rule))
 
                 elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
-                    # rule0 AND rule1 AND ...
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
-                            is_matched = bool(_rule.search(date_s))
+                            _rules.append(_rule)
                         elif isinstance(_rule, str):
-                            is_matched = bool(re_search(_rule, date_s))
+                            _rules.append(re_compile(_rule))
 
+                if _rules:
+                    date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
+                    use_fullmatch = cmd == '$match'
+                    for _rule in _rules:
+                        is_matched = _rule.fullmatch(date_s) if use_fullmatch else \
+                                    _rule.search(date_s)
                         if not is_matched:
                             break
 
@@ -482,7 +615,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                 is_matched = not match_DATE_rules(cdate, mdate, rule, level=level+1)
                 is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$or' or cmd == '$nor':
+            elif cmd in ('$or', '$nor'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -492,7 +625,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$and' or cmd == '$nand':
+            elif cmd in ('$and', '$nand'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -501,6 +634,10 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                             break
 
                     is_matched = (not is_matched) if reverse_it else is_matched
+
+        elif cmd == '_date':
+            is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
+            is_matched = (not is_matched) if reverse_it else is_matched
 
         if not is_matched: return False
 
@@ -571,7 +708,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                 except TypeError: # pragma: no cover
                     pass
 
-            elif cmd == '$gte' or cmd == '$ge':
+            elif cmd in ('$gte', '$ge'):
                 try:
                     if is_same_type and val.__ge__ and rule.__ge__:
                         is_matched = (val < rule) if reverse_it else (val >= rule)
@@ -585,14 +722,14 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                 except TypeError: # pragma: no cover
                     pass
 
-            elif cmd == '$lte' or cmd == '$le':
+            elif cmd in ('$lte', '$le'):
                 try:
                     if is_same_type and val.__le__ and rule.__le__:
                         is_matched = (val > rule) if reverse_it else (val <= rule)
                 except TypeError: # pragma: no cover
                     pass
 
-            elif cmd == '$eq' or cmd == '$ne':
+            elif cmd in ('$eq', '$ne'):
                 try:
                     if is_same_type and val.__eq__ and rule.__eq__:
                         reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
@@ -636,7 +773,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                         except TypeError: # pragma: no cover
                             pass
 
-            elif cmd == '$sw' or cmd == '$ew':
+            elif cmd in ('$sw', '$ew'):
                 try:
                     val_s = val if isinstance(val, str) else \
                             (val if isinstance(rule, bytes) else val.decode('utf8')) if isinstance(val, (bytes, bytearray)) else \
@@ -649,7 +786,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                 except (TypeError, ValueError, AttributeError): # pragma: no cover
                     pass
 
-            elif cmd == '$in' or cmd == '$nin' or cmd == '$anyin':
+            elif cmd in ('$in', '$nin', '$anyin'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 if hasattr(rule, '__contains__'):
                     try:
@@ -667,7 +804,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     except TypeError: # pragma: no cover
                         pass
 
-            elif cmd == '$has' or cmd == '$nhas' or cmd == '$ihas':
+            elif cmd in ('$has', '$nhas', '$ihas'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                 if hasattr(val, '__contains__') and not isinstance(val, (str, bytes, bytearray)):
                     try:
@@ -695,7 +832,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     except (TypeError, ValueError, AttributeError): # pragma: no cover
                         pass
 
-            elif cmd == '$re' or cmd == '$re2' or cmd == '$regex':
+            elif cmd in ('$re', '$re2', '$regex', '$match'):
                 _rules = []
                 if isinstance(rule, Pattern):
                     _rules.append(rule)
@@ -727,9 +864,11 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                         val_s = val
 
                     if val_s is not None:
+                        use_fullmatch = cmd == '$match'
                         val_s = JSON_RE_sub('', val_s) if cmd[-1] == '2' else val_s
                         for _rule in _rules:
-                            is_matched = _rule.search(val_s)
+                            is_matched = _rule.fullmatch(val_s) if use_fullmatch else \
+                                        _rule.search(val_s)
                             if not is_matched:
                                 break
 
@@ -779,7 +918,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                 is_matched = not match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
                 is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$or' or cmd == '$nor':
+            elif cmd in ('$or', '$nor'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -789,7 +928,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$and' or cmd == '$nand':
+            elif cmd in ('$and', '$nand'):
                 if isinstance(rule, (list,tuple)):
                     reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                     for _rule in rule:
@@ -799,11 +938,15 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-            elif cmd == '$any' or cmd == '$none':
+            elif cmd in ('$any', '$none', '$all'):
                 reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
+                is_any = cmd != '$all'
                 if hasattr(val, '__iter__') and not isinstance(val, (str, bytes)):
                     items = val.values() if is_dict else val
-                    is_matched = any(match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in items)
+                    if is_any:
+                        is_matched = any(match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in items)
+                    else:
+                        is_matched = all(match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in items)
                 else:
                     is_matched = match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
 
@@ -816,30 +959,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                             if _ref_l in val:
                                 _is_matched = match_VAL_rules(key, val[_ref_l], _rule, cdate, mdate, level=level+1)
                                 _is_matched = (not _is_matched) if _reverse_it else _is_matched
-                                if _is_matched:
-                                    break
-
-                    is_matched = True if _is_matched else is_matched
-
-                is_matched = (not is_matched) if reverse_it else is_matched
-
-            elif cmd == '$all':
-                if hasattr(val, '__iter__') and not isinstance(val, (str, bytes)):
-                    items = val.values() if is_dict else val
-                    is_matched = all(match_VAL_rules(key, _val, rule, cdate, mdate, ALL=True, level=level+1) for _val in items)
-                else:
-                    is_matched = match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
-
-                if not is_matched and isinstance(rule, dict):
-                    _is_matched = False
-                    if is_dict:
-                        for _ref, _rule in rule.items():
-                            _reverse_it = _ref.startswith('!')
-                            _ref_l = _ref[1:] if _reverse_it else _ref
-                            if _ref_l in val:
-                                _is_matched = match_VAL_rules(key, val[_ref_l], _rule, cdate, mdate, level=level+1)
-                                _is_matched = (not _is_matched) if _reverse_it else _is_matched
-                                if not _is_matched: # pragma: no cover
+                                if is_any and _is_matched or not is_any and not _is_matched:
                                     break
 
                     is_matched = True if _is_matched else is_matched

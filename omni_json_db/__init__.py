@@ -10,13 +10,14 @@ from .jdb_net import JNetFiles
 from .jdb_lite import JDbReader, SEP_SYM, JFlag
 from .jdb import JDb
 from .jdb_server import run_files_server
+from .jdb_query import Query
 
 __package_name__    = 'omni_json_db'
 __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful KV JSON database with compression/Time-travel/Concurrency. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.13.17'
+__version__         = '2.13.18'
 
 __all__ = [
     'JDb',
@@ -29,6 +30,7 @@ __all__ = [
     'JDiskFiles',
     'JMemFiles',
     'JNetFiles',
+    'Query',
     'SEP_SYM',
     'dumps',
     'loads',

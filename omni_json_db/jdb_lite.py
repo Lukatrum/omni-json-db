@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
-from re import compile as re_compile, match as re_match, Pattern, I as re_I
+from re import compile as re_compile, match as re_match, Pattern
 from os.path import exists as path_exists # basename, dirname, join as path_join
 from threading import RLock, get_ident
 from struct import Struct
@@ -14,7 +14,8 @@ from typing import Any, Union, Optional, Tuple, Set, Dict, Callable, Generator, 
 from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
-from .jdb_query import QUERY_OPS, match_KEY_rules, match_DATE_rules, match_VAL_rules
+from .jdb_query import QUERY_OPS, Condition, \
+                match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JTypeError, \
                 JDbBase, deepcopy
 #-----------------------------------------------------------------------------
@@ -3271,21 +3272,22 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
 
         """
-        re_flags = kwargs.get('re_flags', re_I)
-
         vals = {} if not vals else dict(vals)
-
         for key,val in kwargs.items():
             if key in QUERY_OPS:
                 vals[f'${key.lower()}'] = val
             else:
                 raise TypeError(f'invalid query command {key}')
 
+        if isinstance(keys, Condition):
+            vals.update(keys)
+            keys = {}
+        elif not keys:
+            keys = {}
+
         old_with_value = with_value
         if vals:
             with_value = True
-
-        if not keys: keys = {}
 
         if isinstance(keys, dict):
             pass
@@ -3298,7 +3300,7 @@ class JDbReader(JDbBase):
             if idx >= 0:
                 # 'jdb_name:::jdb_key'
                 key_rule = keys[:idx]
-                key_rule = re_compile(key_rule, flags=re_flags) if key_rule else None
+                key_rule = re_compile(key_rule) if key_rule else None
                 next_keys = keys[idx+SEP_LEN:]
                 next_idx = next_keys.find(SEP_SYM)
 
@@ -3325,7 +3327,7 @@ class JDbReader(JDbBase):
                                         yield f'{child_name}{SEP_SYM}{_key}', _val
                 return
 
-            keys = {'$re': re_compile(keys, flags=re_flags)}
+            keys = {'$re': re_compile(keys)}
 
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = bytes(keys) if isinstance(keys, bytearray) else keys
@@ -3357,7 +3359,7 @@ class JDbReader(JDbBase):
                 if cmd_l not in ('$key', '$date'):
                     use_bytes = isinstance(rules, bytes) if cmd_l in ('$eq', '$ne') else \
                             (isinstance(rules, bytes) or (isinstance(rules, str) and _j_type)) if cmd_l in ('$has', '$nhas', '$ihas') else \
-                            _j_type if cmd_l in ('$re', '$re2', '$regex') else False
+                            _j_type if cmd_l in ('$re', '$re2', '$regex', '$match') else False
                     _val_conds.append(({cmd:rules}, use_bytes))
 
             cache = self._cache
