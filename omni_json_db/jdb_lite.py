@@ -11,6 +11,7 @@ from socketserver import TCPServer
 from struct import Struct
 from enum import IntFlag
 from unicodedata import east_asian_width
+from functools import lru_cache
 from typing import Any, List, Union, Optional, Tuple, Set, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, json_dumps, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
@@ -1064,19 +1065,43 @@ def _match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, 
 
     return True
 
+def _iter_all_node(node:Any) -> Generator[Any]:
+    """Recursively yield every node in a nested dict/list structure."""
+    yield node
+
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from _iter_all_node(v)
+
+    elif isinstance(node, (list, tuple)):
+        for v in node:
+            yield from _iter_all_node(v)
+
+@lru_cache(maxsize=512)
+def _compile_path_glob(pattern: str) -> Pattern:
+    """Compile and cache a glob path pattern to regex."""
+    return re_compile(f'^{PATH_RE_sub(".*", pattern.replace("?", "."))}$')
+
 def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int) -> bool:
     """
     Recursively navigate val following path segments (parts).
-    Supports '*' wildcard and glob patterns (e.g. 'addr*', '*city').
+    Supports '*'/'**'/'?' wildcard and glob patterns (e.g. 'addr*', '*c?ty').
     ANY semantics: returns True if any matching path satisfies the rule.
 
     Args:
         key_parts (List[str]): Ordered list of remaining path segments to traverse, produced by splitting a separator-delimited path string (e.g. 'addr*.city' becomes ['addr*', 'city']). Each element is consumed one level per recursive call. Accepted forms for each segment are:
             - Literal string  : exact dict key lookup (e.g. 'meta', 'address').
             - Integer string  : zero-based index for list/tuple access (e.g. '0', '2').
-            - Single wilcard  ? '?' expands to every dict value
-            - Bare wildcard   : '*' expands to every dict value or every sequence element.
-            - Recursive wildcard   : '**' expands to every dict value or every sequence element recursively.
+            - `?` wildcard    :
+                    - On dict : '?' is a single-char wildcard in the key name (regex '.').
+                                N '?'s match keys of exactly N characters.
+                                e.g. '?' -> 1-char keys; 'addr?' -> 5-char keys starting with 'addr'.
+                    - On list :  N '?'s select the N-th decade of indices (0-based).
+                                '?'  -> indices 0–9   (decade 1)
+                                '??' -> indices 10–19 (decade 2)
+
+            - `*` wildcard    : '*' expands to every dict value or every sequence element.
+            - `**` wildcard   : '**' expands to every dict value or every sequence element recursively.
             - Glob pattern    : a string containing '*' matched against dict key names
                                 (e.g. 'addr*', '*city', 'a*z'); only supported on dicts.
             - Operator segment : a segment starting with '$' or '!$' (no leading space), applied as a query operator at the leaf (e.g. '$has', '!$eq'). 
@@ -1105,30 +1130,20 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
     child_key, rest_parts = key_parts[0], key_parts[1:]
     child_key_s = child_key.lstrip(' ') # if map's key starts with '$', child_key must add ' ' before '$'
     if '*' in child_key_s or '?' in child_key_s:
-        if child_key == '**':
-            def _collect_all(node):
-                yield node
-                if isinstance(node, dict):
-                    for v in node.values():
-                        yield from _collect_all(v)
-                elif isinstance(node, (list, tuple)):
-                    for v in node:
-                        yield from _collect_all(v)
-
-            return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in _collect_all(val))
+        if child_key_s == '**':
+            return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in _iter_all_node(val))
 
         child_vals = None
         if isinstance(val, dict):
-            if child_key == '*':
+            if child_key_s == '*':
                 child_vals = list(val.values()) # any field
             else:
                 # Glob -> regex : 'addr*' -> r'^addr.*$'
-                _child_key = child_key_s.replace('?', '.')
-                rx = re_compile('^'+PATH_RE_sub('.*', _child_key)+'$')
+                rx = _compile_path_glob(child_key_s)
                 child_vals = [v for k,v in val.items() if rx.match(k)]
 
         elif isinstance(val, (list, tuple)):
-            if child_key_s == '*':
+            if child_key_s in ('*', '?*', '*?'):
                 child_vals = list(val)
             elif child_key_s.startswith('?'):
                 _cnt = child_key_s.count('?')
@@ -4354,6 +4369,8 @@ class JDbReader:
         for key,val in kwargs.items():
             if key in FIND_OPS:
                 vals[f'${key.lower()}'] = val
+            else:
+                raise TypeError(f'invalid query command {key}')
 
         old_with_value = with_value
         if vals:
@@ -4420,31 +4437,32 @@ class JDbReader:
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
             io, fp, key_fp = self.f_get_fp(fp)
-            count = 0
+            count = skipped = 0
             io_read_key = io.read_key
             io_conv_date = io.z_conv_date
             data_type = io.data_type_str
+            _j_type = data_type.endswith('J')
+            _val_conds = []
+            for cmd, rules in vals.items():
+                cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
+                if cmd_l not in ('$key', '$date'):
+                    use_bytes = isinstance(rules, bytes) if cmd_l in ('$eq', '$ne') else \
+                            (isinstance(rules, bytes) or (isinstance(rules, str) and _j_type)) if cmd_l in ('$has', '$nhas', '$ihas') else \
+                            _j_type if cmd_l in ('$re', '$re2', '$regex') else False
+                    _val_conds.append(({cmd:rules}, use_bytes))
+
             cache = self._cache
-            skipped = 0
             for key,row_id in io.sorted_key_table_items():
                 if count >= limit > 0:
                     break
 
-                is_matched = True
-                for cmd,rules in keys.items():
-                    if _match_KEY_rules(key, {cmd: rules}):
-                        continue
-
-                    is_matched = False
-                    break
-
+                is_matched = not keys or _match_KEY_rules(key, keys)
                 if not is_matched:
                     continue
 
-                if date is not None or with_date:
-                    key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row_id)
-                    cdate, mdate = io_conv_date(_days)
-                    if date is not None and not _match_DATE_rules(cdate, mdate, date):
+                if date is not None:
+                    cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
+                    if not _match_DATE_rules(cdate, mdate, date):
                         continue
                 else:
                     cdate = mdate = None
@@ -4455,6 +4473,8 @@ class JDbReader:
                         continue
 
                     if with_date:
+                        if cdate is None:
+                            cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
                         yield key, None, cdate, mdate
                     else:
                         yield key, None
@@ -4472,9 +4492,13 @@ class JDbReader:
 
                 if vals and isinstance(value, JDbReader):
                     child = value
-                    _vals = deepcopy(vals)
-                    _keys = _vals.pop('$key', None)
-                    _date = _vals.pop('$date', date)
+                    if '$key' in vals or '$date' in vals:
+                        _vals = dict(vals)
+                        _keys = _vals.pop('$key', None)
+                        _date = _vals.pop('$date', date)
+                    else:
+                        _vals, _keys, _date = vals, None, date
+
                     child_limit = (limit-count) if limit > 0 else 0
                     for _match in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value, with_date=with_date):
                         if skipped < skip:
@@ -4495,25 +4519,9 @@ class JDbReader:
                     continue
 
                 if cdate is None:
-                    _key, _file_id, _offset, _row_size, _val_size, _ver, _days =  io_read_key(key_fp, row_id)
-                    cdate, mdate = io_conv_date(_days)
+                    cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
 
-                for cmd,rules in vals.items():
-                    cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
-                    if cmd_l in ('$key', '$date'): # pragma: no cover
-                        continue
-
-                    use_bytes = False
-                    if cmd_l == '$eq' or cmd_l == '$ne':
-                        use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes)
-
-                    elif cmd_l == '$has' or cmd_l == '$nhas' or cmd_l == '$ihas':
-                        use_bytes = isinstance(rules, bytes) and not isinstance(value, bytes) \
-                                    or isinstance(rules, str) and data_type.endswith('J')
-
-                    elif cmd_l == '$re' or cmd_l == '$re2' or cmd_l == '$regex':
-                        use_bytes = data_type.endswith('J')
-
+                for rules,use_bytes in _val_conds:
                     if use_bytes:
                         if value_b is None:
                             try:
@@ -4525,7 +4533,7 @@ class JDbReader:
                     else:
                         _value = value
 
-                    if not _match_VAL_rules(key, _value, {cmd: rules}, cdate, mdate):
+                    if not _match_VAL_rules(key, _value, rules, cdate, mdate):
                         is_matched = False
                         break
 

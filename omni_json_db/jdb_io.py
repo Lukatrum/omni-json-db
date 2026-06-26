@@ -3,7 +3,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, Dict
 from io import DEFAULT_BUFFER_SIZE
 from time import time
-from functools import reduce
+from functools import reduce, lru_cache
 from collections import defaultdict, OrderedDict
 from re import findall as re_findall
 from datetime import date as dt_date, datetime, timedelta
@@ -1565,6 +1565,7 @@ class JIo:
         return old_date, new_date
 
     @staticmethod
+    @lru_cache(maxsize=256)
     def z_conv_str_to_days(val:str) -> int:
         """Parse raw textual timestamp representation parameters expressions converting fields directly to unified day numbers integers.
 
