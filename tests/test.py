@@ -1025,7 +1025,7 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'_id': {'user_1', 'user_2'}})
             self.assertEqual(res, res2)
 
-            res2 = jmem.find(vals={'_id': {'user_1', 'user_2'}})
+            res2 = jmem.find(vals={'$key': {'user_1', 'user_2'}})
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res2)
 
             res2 = jdb.find(lambda k: k.endswith(('1', '2')), with_value=True)
