@@ -3341,15 +3341,15 @@ class JDbReader(JDbBase):
         if not isinstance(keys, dict):  # pragma: no cover
             raise TypeError('invalid type')
 
+        old_with_value = with_value
+        if vals and not old_with_value:
+            with_value = True
+
         if not keys and '_id' in vals:
             keys = vals.pop('_id', keys)
 
         if not date and '_date' in vals:
             date = vals.pop('_date', date)
-
-        old_with_value = with_value
-        if vals and not old_with_value:
-            with_value = True
 
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:

@@ -387,7 +387,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_2'})
 
             # modified date == tuesday (0 = monday, ... 5 = saturday, 6 = sunday)
-            res = jdb.find(user._date.mod(7, today.weekday()), with_value=True)
+            res = jdb.find(user._date.mod(7, today.weekday()))
             self.assertEqual(set(res), {'user_1'})
 
             res2 = jdb.find(user._date.mod(7, today.weekday()))
@@ -460,7 +460,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.show(user._id.endswith(('_3', '_2')))
             self.assertEqual(set(res), {'user_2', 'user_3'})
 
-            res2 = jdb.find(user._id.endswith(('_3', '_2')))
+            res2 = jdb.find(user._id.endswith(('_3', '_2')), with_value=True)
             self.assertEqual(res, res2)
 
             # 'user_2' <= KEY <= 'user_4'
@@ -486,7 +486,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res, res2)
 
             res2 = jdb.find(user._date.any_in([prev_date3, prev_date1]) & user._id.matches(r'er_[24]'))
-            self.assertEqual(res, res2)
+            self.assertEqual(set(res), set(res2))
             #----------------------------------------------------------
             # VAL['name'].endswith('e')
             res = jdb.find(user.name.endswith('e'))
