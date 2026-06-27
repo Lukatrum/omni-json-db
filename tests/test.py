@@ -372,10 +372,10 @@ class TestJDb(unittest.TestCase):
             jdb += users
             self.assertEqual(jdb, users)
 
-            jdb.keys['user_1'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
-            jdb.keys['user_2'] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
-            jdb.keys['user_3'] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
-            jdb.keys['user_4'] = dt_2015 = dt.datetime(2015, 12, 12) # change created date
+            jdb.keys[user.name == 'Alice'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
+            jdb.keys[user.role.ihas('develop')] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
+            jdb.keys[user.age >= 35] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
+            jdb.keys[user.email.endswith('test.com')] = dt_2015 = dt.datetime(2015, 12, 12) # change created date
             jdb.keys['user_1'] = today = dt.date.today() # change modified date
             jdb.keys['user_2'] = prev_date1 = today - dt.timedelta(days=1) # change modified date
             jdb.keys['user_3'] = prev_date2 = today - dt.timedelta(days=2) # change modified date
@@ -391,6 +391,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_1'})
 
             res2 = jdb.find(user._date.mod(7, today.weekday()))
+            self.assertEqual(res, res2)
+
+            res2 = jdb[user._date.mod(7, today.weekday())]
             self.assertEqual(res, res2)
 
             # created date == saturday
@@ -460,8 +463,14 @@ class TestJDb(unittest.TestCase):
             res = jdb.show(user._id.endswith(('_3', '_2')))
             self.assertEqual(set(res), {'user_2', 'user_3'})
 
-            res2 = jdb.find(user._id.endswith(('_3', '_2')), with_value=True)
+            res2 = jdb.find(user._id.endswith(('_3', '_2')))
             self.assertEqual(res, res2)
+
+            res2 = jdb[user._id.endswith(('_3', '_2'))]
+            self.assertEqual(res, res2)
+
+            res2 = jdb.keys[user._id.endswith(('_3', '_2'))]
+            self.assertEqual(set(res), set(res2))
 
             # 'user_2' <= KEY <= 'user_4'
             res = jdb.find(user._id.between('user_2', 'user_4'))
@@ -487,6 +496,9 @@ class TestJDb(unittest.TestCase):
 
             res2 = jdb.find(user._date.any_in([prev_date3, prev_date1]) & user._id.matches(r'er_[24]'))
             self.assertEqual(set(res), set(res2))
+
+            res2 = jdb[user._date.any_in([prev_date3, prev_date1]) & user._id.matches(r'er_[24]')]
+            self.assertEqual(res, res2)
             #----------------------------------------------------------
             # VAL['name'].endswith('e')
             res = jdb.find(user.name.endswith('e'))
@@ -563,6 +575,9 @@ class TestJDb(unittest.TestCase):
 
             res2 = jdb.find(user['*'].ihas('bo'))
             self.assertEqual(res, res2)
+
+            res2 = jdb.keys[user['*'].ihas('bo')]
+            self.assertEqual(set(res), set(res2))
 
             # Age is NOT 30
             res = jdb.find(user.age != 30)
@@ -673,6 +688,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(user['addr*'].city == 'NYC')
             self.assertEqual(res, res2)
 
+            res2 = jdb[user['addr*'].city == 'NYC']
+            self.assertEqual(res, res2)
+
             # find frontend in meta field
             res = jdb.find(user.meta['**'].ihas('frontend'))
             self.assertEqual(set(res), {'user_6'})
@@ -720,6 +738,19 @@ class TestJDb(unittest.TestCase):
             # any(score > 95 for score in scores)
             res = jdb.find(user.scores['*'] > 95)
             self.assertEqual(set(res), {'user_6'})
+
+            # -------------------------------------
+            cond = (user.age >= 32) & (user.age <= 50)
+            res = jdb[cond]
+            self.assertEqual(set(res), {'user_3', 'user_5', 'user_6'})
+
+            jdb[cond] = 'modified'
+            res2 = jdb.find(EQ='modified')
+            self.assertEqual(set(res), set(res2))
+
+            cnt = len(jdb)
+            del jdb[user.email != '']
+            self.assertEqual(len(jdb), cnt-2)
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
@@ -6667,6 +6698,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(matches, expect)
             matches = jdb.keys[dt.date(2010,1, 1):]
             self.assertEqual(set(matches), set(expect))
+            matches_2 = jdb.keys[Query()._date >= dt.date(2010,1,1)]
+            self.assertEqual(matches, matches_2)
 
             matches = jdb[old_date:]
             self.assertEqual(matches, expect)
@@ -6687,7 +6720,7 @@ class TestJDb(unittest.TestCase):
             matches = jdb[:dt.date(2010, 1, 1)]
             self.assertTrue(not matches)
             matches = jdb.keys[:dt.date(2010, 1, 1)]
-            self.assertTrue(not matches)
+            matches_2 = jdb.keys[Query()._date <= dt.date(2010, 1, 1)]
 
             matches = jdb[:old_date]
             self.assertTrue(not matches)
@@ -6703,6 +6736,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(matches, expect)
             matches = jdb.keys[dt.datetime(2010, 1, 1):_now]
             self.assertEqual(set(matches), set(expect))
+            matches_2 = jdb.keys[Query()._date.between(dt.datetime(2010, 1, 1),_now)]
+            self.assertEqual(matches, matches_2)
 
             matches = jdb[now:old_date]
             self.assertTrue(not matches)

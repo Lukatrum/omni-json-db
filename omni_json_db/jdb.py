@@ -24,8 +24,8 @@ from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             MAX_INDEX_SIZE, g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, NEW_DAY_SHIFT
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError
-# from .utils import debug_break
 from .jdb_file import JFilesBase
+from .jdb_query import Condition
 
 MAX_BLOCK_SIZE = 2**20
 #-----------------------------------------------------------------------------
@@ -127,6 +127,18 @@ class JDbKey2(JDbKey):
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         if ver == sync_id:
                             jdb.f_change_days(fp, _key, val)
+                return
+
+            elif isinstance(key, Condition):
+                key_table = io.key_table
+                matched_list = [_key for _key,_val in jdb.find_iter(key)]
+                for _key in matched_list:
+                    if has_SIGINT(): break
+                    row_id = key_table[_key]
+                    if io.n_records > row_id >= 0:
+                        _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
+                        jdb.f_change_days(fp, _key, val)
+
                 return
 
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
@@ -357,6 +369,11 @@ class JDb(JDbReader):
                 - str | int | float | bool | bytes
                     
                     >>> jdb['name'] = val
+
+                - Condition
+
+                    >>> User = Query()
+                    >>> jdb[User.name == 'Alice'] = val
             
                 - slice | date | datetime
                     
@@ -464,6 +481,14 @@ class JDb(JDbReader):
                         self.f_write(fp, key, new_val)
                 else:
                     self.f_write(fp, key, val)
+
+                return
+
+            if isinstance(key, Condition):
+                matched_list = [_key for _key,_val in self.find_iter(key)]
+                has_SIGINT = self.file_lock.has_SIGINT
+                for _key in matched_list:
+                    self.f_write(fp, _key, val)
 
                 return
 
@@ -613,6 +638,11 @@ class JDb(JDbReader):
                 - str | int | float | bool | bytes
                     
                     >>> del jdb['name']
+
+                - Condition
+
+                    >>> user = Query()
+                    >>> del jdb[user.age >= 40]
             
                 - slice | date | datetime
                     
@@ -702,6 +732,13 @@ class JDb(JDbReader):
                     key = key.decode('utf8')
                 except (UnicodeDecodeError, ValueError):
                     key = str(key)
+
+            elif isinstance(key, Condition):
+                for _key,_val in self.find_iter(key):
+                    del_keys.add(_key)
+
+                if not del_keys:
+                    return
 
             elif isinstance(key, (slice, dt_date, datetime)):
                 io, fp, key_fp = self.f_get_fp(fp)

@@ -118,6 +118,9 @@ class JDbKey:
                     - str | bool | bytes
                         - val = jdb.keys['name']
 
+                    - Condition
+                        - val = jdb.keys[Query().name.startswith('A'')]
+
                     - slice | date | datetime | float | int
                         >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
                         >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
@@ -163,6 +166,21 @@ class JDbKey:
                 key = key.decode('utf8')
             except (UnicodeDecodeError, ValueError):
                 key = str(key)
+
+        elif isinstance(key, Condition):
+            jdb = self.jdb
+            matches = {}
+            with jdb.open(read_only=True) as fp:
+                io, fp, key_fp = jdb.f_get_fp(fp)
+                key_table = io.key_table
+                for _key,_val in jdb.find_iter(key):
+                    row_id = key_table[_key]
+                    if io.n_records > row_id >= 0:
+                        _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
+                        old_date, new_date  = io.z_conv_date(days)
+                        matches[_key] = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+
+            return matches
 
         elif isinstance(key, (int, float, slice, dt_date, datetime, Pattern)) \
                 or callable(key) \
@@ -1170,6 +1188,10 @@ class JDbReader(JDbBase):
                 - str | int | float | bool | bytes
                     >>> val = jdb['name']
 
+                - Condition
+                    >>> user = Query()
+                    >>> data = jdb[user.name == 'Alice']
+
                 - slice | date | datetime
                     >>> data = jdb[1:10:2]
                     >>> data = jdb[-10.:]
@@ -1210,6 +1232,10 @@ class JDbReader(JDbBase):
                 key = key.decode('utf8')
             except (UnicodeDecodeError, ValueError):
                 key = str(key)
+
+        elif isinstance(key, Condition):
+            # pylint: disable=unnecessary-comprehension
+            return {k:v for k,v in self.find_iter(key)}
 
         elif isinstance(key, (slice, dt_date, datetime, Pattern)) \
                 or callable(key) \

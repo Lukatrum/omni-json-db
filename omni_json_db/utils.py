@@ -450,18 +450,26 @@ class FileLock:
                                     continue
 
                             _mode = self._mode = ''
-                            self._cond.notify_all()
-
                             if not switch:
+                                self._cond.notify_all()
                                 _idents[ident] = _cnt
-
-                            continue
+                                continue
 
                         if not switch and _cnt > 0: # pragma: no cover
                             _idents[ident] = _cnt
 
                     elif switch: # pragma: no cover
                         _idents[ident] = _cnt - 1
+                        if _cnt > 1 and len(_idents) == 1:
+                            try:
+                                self._unlock()
+
+                            except OSError as e:
+                                print(e)
+                                if self._mode == 'x':
+                                    continue
+
+                            _mode = self._mode = ''
 
                 if _mode != '': # pragma: no cover
                     if not block:
