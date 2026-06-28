@@ -71,7 +71,7 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
-* **Almnost 100% test coverage**
+* **~100% test coverage**
 
 🛠️ Quick Start
 **************

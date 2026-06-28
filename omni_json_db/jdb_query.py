@@ -187,7 +187,7 @@ class Query:
     def endswith(self, suffix:Union[str,tuple]) -> Condition:
         return self._cond('$ew', suffix)
 
-    def between(self, lo:Union[str,int,float], hi:[Union[str,int,float]]) -> Condition:
+    def between(self, lo:Union[str,int,float], hi:Union[str,int,float]) -> Condition:
         return self._cond('$between', (lo, hi))
 
     def near(self, target:Union[int,float], tol:Union[int,float]) -> Condition:
@@ -765,7 +765,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                                     isinstance(val, (int, float)) and isinstance(high, (int, float)) or \
                                     isinstance(val, (bytes, bytearray)) and isinstance(high, (bytes, bytearray)))
 
-                        if  _is_same_type and val.__le__ and high.__ge__:
+                        if  _is_same_type:
                             is_matched = low <= val <= high
                             is_matched = (not is_matched) if reverse_it else is_matched
 

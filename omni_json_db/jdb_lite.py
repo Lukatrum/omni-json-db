@@ -3624,6 +3624,8 @@ class JDbReader(JDbBase):
                         if kk not in fields:
                             fields.insert(ii+offset, kk)
 
+        clean_re = re_compile(r'\x1b\[\d\d?m')
+
         def _format_cell(val:Any) -> str:
             if val is None:
                 return ""
@@ -3632,16 +3634,17 @@ class JDbReader(JDbBase):
                 return val
 
             if isinstance(val, (int, float, bool, bytes, bytearray)):
-                return str(val)
+                return f"\x1b[93m{val}\x1b[0m"
 
             try:
-                return f"<{type(val).__name__}:{len(val)}>"
+                return f"\x1b[4m<{type(val).__name__}:{len(val)}>\x1b[0m"
             except TypeError: # pragma: no cover
-                return f"<{type(val).__name__}>"
+                return f"\x1b[4m'<{type(val).__name__}>\x1b[0m"
 
         def _get_display_width(s_str:str) -> int:
             width = 0
-            for ch in s_str:
+            s_str_ = clean_re.sub('', s_str) if s_str.find('\x1b[') >= 0 else s_str
+            for ch in s_str_:
                 width += (2 if east_asian_width(ch) in ('W', 'F', 'A') else 1)
             return width
 
@@ -3679,13 +3682,16 @@ class JDbReader(JDbBase):
         def _pad_string(s_str, target_width):
             return s_str + " " * (target_width - _get_display_width(s_str))
 
-        border = "+" + "+".join("-" * (col_widths[field] + 2) for field in fields) + "+"
-        print(border)
-        print("|" + "|".join(" " + _pad_string(field, col_widths[field]) + " " for field in fields) + "|")
-        print(border)
+        sep = "┼".join("─" * (col_widths[field] + 2) for field in fields)
+        top = "╔" + "╤".join("═" * (col_widths[field] + 2) for field in fields) + "╗"
+        mid = "╟" + sep + "╢"
+        bot = "╚" + "╧".join("═" * (col_widths[field] + 2) for field in fields) + "╝"
+        print(top)
+        print( "║" + "│".join(" \x1b[96m\x1b[1m" + _pad_string(field, col_widths[field]) + "\x1b[0m " for field in fields) + "║")
+        print(mid)
         for row_data in matrix:
-            print("|" + "|".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "|")
-        print(border)
+            print("║" + "│".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "║")
+        print(bot)
         return {vv[0]:vv[1] for vv in data_rows} if data_rows else {}
 
     def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:
