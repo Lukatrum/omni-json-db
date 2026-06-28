@@ -1233,7 +1233,7 @@ Pythonic 查詢範例
 可在初始化時配置 ``zip_type``
 
 * ``no``: 無壓縮（預設, 速度最快)
-* ``gz``: Gzip (mode=9)
+* ``gz``: Gzip (mode=1)
 * ``bz``: Bzip2 (mode=9, 壓縮比佳，解壓最慢)
 * ``xz``: LZMA
 * ``zs``: Zstandard (mode=22, 最佳壓縮比)

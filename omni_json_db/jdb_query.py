@@ -86,14 +86,37 @@ QUERY_OPS = {
                     # {'$exists': {...}}                    # all(chk in Value for chk in {...})
 }
 
+@lru_cache(maxsize=256)
+def _compile_rule(rule:str, flags:int=0) -> Pattern:
+    return re_compile(rule, flags=flags)
+
+@lru_cache(maxsize=256)
+def _compile_path_glob(pattern: str) -> Pattern:
+    """Compile and cache a glob path pattern to regex."""
+    return re_compile(f'^{PATH_RE_sub(".*", pattern.replace("?", "."))}$')
+
+@lru_cache(maxsize=256)
+def _lower_cmd(cmd:str) -> Tuple[bool,bool,str]:
+    reverse_it = cmd.startswith('!')
+    cmd = cmd[1:] if reverse_it else cmd
+    if cmd and cmd[0] == '$':
+        return reverse_it, True, cmd.lower()
+
+    return reverse_it, False, cmd
+
 #-----------------------------------------------------------------------------
+_CONDITION_DEFAULTS = {'$and': [], '$or': [], '$not': {}}
 
 class Condition(dict):
+    __slots__ = ()
+
     def copy(self) -> Condition:
         return Condition(super().copy())
 
     def __missing__(self, key:str) -> None: # pragma: no cover
-        return ''
+        if key in _CONDITION_DEFAULTS:
+            return _CONDITION_DEFAULTS[key]
+        raise KeyError(key)
 
     def __and__(self, other:Condition) -> Condition:
         left  = self['$and']  if '$and' in self and len(self) == 1 else [dict(self)]
@@ -112,6 +135,8 @@ class Condition(dict):
         return f'Condition({dict.__repr__(self)})'
 
 class Query:
+    __slots__ = ('_path', )
+
     def __init__(self, _path:str = ''):
         object.__setattr__(self, '_path', _path)
 
@@ -184,11 +209,11 @@ class Query:
         return self._cond('$anyin', col)
 
     def matches(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
-        rx = re_compile(pattern, flags) if isinstance(pattern, str) else pattern
+        rx = _compile_rule(pattern, flags) if isinstance(pattern, str) else pattern
         return self._cond('$re', rx)
 
     def fullmatch(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
-        rx = re_compile(pattern, flags) if isinstance(pattern, str) else pattern
+        rx = _compile_rule(pattern, flags) if isinstance(pattern, str) else pattern
         return self._cond('$match', rx)
 
     def test(self, func:Union[Callable[[Any],bool],Callable[[str,Any],bool]]) -> Condition:
@@ -242,10 +267,8 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
 
     for cmd,rule in rules.items():
         is_matched = False
-        reverse_it = cmd.startswith('!')
-        cmd = cmd[1:] if reverse_it else cmd
-        if cmd and cmd[0] == '$':
-            cmd = cmd.lower()
+        reverse_it, is_cmd, cmd = _lower_cmd(cmd)
+        if is_cmd:
             is_same_type = isinstance(rule, str)
             if cmd == '$gt':
                 if is_same_type:
@@ -332,14 +355,14 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                     _rules.append(rule)
 
                 elif isinstance(rule, str):
-                    _rules.append(re_compile(rule))
+                    _rules.append(_compile_rule(rule))
 
                 elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
                             _rules.append(_rule)
                         elif isinstance(_rule, str):
-                            _rules.append(re_compile(_rule))
+                            _rules.append(_compile_rule(_rule))
 
                 if _rules:
                     key_s = JSON_RE_sub('', key) if cmd[-1] == '2' else key
@@ -469,10 +492,8 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
     date_s = f'{cdate_s} {mdate_s}'
     for cmd,rule in rules.items():
         is_matched = False
-        reverse_it = cmd.startswith('!')
-        cmd = cmd[1:] if reverse_it else cmd
-        if cmd and cmd[0] == '$':
-            cmd = cmd.lower()
+        reverse_it, is_cmd, cmd = _lower_cmd(cmd)
+        if is_cmd:
             is_cdate = isinstance(rule, datetime)
             is_mdate = not is_cdate and isinstance(rule, dt_date)
             is_same_type = is_cdate or is_mdate
@@ -582,14 +603,14 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     _rules.append(rule)
 
                 elif isinstance(rule, str):
-                    _rules.append(re_compile(rule))
+                    _rules.append(_compile_rule(rule))
 
                 elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
                             _rules.append(_rule)
                         elif isinstance(_rule, str):
-                            _rules.append(re_compile(_rule))
+                            _rules.append(_compile_rule(_rule))
 
                 if _rules:
                     date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
@@ -693,45 +714,43 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
     for cmd,rule in rules.items():
         is_matched = False
-        reverse_it = cmd.startswith('!')
-        cmd = cmd[1:] if reverse_it else cmd
-        if cmd and cmd[0] == '$':
-            cmd = cmd.lower()
+        reverse_it, is_cmd, cmd = _lower_cmd(cmd)
+        if is_cmd:
             is_same_type = isinstance(val, type(rule)) \
                 or isinstance(val, (int, float)) and isinstance(rule, (int, float)) \
                 or isinstance(val, (bytes, bytearray)) and isinstance(rule, (bytes, bytearray))
 
             if cmd == '$gt':
                 try:
-                    if is_same_type and val.__gt__ and rule.__gt__:
+                    if is_same_type:
                         is_matched = (val <= rule) if reverse_it else (val > rule)
                 except TypeError: # pragma: no cover
                     pass
 
             elif cmd in ('$gte', '$ge'):
                 try:
-                    if is_same_type and val.__ge__ and rule.__ge__:
+                    if is_same_type:
                         is_matched = (val < rule) if reverse_it else (val >= rule)
                 except TypeError: # pragma: no cover
                     pass
 
             elif cmd == '$lt':
                 try:
-                    if is_same_type and val.__lt__ and rule.__lt__:
+                    if is_same_type:
                         is_matched = (val >= rule) if reverse_it else (val < rule)
                 except TypeError: # pragma: no cover
                     pass
 
             elif cmd in ('$lte', '$le'):
                 try:
-                    if is_same_type and val.__le__ and rule.__le__:
+                    if is_same_type:
                         is_matched = (val > rule) if reverse_it else (val <= rule)
                 except TypeError: # pragma: no cover
                     pass
 
             elif cmd in ('$eq', '$ne'):
                 try:
-                    if is_same_type and val.__eq__ and rule.__eq__:
+                    if is_same_type:
                         reverse_it = (not reverse_it) if cmd[1] == 'n' else reverse_it
                         is_matched = (val != rule) if reverse_it else (val == rule)
                 except TypeError: # pragma: no cover
@@ -793,7 +812,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                         if val.__hash__ and not isinstance(val, (list, set, frozenset, tuple, range)):
                             is_matched = val in rule
 
-                        elif val.__iter__:
+                        else: # val is iterable (list/set/tuple/etc)
                             _set_r = set(rule) if not isinstance(rule, (set, frozenset)) else rule
                             _set_v = set(val) if not isinstance(val, (set, frozenset)) else val
                             is_matched = len(_set_r & _set_v) > 0 if cmd.endswith('anyin') else \
@@ -838,14 +857,14 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     _rules.append(rule)
 
                 elif isinstance(rule, str):
-                    _rules.append(re_compile(rule))
+                    _rules.append(_compile_rule(rule))
 
                 elif isinstance(rule, (dict, list, tuple, set, frozenset)): # pragma: no cover
                     for _rule in rule:
                         if isinstance(_rule, Pattern):
                             _rules.append(_rule)
                         elif isinstance(_rule, str):
-                            _rules.append(re_compile(_rule))
+                            _rules.append(_compile_rule(_rule))
 
                 if _rules:
                     if not isinstance(val, str):
@@ -946,7 +965,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     if is_any:
                         is_matched = any(match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in items)
                     else:
-                        is_matched = all(match_VAL_rules(key, _val, rule, cdate, mdate, ANY=True, level=level+1) for _val in items)
+                        is_matched = all(match_VAL_rules(key, _val, rule, cdate, mdate, ALL=True, level=level+1) for _val in items)
                 else:
                     is_matched = match_VAL_rules(key, val, rule, cdate, mdate, level=level+1)
 
@@ -954,8 +973,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     _is_matched = False
                     if is_dict:
                         for _ref, _rule in rule.items():
-                            _reverse_it = _ref.startswith('!')
-                            _ref_l = _ref[1:] if _reverse_it else _ref
+                            _reverse_it, _is_cmd, _ref_l = _lower_cmd(_ref)
                             if _ref_l in val:
                                 _is_matched = match_VAL_rules(key, val[_ref_l], _rule, cdate, mdate, level=level+1)
                                 _is_matched = (not _is_matched) if _reverse_it else _is_matched
@@ -1041,11 +1059,6 @@ def _iter_all_node(node:Any) -> Generator[Any]:
         for v in node:
             yield from _iter_all_node(v)
 
-@lru_cache(maxsize=256)
-def _compile_path_glob(pattern: str) -> Pattern:
-    """Compile and cache a glob path pattern to regex."""
-    return re_compile(f'^{PATH_RE_sub(".*", pattern.replace("?", "."))}$')
-
 def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int) -> bool:
     """
     Recursively navigate val following path segments (parts).
@@ -1100,19 +1113,19 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
         child_vals = None
         if isinstance(val, dict):
             if child_key_s == '*':
-                child_vals = list(val.values()) # any field
+                child_vals = val.values() # any field
             else:
                 # Glob -> regex : 'addr*' -> r'^addr.*$'
                 rx = _compile_path_glob(child_key_s)
-                child_vals = [v for k,v in val.items() if rx.match(k)]
+                child_vals = (v for k,v in val.items() if rx.match(k))
 
         elif isinstance(val, (list, tuple)):
             if child_key_s in ('*', '?*', '*?'):
-                child_vals = list(val)
+                child_vals = val
             elif child_key_s.startswith('?'):
                 _cnt = child_key_s.count('?')
                 if _cnt == len(child_key_s):
-                    child_vals = [val for ii,val in enumerate(val) if (ii//10)+1 == _cnt]
+                    child_vals = (_val for ii,_val in enumerate(val) if (ii//10)+1 == _cnt)
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
 

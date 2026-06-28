@@ -134,10 +134,8 @@ class JDbKey2(JDbKey):
                 matched_list = [_key for _key,_val in jdb.find_iter(key)]
                 for _key in matched_list:
                     if has_SIGINT(): break
-                    row_id = key_table[_key]
-                    if io.n_records > row_id >= 0:
-                        _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
-                        jdb.f_change_days(fp, _key, val)
+                    _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, key_table[_key])
+                    jdb.f_change_days(fp, _key, val)
 
                 return
 

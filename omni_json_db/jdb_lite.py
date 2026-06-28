@@ -175,10 +175,9 @@ class JDbKey:
                 key_table = io.key_table
                 for _key,_val in jdb.find_iter(key):
                     row_id = key_table[_key]
-                    if io.n_records > row_id >= 0:
-                        _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
-                        old_date, new_date  = io.z_conv_date(days)
-                        matches[_key] = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+                    _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
+                    old_date, new_date  = io.z_conv_date(days)
+                    matches[_key] = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
 
             return matches
 

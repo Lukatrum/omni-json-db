@@ -71,6 +71,7 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
+* **Almnost 100% test coverage**
 
 🛠️ Quick Start
 **************
@@ -1290,7 +1291,7 @@ Supported Zip Formats
 Configure ``zip_type`` during initialization:
 
 * ``no``: no compression for Value (default)
-* ``gz``: Gzip (mode=9) compression for Value
+* ``gz``: Gzip (mode=1) compression for Value
 * ``bz``: Bzip2 (mode=9) compression for Value
 * ``xz``: LZMA compression for Value
 * ``zs``: Zstandard (mode=22) compression for Value
