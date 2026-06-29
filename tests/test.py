@@ -3658,7 +3658,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb['kk111':'kk99']
             self.assertEqual(len(ret), 99)
 
-            ret = jdb[::r'kk1\d+']
+            ret = jdb[::Query().matches(r'kk1\d+')]
             self.assertEqual(set(ret), {'kk10', 'kk11', 'kk12', 'kk13', 'kk14', 'kk15', 'kk16', 'kk17', 'kk18', 'kk19'})
 
             ret = jdb['kk11'::r'kk1\d+']
@@ -3940,12 +3940,28 @@ class TestJDb(unittest.TestCase):
             del jdb2['kk60', 'kk61', 'kk62']
             self.assertFalse(jdb2.get_n('kk60'))
 
+            Key = Query()
             matches = jdb2[::r'k[45]']
             self.assertGreaterEqual(len(matches), 2)
+            matches_2 = jdb2[::Key.has('k4') | Key.has('k5')]
+            self.assertEqual(matches, matches_2)
             self.assertEqual(set(matches), set(jdb2.keys[::r'k[45]']))
+            self.assertEqual(set(matches), set(jdb2.keys[::Key.has('k4') | Key.has('k5')]))
             jdb2 -= matches
             matches = jdb2[::r'k[45]']
             self.assertEqual(len(matches), 0)
+
+            matches = jdb2[::Key.endswith(('2', '3'))]
+            self.assertGreaterEqual(len(matches), 2)
+            del jdb2[::Key.endswith(('2', '3'))]
+            matches = jdb2[::Key.endswith(('2', '3'))]
+            self.assertEqual(len(matches), 0)
+
+            matches = jdb2[::Key.has('6')]
+            jdb2[::Key.has('6')] = lambda k,v: v.replace('6', '*')
+
+            matches_2 = jdb2.find(vals=Query().has('*'))
+            self.assertEqual(set(matches), set(matches_2))
 
             jdb.reinit(keys, default_val=1234, agree='yes', wait_sec=0)
             ret = jdb.get_n(keys)
@@ -7896,8 +7912,9 @@ class TestJDb(unittest.TestCase):
             del jdb[lambda key,val: key.endswith('0')]
             self.assertEqual(len(jdb), total - 7)
 
+            Key = Query()
             total = jdb.len_()
-            del jdb[lambda key: key.endswith('1')]
+            del jdb[::Key.endswith('1')]
             self.assertEqual(len(jdb), total - 8)
 
             old = jdb.get_all()

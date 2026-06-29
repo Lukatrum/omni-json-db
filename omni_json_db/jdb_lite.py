@@ -786,12 +786,12 @@ class JDbKey:
                 n_lines = io.n_lines
                 io_read_key = io.read_key
                 io_conv_date = io.z_conv_date
-                new_slice, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date = jdb.f_slice(fp, key)
+                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = jdb.f_slice(fp, key)
                 for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
                     if not n_lines > row_id >= 0: continue
 
                     _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver or filter_re and not filter_re.search(_key):
+                    if not max_ver > ver >= min_ver:
                         continue
 
                     old_date, new_date = io_conv_date(days)
@@ -801,6 +801,9 @@ class JDbKey:
                     else:
                         if min_date and old_date < min_date or max_date and old_date >= max_date:
                             continue
+
+                    if key_rules and not match_KEY_rules(_key, key_rules):
+                        continue
 
                     if row_id >= n_records:
                         _key = f'|{_key}|~~{ver}~\t\t'
@@ -1550,7 +1553,7 @@ class JDbReader(JDbBase):
             key (Union[dt_date, datetime, Any]): The time or slice specification for filtering.
 
         Returns:
-            tuple: A tuple containing (slice_obj, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date).
+            tuple: A tuple containing (slice_obj, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date).
         """
         chk_new_date = True
         if isinstance(key, datetime): # before dt_date
@@ -1573,7 +1576,7 @@ class JDbReader(JDbBase):
         _stop = key.stop
         _step = key.step
         chk_ver = chk_days = False
-        filter_re = None
+        key_rules = None
 
         min_days = None # THE_1ST_DATE
         max_days = None # dt_date.today() + timedelta(days=1)
@@ -1589,7 +1592,10 @@ class JDbReader(JDbBase):
                 _step = int(_step)
 
             elif isinstance(_step, str):
-                filter_re = re_compile(_step)
+                key_rules = {'$re': _step}
+                _step = 1
+            elif isinstance(_step, Condition):
+                key_rules = _step
                 _step = 1
             else:
                 raise JTypeError(key)
@@ -1692,7 +1698,7 @@ class JDbReader(JDbBase):
             _stop  = n_records
             _step = 1
 
-        return slice(_start, _stop, _step), max_ver, min_ver, max_days, min_days, filter_re, chk_new_date
+        return slice(_start, _stop, _step), max_ver, min_ver, max_days, min_days, key_rules, chk_new_date
 
     def f_open(self, read_only:bool=True) -> Dict[int,IO]:
         """Explicitly initialize and acquire transaction streams allocated to internal pools.
@@ -3127,13 +3133,13 @@ class JDbReader(JDbBase):
                 io_read_key = io.read_key
                 io_conv_date = io.z_conv_date
                 io_read_value = io.read_value
-                new_slice, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date = self.f_slice(fp, key)
+                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
                 chk_date = max_date is not None or min_date is not None
                 for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
                     if not n_records > row_id >= 0: continue
 
                     _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver or filter_re and not filter_re.search(_key):
+                    if not max_ver > ver >= min_ver:
                         continue
 
                     if chk_date:
@@ -3144,6 +3150,9 @@ class JDbReader(JDbBase):
                         else:
                             if min_date and old_date < min_date or max_date and old_date >= max_date:
                                 continue
+
+                    if key_rules and not match_KEY_rules(_key, key_rules):
+                        continue
 
                     if _cache and _key in _cache:
                         val = _cache.get(_key, None)
@@ -3634,11 +3643,14 @@ class JDbReader(JDbBase):
                 return val
 
             if isinstance(val, (int, float, bool, bytes, bytearray)):
+                # with yellow color
                 return f"\x1b[93m{val}\x1b[0m"
 
             try:
+                # with underscore
                 return f"\x1b[4m<{type(val).__name__}:{len(val)}>\x1b[0m"
             except TypeError: # pragma: no cover
+                # with underscore
                 return f"\x1b[4m'<{type(val).__name__}>\x1b[0m"
 
         def _get_display_width(s_str:str) -> int:
@@ -3687,6 +3699,7 @@ class JDbReader(JDbBase):
         mid = "╟" + sep + "╢"
         bot = "╚" + "╧".join("═" * (col_widths[field] + 2) for field in fields) + "╝"
         print(top)
+        # with bold+cyan color
         print( "║" + "│".join(" \x1b[96m\x1b[1m" + _pad_string(field, col_widths[field]) + "\x1b[0m " for field in fields) + "║")
         print(mid)
         for row_data in matrix:

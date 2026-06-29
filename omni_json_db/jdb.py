@@ -23,9 +23,9 @@ from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             MAX_KEY_SIZE, API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK,\
             MAX_INDEX_SIZE, g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, NEW_DAY_SHIFT
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
-from .utils import Style, JValueError, JKeyError, JTypeError
+from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy
 from .jdb_file import JFilesBase
-from .jdb_query import Condition
+from .jdb_query import Condition, match_KEY_rules
 
 MAX_BLOCK_SIZE = 2**20
 #-----------------------------------------------------------------------------
@@ -150,14 +150,14 @@ class JDbKey2(JDbKey):
                 n_records = io.n_records
                 io_read_key = io.read_key
                 io_conv_date = io.z_conv_date
-                new_slice, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date = jdb.f_slice(fp, key)
+                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = jdb.f_slice(fp, key)
                 chk_date = max_date is not None or min_date is not None
                 for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
                     if not n_records > row_id >= 0: continue
                     if has_SIGINT(): break
 
                     _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver or filter_re and not filter_re.search(_key):
+                    if not max_ver > ver >= min_ver:
                         continue
 
                     if chk_date:
@@ -168,6 +168,9 @@ class JDbKey2(JDbKey):
                         else:
                             if min_date and old_date < min_date or max_date and old_date >= max_date:
                                 continue
+
+                    if key_rules and not match_KEY_rules(_key, key_rules):
+                        continue
 
                     jdb.f_change_days(fp, _key, val)
                     io, fp, key_fp = jdb.f_get_fp(fp) # key_fp is changed after switch to write mode
@@ -473,8 +476,7 @@ class JDb(JDbReader):
                 if func:
                     row_id = io.key_table[key]
                     old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
-                    new_val = func(key, old_val)
-
+                    new_val = func(key, deepcopy(old_val))
                     if new_val != old_val:
                         self.f_write(fp, key, new_val)
                 else:
@@ -503,13 +505,13 @@ class JDb(JDbReader):
                 n_records = io.n_records
                 io_conv_date = io.z_conv_date
                 io_read_key = io.read_key
-                new_slice, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date = self.f_slice(fp, key)
+                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
                 chk_date = max_date is not None or min_date is not None
                 for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
                     if not n_records > row_id >= 0: continue # pragma: no cover
 
                     _key, _f, _o, _s, _v, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver or filter_re and not filter_re.search(_key):
+                    if not max_ver > ver >= min_ver:
                         continue
 
                     if chk_date:
@@ -520,6 +522,9 @@ class JDb(JDbReader):
                         else:
                             if min_date and old_date < min_date or max_date and old_date >= max_date:
                                 continue
+
+                    if key_rules and not match_KEY_rules(_key, key_rules):
+                        continue
 
                     keys.append(_key)
 
@@ -535,8 +540,7 @@ class JDb(JDbReader):
 
                             row_id = key_table[_key]
                             old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=True)
-                            new_val = func(_key, old_val)
-
+                            new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
                                 f_write(fp, _key, new_val)
 
@@ -565,7 +569,7 @@ class JDb(JDbReader):
 
                     if _is_matched:
                         if func:
-                            new_val = func(_key, old_val)
+                            new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
                                 keys[_key] = new_val
 
@@ -606,7 +610,7 @@ class JDb(JDbReader):
 
                     if func:
                         old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
-                        new_val = func(_key, old_val)
+                        new_val = func(_key, deepcopy(old_val))
                         if new_val != old_val:
                             f_write(fp, _key, new_val)
                     else:
@@ -621,7 +625,7 @@ class JDb(JDbReader):
             if func:
                 row_id = io.key_table[key]
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
-                new_val = func(key, old_val)
+                new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
                     self.f_write(fp, key, new_val)
             else:
@@ -743,23 +747,27 @@ class JDb(JDbReader):
                 n_records = io.n_records
                 io_conv_date = io.z_conv_date
                 io_read_key = io.read_key
-                new_slice, max_ver, min_ver, max_date, min_date, filter_re, chk_new_date = self.f_slice(fp, key)
+                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
                 chk_date = max_date is not None or min_date is not None
                 for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
                     if not n_records > row_id >= 0: continue # pragma: no cover
-
                     _key, _f, _o, _s, _v, ver, days = io_read_key(key_fp, row_id)
-                    if not (not max_ver > ver >= min_ver or filter_re and not filter_re.search(_key)):
-                        if chk_date: # pragma: no cover
-                            old_date, new_date = io_conv_date(days)
-                            if chk_new_date:
-                                if min_date and new_date < min_date or max_date and new_date >= max_date:
-                                    continue
-                            else:
-                                if min_date and old_date < min_date or max_date and old_date >= max_date:
-                                    continue
+                    if not max_ver > ver >= min_ver:
+                        continue
 
-                        del_keys.add(_key)
+                    if chk_date: # pragma: no cover
+                        old_date, new_date = io_conv_date(days)
+                        if chk_new_date:
+                            if min_date and new_date < min_date or max_date and new_date >= max_date:
+                                continue
+                        else:
+                            if min_date and old_date < min_date or max_date and old_date >= max_date:
+                                continue
+
+                    if key_rules and not match_KEY_rules(_key, key_rules):
+                        continue
+
+                    del_keys.add(_key)
 
                 if not del_keys:
                     return
@@ -2394,7 +2402,7 @@ class JDb(JDbReader):
             if func:
                 row_id = self.io.key_table[key]
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=True)
-                new_val = func(key, old_val)
+                new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
                     if self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize):
                         return new_val
@@ -3029,8 +3037,8 @@ class JDb(JDbReader):
                 if row >= 0:
                     if replace:
                         if func:
-                            old_val =f_read(fp, str_key, row=row, copy=False)
-                            new_val = func(str_key, old_val)
+                            old_val = f_read(fp, str_key, row=row, copy=False)
+                            new_val = func(str_key, deepcopy(old_val))
                             if new_val != old_val:
                                 if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize):
                                     chg_table[str_key] = new_val
