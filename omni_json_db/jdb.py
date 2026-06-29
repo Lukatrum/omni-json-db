@@ -25,7 +25,7 @@ from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy
 from .jdb_file import JFilesBase
-from .jdb_query import Condition, match_KEY_rules
+from .jdb_query import Condition
 
 MAX_BLOCK_SIZE = 2**20
 #-----------------------------------------------------------------------------
@@ -129,16 +129,6 @@ class JDbKey2(JDbKey):
                             jdb.f_change_days(fp, _key, val)
                 return
 
-            elif isinstance(key, Condition):
-                key_table = io.key_table
-                matched_list = [_key for _key,_val in jdb.find_iter(key)]
-                for _key in matched_list:
-                    if has_SIGINT(): break
-                    _k, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, key_table[_key])
-                    jdb.f_change_days(fp, _key, val)
-
-                return
-
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
                 key = bytes(key) if isinstance(key, bytearray) else key
                 try:
@@ -146,34 +136,15 @@ class JDbKey2(JDbKey):
                 except (UnicodeDecodeError, ValueError):
                     key = str(key)
 
-            elif isinstance(key, (slice, dt_date, datetime)):
-                n_records = io.n_records
-                io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
-                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = jdb.f_slice(fp, key)
-                chk_date = max_date is not None or min_date is not None
-                for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
-                    if not n_records > row_id >= 0: continue
-                    if has_SIGINT(): break
+            elif isinstance(key, (slice, dt_date, datetime, Condition)):
+                matched_keys = [_key for _key,_val in jdb.find_iter(key)] if isinstance(key, Condition) else \
+                                [_key for _key,_info in jdb.f_key_iter(fp, key)]
 
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver:
-                        continue
-
-                    if chk_date:
-                        old_date, new_date = io_conv_date(days)
-                        if chk_new_date: # pragma: no cover
-                            if min_date and new_date < min_date or max_date and new_date >= max_date:
-                                continue
-                        else:
-                            if min_date and old_date < min_date or max_date and old_date >= max_date:
-                                continue
-
-                    if key_rules and not match_KEY_rules(_key, key_rules):
-                        continue
-
-                    jdb.f_change_days(fp, _key, val)
-                    io, fp, key_fp = jdb.f_get_fp(fp) # key_fp is changed after switch to write mode
+                if matched_keys:
+                    io, fp, key_fp, _sync_chg = jdb.f_get_write_fp(fp)
+                    for _key in matched_keys:
+                        if has_SIGINT(): break
+                        jdb.f_change_days(fp, _key, val)
 
                 return
 
@@ -431,7 +402,7 @@ class JDb(JDbReader):
             idx = key.find(SEP_SYM)
             if idx >= 0:
                 with self.open(read_only=True) as fp:
-                    io, fp, key_fp = self.f_get_fp(fp)
+                    io, fp, _key_fp = self.f_get_fp(fp)
                     childs = set(io.groups).union(self.childs)
                     if childs and key not in self.io.key_table:
                         jdb_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
@@ -484,14 +455,6 @@ class JDb(JDbReader):
 
                 return
 
-            if isinstance(key, Condition):
-                matched_list = [_key for _key,_val in self.find_iter(key)]
-                has_SIGINT = self.file_lock.has_SIGINT
-                for _key in matched_list:
-                    self.f_write(fp, _key, val)
-
-                return
-
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
                 key = bytes(key) if isinstance(key, bytearray) else key
                 try:
@@ -499,45 +462,19 @@ class JDb(JDbReader):
                 except (UnicodeDecodeError, ValueError):
                     key = str(key)
 
-            elif isinstance(key, (slice, dt_date, datetime)):
-                io, fp, key_fp = self.f_get_fp(fp)
-                keys = []
-                n_records = io.n_records
-                io_conv_date = io.z_conv_date
-                io_read_key = io.read_key
-                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
-                chk_date = max_date is not None or min_date is not None
-                for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
-                    if not n_records > row_id >= 0: continue # pragma: no cover
+            elif isinstance(key, (slice, dt_date, datetime, Condition)):
+                matched_keys = [_key for _key,_val in self.find_iter(key)] if isinstance(key, Condition) else \
+                                [_key for _key,_info in self.f_key_iter(fp, key)]
 
-                    _key, _f, _o, _s, _v, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver:
-                        continue
-
-                    if chk_date:
-                        old_date, new_date = io_conv_date(days)
-                        if chk_new_date: # pragma: no cover
-                            if min_date and new_date < min_date or max_date and new_date >= max_date:
-                                continue
-                        else:
-                            if min_date and old_date < min_date or max_date and old_date >= max_date:
-                                continue
-
-                    if key_rules and not match_KEY_rules(_key, key_rules):
-                        continue
-
-                    keys.append(_key)
-
-                if keys:
+                if matched_keys:
+                    io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
                     has_SIGINT = self.file_lock.has_SIGINT
                     f_write = self.f_write
                     if func:
                         f_read = self.f_read
                         key_table = io.key_table
-                        for _key in keys:
-                            if has_SIGINT():
-                                break
-
+                        for _key in matched_keys:
+                            if has_SIGINT(): break
                             row_id = key_table[_key]
                             old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=True)
                             new_val = func(_key, deepcopy(old_val))
@@ -545,10 +482,8 @@ class JDb(JDbReader):
                                 f_write(fp, _key, new_val)
 
                     else:
-                        for _key in keys:
-                            if has_SIGINT():
-                                break
-
+                        for _key in matched_keys:
+                            if has_SIGINT(): break
                             f_write(fp, _key, val)
 
                 return
@@ -562,10 +497,7 @@ class JDb(JDbReader):
                         _is_matched = is_matched(_key, old_val)
                     else:
                         _is_matched = is_matched(_key)
-                        if _is_matched:
-                            old_val = f_read(fp, _key, row=row_id, copy=False)
-                        else:
-                            old_val = None
+                        old_val = f_read(fp, _key, row=row_id, copy=False) if _is_matched else None
 
                     if _is_matched:
                         if func:
@@ -580,8 +512,7 @@ class JDb(JDbReader):
                     has_SIGINT = self.file_lock.has_SIGINT
                     f_write = self.f_write
                     for _key,_val in keys.items():
-                        if has_SIGINT():
-                            break
+                        if has_SIGINT(): break
                         f_write(fp, _key, _val)
 
                 return
@@ -600,9 +531,7 @@ class JDb(JDbReader):
                         continue
 
                     done.add(_key)
-                    if has_SIGINT():
-                        break
-
+                    if has_SIGINT(): break
                     row_id = key_table[_key]
                     if has_childs and row_id < 0 and _key.find(SEP_SYM) >= 0: # pylint: disable=R
                         self[_key] = val
@@ -689,9 +618,9 @@ class JDb(JDbReader):
             idx = key.find(SEP_SYM)
             if idx >= 0:
                 with self.open(read_only=True) as fp:
-                    io, fp, key_fp = self.f_get_fp(fp)
+                    io, fp, _key_fp = self.f_get_fp(fp)
                     childs = set(io.groups).union(self.childs)
-                    if childs and key not in self.io.key_table:
+                    if childs and key not in io.key_table:
                         jdb_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                         f_get_child = self.f_get_child
                         if not jdb_name:
@@ -742,32 +671,9 @@ class JDb(JDbReader):
                 if not del_keys:
                     return
 
-            elif isinstance(key, (slice, dt_date, datetime)):
-                io, fp, key_fp = self.f_get_fp(fp)
-                n_records = io.n_records
-                io_conv_date = io.z_conv_date
-                io_read_key = io.read_key
-                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
-                chk_date = max_date is not None or min_date is not None
-                for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
-                    if not n_records > row_id >= 0: continue # pragma: no cover
-                    _key, _f, _o, _s, _v, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver:
-                        continue
-
-                    if chk_date: # pragma: no cover
-                        old_date, new_date = io_conv_date(days)
-                        if chk_new_date:
-                            if min_date and new_date < min_date or max_date and new_date >= max_date:
-                                continue
-                        else:
-                            if min_date and old_date < min_date or max_date and old_date >= max_date:
-                                continue
-
-                    if key_rules and not match_KEY_rules(_key, key_rules):
-                        continue
-
-                    del_keys.add(_key)
+            elif isinstance(key, (slice, dt_date, datetime, Condition)):
+                del_keys = {_key for _key,_val in self.find_iter(key)} if isinstance(key, Condition) else \
+                            {_key for _key,_info in self.f_key_iter(fp, key)}
 
                 if not del_keys:
                     return
@@ -810,9 +716,9 @@ class JDb(JDbReader):
                     raise JKeyError(key)
 
                 del_keys = [(row_id, key)]
-                io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
+                io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
             else:
-                io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
+                io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
                 del_keys = sorted([(key_table[_key], _key) for _key in del_keys], reverse=True)
 
             f_delete = self.f_delete
@@ -1152,8 +1058,7 @@ class JDb(JDbReader):
             if add_keys:
                 row_id = io.n_records
                 while add_keys and row_id < io.n_lines:
-                    if has_SIGINT():
-                        break
+                    if has_SIGINT(): break
 
                     _key, _f, _o, _r, _v, _s, _d = io_read_key(key_fp, row_id)
                     if _key in add_keys:
@@ -1162,14 +1067,14 @@ class JDb(JDbReader):
                         if add_row:
                             row_id = io.n_records
                             continue
+
                     else: # pragma: no cover
                         row_id += 1
 
             if chg_keys:
                 row_id = io.n_records
                 while chg_keys and row_id < io.n_lines:
-                    if has_SIGINT():
-                        break
+                    if has_SIGINT(): break
 
                     _key, _f, _o, _r, _v, _s, _d = io_read_key(key_fp, row_id)
                     if _key in chg_keys:
@@ -1503,6 +1408,7 @@ class JDb(JDbReader):
 
                             finally:
                                 if val_fp is not None:
+                                    self.files_obj.fsync(val_fp.fileno())
                                     val_fp.close()
 
                             if verbose: # pragma: no cover
@@ -1592,6 +1498,7 @@ class JDb(JDbReader):
 
                             finally:
                                 if val_fp is not None:
+                                    self.files_obj.fsync(val_fp.fileno())
                                     val_fp.close()
 
                             if verbose: # pragma: no cover
@@ -1919,6 +1826,7 @@ class JDb(JDbReader):
 
                     finally:
                         if val_fp_d is not None:
+                            self.files_obj.fsync(val_fp_d.fileno())
                             val_fp_d.close()
 
                 for file_id,old_offset in old_file_table.items():
@@ -1951,6 +1859,7 @@ class JDb(JDbReader):
 
                 finally:
                     if key_fp_d is not None:
+                        self.files_obj.fsync(key_fp_d.fileno())
                         key_fp_d.close()
 
             # unsync
@@ -2313,6 +2222,7 @@ class JDb(JDbReader):
 
                         finally:
                             if val_fp is not None:
+                                files_obj.fsync(val_fp.fileno())
                                 val_fp.close()
 
                 for key,s_jdb in src_io.groups.items():

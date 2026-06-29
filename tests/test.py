@@ -2767,7 +2767,7 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb[:], jdb1[:])
-            self.assertEqual(jdb[0.:], jdb1[0.:])
+            self.assertEqual(jdb[0.:], jdb1[0.:], filename)
             self.assertEqual(jdb[''], None)
             self.assertEqual(jdb['key1'], False)
             self.assertEqual(jdb['key2'], False)
@@ -6922,13 +6922,12 @@ class TestJDb(unittest.TestCase):
             jmem.keys[':::kk3'] = today
             info2 = jdb.keys['kk3']
             self.assertEqual(info2[-2], str(today))
-
             jdb.keys[::'kk4'] = '2000-1-1 1900-10-10'
             matches = jdb.keys[::'kk4']
             self.assertTrue(len(matches) > 4)
             for key,info2 in matches.items():
-                self.assertEqual(info2[-1], '1900-10-10')
-                self.assertEqual(info2[-2], '2000-01-01')
+                self.assertEqual(info2[-1], '1900-10-10', filename)
+                self.assertEqual(info2[-2], '2000-01-01', filename)
 
             matches = jdb.keys[1]
             self.assertTrue(len(matches) == 1)

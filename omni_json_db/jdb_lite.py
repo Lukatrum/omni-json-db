@@ -663,7 +663,7 @@ class JDbKey:
                 - float
                     >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
 
-                - slice | date | datetime
+                - slice | date | datetime | Conditon
                     >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
                     >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
                     >>> matches = jdb.keys[date.today()]     # get today modified/new keys
@@ -671,6 +671,7 @@ class JDbKey:
                     >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
                     >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
                     >>> matches = jdb.keys[:]        # get all key info
+                    >>> matches = jdb.keys[Query().name.endswith('e')]
 
                 - re.Pattern
                     >>> matches = jdb.keys[re.compile(r'key[0-9]')]
@@ -781,35 +782,20 @@ class JDbKey:
 
                 return
 
-            if isinstance(key, (slice, dt_date, datetime)):
+            if isinstance(key, Condition):
+                key_table = io.key_table
                 n_records = io.n_records
-                n_lines = io.n_lines
-                io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
-                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = jdb.f_slice(fp, key)
-                for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
-                    if not n_lines > row_id >= 0: continue
+                for _key,_val in jdb.item_iter(key):
+                    row_id = key_table[row_id]
+                    if n_records > row_id >= 0:
+                        _key0, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
+                        if _key0 == _key:
+                            old_date, new_date = io_conv_date(days)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
+                return
 
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver:
-                        continue
-
-                    old_date, new_date = io_conv_date(days)
-                    if chk_new_date:
-                        if min_date and new_date < min_date or max_date and new_date >= max_date:
-                            continue
-                    else:
-                        if min_date and old_date < min_date or max_date and old_date >= max_date:
-                            continue
-
-                    if key_rules and not match_KEY_rules(_key, key_rules):
-                        continue
-
-                    if row_id >= n_records:
-                        _key = f'|{_key}|~~{ver}~\t\t'
-
-                    yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
-
+            if isinstance(key, (slice, dt_date, datetime)):
+                yield from jdb.f_key_iter(fp, key)
                 return
 
             if k_arg_cnt > 0:
@@ -1129,10 +1115,8 @@ class JDbReader(JDbBase):
             if fp_table: # pragma: no cover
                 for _ident,fp_dict in fp_table.items():
                     for fp in fp_dict.values():
-                        if fp is None:
-                            continue
-
-                        fp.close()
+                        if fp is not None:
+                            fp.close()
 
                     fp_dict.clear()
 
@@ -1237,7 +1221,7 @@ class JDbReader(JDbBase):
 
         elif isinstance(key, Condition):
             # pylint: disable=unnecessary-comprehension
-            return {k:v for k,v in self.find_iter(key)}
+            return {k:v for k,v in self.find_iter(key, with_value=True)}
 
         elif isinstance(key, (slice, dt_date, datetime, Pattern)) \
                 or callable(key) \
@@ -1544,7 +1528,7 @@ class JDbReader(JDbBase):
         """
         return self.symmetric_difference(keys)
 
-    def f_slice(self, fp_dict:dict, key:Union[dt_date,datetime,Any]) -> tuple:
+    def f_slice(self, fp_dict:dict, key:Union[dt_date,datetime,Condition,slice,Any]) -> tuple:
         """
         Compute row and version iteration boundaries for a given slice or datetime constraint.
 
@@ -1562,6 +1546,9 @@ class JDbReader(JDbBase):
 
         elif isinstance(key, dt_date):
             key = slice(key, key+timedelta(days=1)) # modified date
+
+        elif isinstance(key, Condition):
+            key = slice(0, self.io.n_records, key)
 
         if not isinstance(key, slice):
             raise JTypeError
@@ -1810,7 +1797,8 @@ class JDbReader(JDbBase):
             th_cnt = th_table.get(ident, 0) - 1
             try:
                 io = self.io
-                if not io.is_updated():
+                is_dirty = not io.is_updated()
+                if is_dirty:
                     if file_lock.mode == 'w':
                         key_fp = fp_dict.get(-1, None)
                         if key_fp is None: # pragma: no cover
@@ -1843,8 +1831,11 @@ class JDbReader(JDbBase):
             finally:
                 if th_cnt <= 0:
                     chg_keys.clear()
+                    is_dirty = is_dirty and file_lock.mode == 'w'
                     for fp in fp_dict.values():
                         if fp is not None:
+                            if is_dirty:
+                                files_obj.fsync(fp.fileno())
                             fp.close()
 
                     fp_dict.clear()
@@ -1969,7 +1960,6 @@ class JDbReader(JDbBase):
                         if key_fp is not None:
                             if io.file_size > 0 and io.n_lines > 0: # pragma: no cover
                                 self.fsize = io.write_header(key_fp)
-
                             key_fp.close()
 
                     except Exception as e1: # pragma: no cover
@@ -2004,7 +1994,8 @@ class JDbReader(JDbBase):
             finally:
                 try:
                     io = self.io
-                    if not io.is_updated():
+                    is_dirty = not io.is_updated()
+                    if is_dirty:
                         if file_lock.mode == 'w':
                             if not is_error:
                                 key_fp = fp_dict.get(-1, None)
@@ -2029,8 +2020,11 @@ class JDbReader(JDbBase):
                     th_cnt -= 1
                     if th_cnt <= 0:
                         chg_keys.clear()
+                        is_dirty = is_dirty and file_lock.mode == 'w'
                         for fp in fp_dict.values():
                             if fp is not None:
+                                if is_dirty:
+                                    files_obj.fsync(fp.fileno())
                                 fp.close()
 
                         fp_dict.clear()
@@ -3049,7 +3043,7 @@ class JDbReader(JDbBase):
                 - list | tuple | set | dict
 
         Yields:
-            Tuple[str, Any]: Matching target values aligned with identity descriptors records fields.
+            Generator[str, Any]: (key, Value)
         """
 
         if isinstance(key, Pattern):
@@ -3105,7 +3099,7 @@ class JDbReader(JDbBase):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id > 0:
-                    _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
+                    _key, _file_id, _offset, _size, _vsize, _ver, _days = io.read_key(key_fp, row_id)
                     yield _key, self.f_read(fp, _key, row=row_id, copy=False)
 
                 return
@@ -3117,10 +3111,14 @@ class JDbReader(JDbBase):
                     io_read_key = io.read_key
                     n_records = io.n_records
                     for row_id in range(n_records):
-                        _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                        if ver == sync_id:
+                        _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
+                        if _ver == sync_id:
                             yield _key, self.f_read(fp, _key, row=row_id, copy=False)
 
+                return
+
+            if isinstance(key, Condition):
+                yield from self.find_iter(key, with_value=True)
                 return
 
             if isinstance(key, (slice, dt_date, datetime)):
@@ -3130,30 +3128,9 @@ class JDbReader(JDbBase):
                 _decode_row = self._decode_row
                 f_get_val_fp = self.f_get_val_fp
                 n_records = io.n_records
-                io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
                 io_read_value = io.read_value
-                new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, key)
-                chk_date = max_date is not None or min_date is not None
-                for row_id in range(new_slice.start, new_slice.stop, new_slice.step):
+                for _key, (row_id, file_id, offset, size, vsize, _ver, _days, _cdate, _mdate) in self.f_key_iter(fp, key):
                     if not n_records > row_id >= 0: continue
-
-                    _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                    if not max_ver > ver >= min_ver:
-                        continue
-
-                    if chk_date:
-                        old_date, new_date = io_conv_date(days)
-                        if chk_new_date:
-                            if min_date and new_date < min_date or max_date and new_date >= max_date:
-                                continue
-                        else:
-                            if min_date and old_date < min_date or max_date and old_date >= max_date:
-                                continue
-
-                    if key_rules and not match_KEY_rules(_key, key_rules):
-                        continue
-
                     if _cache and _key in _cache:
                         val = _cache.get(_key, None)
                     else:
@@ -4516,6 +4493,57 @@ class JDbReader(JDbBase):
             val_fp = fp_dict[file_id]
 
         return val_fp, file_id, offset
+
+    def f_key_iter(self, fp:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[str,tuple]:
+        """
+        Iterate over keys and their corresponding information.
+
+        Args:
+            fp_dict (Dict[int, IO]): Active file handler matrix registration array mappings table.
+            slice_obj (Union[slice, dt_date, datetime, Condition]]): slice object
+
+        Returns:
+            Generator[str, tuple]: key, (row_id, file_id, offset, row_size, val_size, version, days, created_date, modified_date)
+        """
+        io, fp, key_fp = self.f_get_fp(fp)
+        n_records = io.n_records
+        io_conv_date = io.z_conv_date
+        io_read_key = io.read_key
+        new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, slice_obj)
+        start, stop, step = new_slice.start, new_slice.stop, new_slice.step
+        if key_rules and step == 1:
+            for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop):
+                if not match_KEY_rules(_key, key_rules):
+                    continue
+
+                __key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver:
+                    continue
+
+                old_date, new_date = io_conv_date(days)
+                # pylint: disable= too-many-boolean-expressions
+                if chk_new_date and (min_date and new_date < min_date or max_date and new_date >= max_date) or \
+                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date):
+                    continue
+
+                yield __key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
+
+        else:
+            for row_id in range(start, stop, step):
+                _key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver:
+                    continue
+
+                old_date, new_date = io_conv_date(days)
+                # pylint: disable= too-many-boolean-expressions
+                if chk_new_date and (min_date and new_date < min_date or max_date and new_date >= max_date) or \
+                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date):
+                    continue
+
+                if key_rules and (not n_records > row_id >= 0 or not match_KEY_rules(_key, key_rules)):
+                    continue
+
+                yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
 
     def _init_KEY(self) -> Tuple[JIo,IO]:
         """Wipe tracking maps writing fresh primary configuration sheets records blueprints templates.

@@ -488,6 +488,23 @@ class JNetIO(RawIOBase):
                 raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
             return
 
+    def fileno(self) -> int:
+        with self.lock:
+            if self.closed: # pragma: no cover
+                raise ValueError('I/O operation on closed file.')
+
+            dump_and_send(self.sock, (self.file, 'fileno', [], {}))
+            resp = recv_and_load(self.sock)
+
+        if not resp.get('ok'): # pragma: no cover
+            cmd = resp.get("cmd", "")
+            err = JErrCode(resp.get('err', 0))
+            if err == JErrCode.NOT_FOUND:
+                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
+            return -1
+
+        return resp.get('ret', -1)
+
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -635,6 +652,28 @@ class JNetFiles(JFilesBase):
             return JNetFiles(self.server_addr)
 
         raise IOError
+
+    def fsync(self, fd:int) -> None:
+        """Force write of fd to disk.
+        
+        Args:
+            fd(int): Target fd
+
+        Raises:
+            IOError: if file is closed
+            ValueError: if fail to call fsync in server side
+        """
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, ('KEY', 'fsync', [], {'fd':fd}))
+                resp = recv_and_load(self.sock)
+
+                if resp.get('ok'):
+                    return resp.get('ret', '')
+
+                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
+
+            raise IOError
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Query if designated partition trees paths match layout guidelines managed on the remote workspace.

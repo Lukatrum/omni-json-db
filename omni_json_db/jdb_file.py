@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from io import RawIOBase
 from typing import Optional, Union, IO
 from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
-from os import remove as os_remove, stat as os_stat
+from os import remove as os_remove, stat as os_stat, fsync as os_fsync
 from os.path import basename, dirname, join as path_join, exists as path_exists
 from datetime import datetime
 from threading import Lock, Condition
@@ -516,6 +516,9 @@ class JBytesIO(RawIOBase):
 
         return n_byte
 
+    def fileno(self) -> int:
+        return -1
+
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -526,6 +529,8 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     def __eq__(self, obj) -> bool: ...
     @abstractmethod
     def copy(self) -> JFilesBase: ...
+    @abstractmethod
+    def fsync(self, fd:int) -> None: ...
     @abstractmethod
     def get_KEY(self) -> str: ...
     @abstractmethod
@@ -691,6 +696,18 @@ class JMemFiles(JFilesBase):
             JMemFiles: Replicated virtual storage management context instance.
         """
         return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name)
+
+    def fsync(self, fd:int) -> None: # pragma: no cover
+        """Force write of fd to disk.
+        
+        Args:
+            fd(int): Target fd
+        """
+        if fd >= 0:
+            try:
+                os_fsync(fd)
+            except (OSError, PermissionError, AttributeError) as e: # pragma: no cover
+                print(fd, e)
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
@@ -1013,6 +1030,18 @@ class JDiskFiles(JFilesBase):
             JDiskFiles: Duplicate disk space storage driver context interface controller.
         """
         return JDiskFiles(self.KEY_file)
+
+    def fsync(self, fd:int) -> None:
+        """Force write of fd to disk.
+        
+        Args:
+            fd(int): Target fd
+        """
+        if fd >= 0:
+            try:
+                os_fsync(fd)
+            except (OSError, PermissionError, AttributeError) as e: # pragma: no cover
+                print(fd, e)
 
     def is_group(self, KEY_file:Union[str, JFilesBase], name:str) -> bool:
         """Cross-verify group naming schema structures ensuring correct cluster namespace allocations alignments.

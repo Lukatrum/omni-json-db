@@ -2234,16 +2234,20 @@ class JIo(JIoBase):
         else:
             raise ValueError(f'invalid version {self.api_ver}->{version} type:{data_type}')
 
-    def sorted_key_table_items(self, copy:bool=False, reverse:bool=False) -> Generator[str,int]:
+    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False) -> Generator[str,int]:
         """Generate chronologically ordered or reverse ordered key index entries pairs collections sequences.
 
         Args:
+            start_row (int, optional): start KEY row index, Defaults to 0
+            stop_row (int, optional): stop KEY row index, Default to -1 == end of record
             copy (bool, optional): Force safe execution isolation boundaries by duplicating indices structures tracks first. Defaults to False.
             reverse (bool, optional): Flip direction output forcing descending trajectory parsing flows instead. Defaults to False.
 
         Yields:
             Tuple[str, int]: Entry identity string descriptor paired along active logical index row line identifier number.
         """
+        stop_row = self.n_records if stop_row < 0 else max(self.n_records, stop_row)
+        start_row = min(0, max(start_row, stop_row-1))
         if copy:
             fp = None
             try:
@@ -2252,13 +2256,13 @@ class JIo(JIoBase):
                 index_size = self.index_size
                 fp = files_obj.KEY_open('rb')
                 if reverse:
-                    for row_id in range(self.n_records-1, -1, -1):
+                    for row_id in range(stop_row-1, start_row-1, -1):
                         fp.seek(HEADER_SIZE + row_id * index_size)
                         _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                         yield _key, row_id
                 else:
-                    fp.seek(HEADER_SIZE)
-                    for row_id in range(self.n_records):
+                    fp.seek(HEADER_SIZE + start_row * index_size)
+                    for row_id in range(start_row, stop_row):
                         _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
                         yield _key, row_id
 
@@ -2270,7 +2274,7 @@ class JIo(JIoBase):
 
         lut = {}
         if reverse:
-            row = self.n_records-1
+            row = stop_row-1
             for key,_row in self.key_table.items():
                 if _row == row:
                     yield key, row
@@ -2278,14 +2282,14 @@ class JIo(JIoBase):
                     while lut and row in lut:
                         yield lut.pop(row, ''), row
                         row -= 1
-                else:
+                elif start_row <= _row < stop_row:
                     lut[_row] = key
 
             for row in sorted(lut, reverse=True): # pragma: no cover
                 yield lut.pop(row, ''), row
 
         else:
-            row = 0
+            row = start_row
             for key,_row in self.key_table.items():
                 if _row == row:
                     yield key, row
@@ -2293,7 +2297,7 @@ class JIo(JIoBase):
                     while lut and row in lut:
                         yield lut.pop(row, ''), row
                         row += 1
-                else:
+                elif start_row <= _row < stop_row:
                     lut[_row] = key
 
             for row in sorted(lut): # pragma: no cover

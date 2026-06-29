@@ -275,10 +275,13 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'date':
                         resp['ret'] = files_obj.KEY_date()
 
+                    elif cmd == 'fsync':
+                        resp['ret'] = files_obj.fsync(*_args, **_kwargs)
+
                     else:
                         is_done = False
 
-                else:
+                else: # file == 'VAL'
                     if cmd == 'open':
                         if fp is not None: # pragma: no cover
                             if verbose >= 0:
