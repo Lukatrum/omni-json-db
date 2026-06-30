@@ -103,52 +103,58 @@ class JDbKey:
         return f'<{type(self).__name__} at {hex(id(self))}>'
 
     def __getitem__(self, key:Any) -> Union[dict,tuple,None]:
-        """
-        Retrieve key metadata or filter keys based on a variety of condition types.
-        
-        Supports string lookups, slice ranges, datetimes, regular expressions, 
-        and custom evaluation functions.
-            Args:
-                key (Any): The filter criteria.
-                    - str | bool | bytes
-                        - val = jdb.keys['name']
+        """Retrieve key metadata or filter keys based on a variety of condition types.
 
-                    - Condition
-                        - val = jdb.keys[Query().name.startswith('A'')]
+        Args:
+            key (Any): The filter criteria.
+                
+                - str | bool | bytes
 
-                    - slice | date | datetime | float | int
-                        >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
-                        >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
-                        >>> matches = jdb.keys[date.today()]     # get today modified/new keys
-                        >>> matches = jdb.keys[datetime.now()]   # get today new keys
-                        >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
-                        >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
-                        >>> matches = jdb.keys[:]        # get all key info
-                        >>> matches = jdb.keys[0]        # get 1st key info
-                        >>> matches = jdb.keys[-1]       # get last key info
-                        >>> matches = jdb.keys[0]        # get 1st key info
-                        >>> matches = jdb.keys[-1]       # get last key info
-                        >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
+                    - val = jdb.keys['name']
 
-                    - re.Pattern
-                        >>> matches = jdb.keys[re.compile(r'key[0-9]')]
+                - Condition
 
-                    - function(k,v)
-                        >>> matches = jdb.keys[lambda k,v: k.startswith('key')]
-                        >>> matches = jdb.keys[lambda k,v: v == 10]
+                    - val = jdb.keys[Query().name.startswith('A'')]
 
-                    - function(k)
-                        >>> matches = jdb.keys[lambda k: k[0] == 'k']
+                - slice | date | datetime | float | int
 
-                    - tuple | set | list | dict
-                        >>> matches = jdb.keys[1, 2, 3, 'a']
-                        >>> matches = jdb.keys[(1, 2, 3, 'a')]
-                        >>> matches = jdb.keys[{1, 2, 3, 'a'}]
-                        >>> matches = jdb.keys[[1, 2, 3, 'a']]
-                        >>> matches = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
+                    >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
+                    >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
+                    >>> matches = jdb.keys[date.today()]     # get today modified/new keys
+                    >>> matches = jdb.keys[datetime.now()]   # get today new keys
+                    >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
+                    >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
+                    >>> matches = jdb.keys[:]        # get all key info
+                    >>> matches = jdb.keys[0]        # get 1st key info
+                    >>> matches = jdb.keys[-1]       # get last key info
+                    >>> matches = jdb.keys[0]        # get 1st key info
+                    >>> matches = jdb.keys[-1]       # get last key info
+                    >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
 
-            Returns:
-                dict | tuple | None: Metadata tuple if a single string is passed, a dictionary of matched keys to their metadata, or ``None`` if not found.
+                - re.Pattern
+
+                    >>> matches = jdb.keys[re.compile(r'key[0-9]')]
+
+                - function(k,v)
+
+                    >>> matches = jdb.keys[lambda k,v: k.startswith('key')]
+                    >>> matches = jdb.keys[lambda k,v: v == 10]
+
+                - function(k)
+
+                    >>> matches = jdb.keys[lambda k: k[0] == 'k']
+
+                - tuple | set | list | dict
+
+                    >>> matches = jdb.keys[1, 2, 3, 'a']
+                    >>> matches = jdb.keys[(1, 2, 3, 'a')]
+                    >>> matches = jdb.keys[{1, 2, 3, 'a'}]
+                    >>> matches = jdb.keys[[1, 2, 3, 'a']]
+                    >>> matches = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
+
+        Returns:
+            dict | tuple | None: Metadata tuple if a single string is passed, a dictionary of matched keys to their metadata, or ``None`` if not found.
+
         """
         if isinstance(key, str):
             if key.find(SEP_SYM) >= 0 and key not in self.jdb:
