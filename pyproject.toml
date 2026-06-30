@@ -7,11 +7,11 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.13.28"
+version = "2.13.30"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
-description = "A high-performance KV JSON DB for Python with Time-Travel/Concurrency/NoSQL/Compression. Built as an alternative to SQLite/TinyDB, effortlessly scaling from small projects to GB-grade big data."
+description = "A high-performance KV JSON DB for Python with Time-Travel, concurrency and compression. The perfect NoSQL alternative to SQLite/TinyDB for effortlessly managing GB-scale data."
 readme = "README.rst"
 requires-python = ">=3.7,<4"
 keywords = [
