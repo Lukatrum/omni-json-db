@@ -36,17 +36,33 @@ class JIoBase(metaclass=ABCMeta): # pragma: no cover
     pass
 
 def deepcopy(src:Any) -> Any:
-    """
-    Create a deep copy of the given object, optimized for immutable types.
-    
-    If the object has a valid `__hash__` (is immutable), it returns the object itself.
-    Otherwise, it recursively copies dictionaries, sets, lists, and JDbBase instances.
-
+    """Create a selective deep copy optimised for the types used in JDb.
+ 
+    Common immutable types and :class:`JDbBase` instances are returned
+    as-is without copying.  Containers are handled as follows:
+ 
+    * ``tuple``  – new tuple whose elements are recursively deep-copied.
+    * ``dict``   – new dict whose *values* are recursively deep-copied
+      (keys are not copied because dict keys must be hashable).
+    * ``set``    – shallow copy via ``set.copy()`` (set elements are
+      hashable scalars and need no further copying).
+    * Any other object whose ``__hash__`` attribute is truthy (e.g.
+      a compiled :class:`re.Pattern` or a ``frozenset``) is treated as
+      effectively immutable and returned without copying.
+    * Everything else (typically a ``list``) – new list whose elements
+      are recursively deep-copied.
+ 
     Args:
-        src (Any): The source object to be deeply copied.
-
+        src (Any): The object to copy.
+ 
     Returns:
-        Any: A deeply copied instance of the source object.
+        Any: A deep copy of *src*, or *src* itself for immutable types.
+ 
+    Example:
+        >>> original = {'key': [1, 2, 3]}
+        >>> copied = deepcopy(original)
+        >>> copied['key'] is original['key']
+        False
     """
     if src is None or isinstance(src, (str, bytes, int, float, bool, JDbBase)):
         return src
@@ -67,42 +83,65 @@ def deepcopy(src:Any) -> Any:
 
 #-----------------------------------------------------------------------------
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):
-    """Format and apply ANSI terminal styling codes onto text strings for decorative command-line outputs.
-
+    """Wrap a string in ANSI escape codes to apply terminal colour and text styling.
+ 
+    If no styling flags are set, *msg* is returned unchanged.
+    All boolean parameters default to ``None`` (off).
+ 
+    **Foreground colour precedence** – ``fg`` overrides the named colour
+    shortcuts (``black``, ``red``, … ``white``).  Only the *first* truthy
+    shortcut is applied.
+ 
+    **Colour encoding for** ``fg`` **and** ``bg``:
+ 
+    * ``int``  (0–7) – standard ANSI colour index directly.
+    * ``str``  – bit-mapped from the characters present: ``'r'`` → +1,
+      ``'g'`` → +2, ``'b'`` → +4.  E.g. ``'rg'`` → yellow (3).
+    * ``tuple`` / ``list`` – three-element sequence ``[r, g, b]`` where each
+      value is 0 or 1, bit-mapped the same way.
+ 
+    When ``bright=True`` the foreground uses high-intensity ANSI codes
+    (90–97) instead of standard codes (30–37).
+ 
     Args:
-        msg (str): The destination target string payload to be styled.
-        bold (Optional[bool], optional): Enable bold or increased intensity layout mode. Defaults to None.
-        dim (Optional[bool], optional): Enable decreased intensity text mode. Defaults to None.
-        smso (Optional[bool], optional): Enable standout parameter configuration mode. Defaults to None.
-        underscore (Optional[bool], optional): Render text with a continuous bottom line. Defaults to None.
-        blink (Optional[bool], optional): Force active text animation loops blinking characters. Defaults to None.
-        reverse (Optional[bool], optional): Swap default foreground colors with background arrays colors. Defaults to None.
-        hidden (Optional[bool], optional): Keep matching output segments masked from visibility screens. Defaults to None.
-        bright (Optional[bool], optional): Boost chosen foreground saturation levels parameters. Defaults to None.
-        fg (Optional[Union[int, str, tuple, list]], optional): Manual configuration mapping foreground color values. Defaults to None.
-        black (Optional[bool], optional): Quick flag routing terminal text color straight to black. Defaults to None.
-        red (Optional[bool], optional): Quick flag routing terminal text color straight to red. Defaults to None.
-        green (Optional[bool], optional): Quick flag routing terminal text color straight to green. Defaults to None.
-        yellow (Optional[bool], optional): Quick flag routing terminal text color straight to yellow. Defaults to None.
-        blue (Optional[bool], optional): Quick flag routing terminal text color straight to blue. Defaults to None.
-        magenta (Optional[bool], optional): Quick flag routing terminal text color straight to magenta. Defaults to None.
-        cyan (Optional[bool], optional): Quick flag routing terminal text color straight to cyan. Defaults to None.
-        white (Optional[bool], optional): Quick flag routing terminal text color straight to white. Defaults to None.
-        bg (Optional[Union[int, str, tuple, list]], optional): Manual configuration mapping background space color block rules. Defaults to None.
-        bg_black (Optional[bool], optional): Apply solid black background matrices blocks onto output spans. Defaults to None.
-        bg_red (Optional[bool], optional): Apply solid red background matrices blocks onto output spans. Defaults to None.
-        bg_green (Optional[bool], optional): Apply solid green background matrices blocks onto output spans. Defaults to None.
-        bg_yellow (Optional[bool], optional): Apply solid yellow background matrices blocks onto output spans. Defaults to None.
-        bg_blue (Optional[bool], optional): Apply solid blue background matrices blocks onto output spans. Defaults to None.
-        bg_magenta (Optional[bool], optional): Apply solid magenta background matrices blocks onto output spans. Defaults to None.
-        bg_cyan (Optional[bool], optional): Apply solid cyan background matrices blocks onto output spans. Defaults to None.
-        bg_white (Optional[bool], optional): Apply solid white background matrices blocks onto output spans. Defaults to None.
-
+        msg (str): The text to style.
+        bold (bool, optional): Bold / increased intensity.
+        dim (bool, optional): Dim / decreased intensity.
+        smso (bool, optional): Standout mode (terminal-defined highlight).
+        underscore (bool, optional): Underline the text.
+        blink (bool, optional): Blinking text.
+        reverse (bool, optional): Swap foreground and background colours.
+        hidden (bool, optional): Hide the text (invisible).
+        bright (bool, optional): Use high-intensity foreground colour codes.
+        fg (int | str | tuple | list, optional): Foreground colour; see
+            colour encoding above.
+        black (bool, optional): Set foreground colour to black.
+        red (bool, optional): Set foreground colour to red.
+        green (bool, optional): Set foreground colour to green.
+        yellow (bool, optional): Set foreground colour to yellow.
+        blue (bool, optional): Set foreground colour to blue.
+        magenta (bool, optional): Set foreground colour to magenta.
+        cyan (bool, optional): Set foreground colour to cyan.
+        white (bool, optional): Set foreground colour to white.
+        bg (int | str | tuple | list, optional): Background colour; see
+            colour encoding above.
+        bg_black (bool, optional): Set background colour to black.
+        bg_red (bool, optional): Set background colour to red.
+        bg_green (bool, optional): Set background colour to green.
+        bg_yellow (bool, optional): Set background colour to yellow.
+        bg_blue (bool, optional): Set background colour to blue.
+        bg_magenta (bool, optional): Set background colour to magenta.
+        bg_cyan (bool, optional): Set background colour to cyan.
+        bg_white (bool, optional): Set background colour to white.
+ 
     Returns:
-        str: Styled alphanumeric text enclosed inside proper ANSI escape sequence boundary frames.
-
-    Examples:
-        >>> print(Style("Database Connected Successfully!", green=True, bold=True))
+        str: *msg* wrapped in ANSI escape codes, or *msg* unchanged if no
+        styling is requested.
+ 
+    Example:
+        >>> print(Style("OK", green=True, bold=True))
+        >>> print(Style("ERROR", fg='r', bold=True))
+        >>> print(Style("INFO", fg=[0, 0, 1], bg=0))   # blue on black
     """
     code = ''
     for ii,vv in enumerate([bold, dim, smso, underscore, blink, reverse, hidden]):
@@ -157,14 +196,21 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class INT_Handler:
-    """Thread-safe signal execution interceptor routing keyboard interrupt SIGINT behaviors.
-
-    Postpones default termination actions during active critical system I/O database transactions.
+    """Deferred SIGINT handler that protects critical sections from keyboard interrupts.
+ 
+    When code enters a protected section (via :meth:`disable`) any ``Ctrl+C``
+    (SIGINT) is captured silently and recorded instead of raising
+    :exc:`KeyboardInterrupt` immediately.  Once all protected sections have
+    exited (via :meth:`enable`), callers can check :meth:`is_called` to
+    discover whether an interrupt was received and act accordingly.
+ 
+    This is used internally by :class:`FileLock` to prevent SIGINT from
+    interrupting a write-locked database operation mid-transaction.
     """
     __slots__ = ('count', 'lock', 'call_flag')
 
     def __init__(self):
-        """Initialize the interrupt handler subsystem, overriding global SIGINT handlers frameworks."""
+        """Set up the deferred SIGINT handler and install it as the process SIGINT handler."""
         self.count = 0
         self.count = 0
         self.lock = Lock()
@@ -172,7 +218,15 @@ class INT_Handler:
         signal(SIGINT, self.handler)
 
     def disable(self):
-        """Increment transaction isolation counters to suppress immediate SIGINT runtime execution crashes."""
+        """Enter a protected section where SIGINT is deferred rather than raised.
+ 
+        Increments the internal nesting counter.  If this is the outermost
+        ``disable()`` call (counter was 0), the pending-interrupt flag is
+        cleared so stale events from a previous section cannot bleed through.
+ 
+        This method is re-entrant: multiple nested calls are allowed and each
+        must be matched by a corresponding :meth:`enable` call.
+        """
         with self.lock:
             count = self.count
             self.count = count + 1
@@ -180,23 +234,39 @@ class INT_Handler:
                 self.call_flag.clear()
 
     def enable(self):
-        """Decrement transaction isolation counters, enabling system restoration towards default signal actions cascades."""
+        """Leave a protected section, decrementing the nesting counter.
+ 
+        When the counter reaches zero the pending-interrupt flag is cleared,
+        discarding any deferred SIGINT that was recorded during the section.
+        Callers should check :meth:`is_called` *before* calling ``enable()``
+        if they need to act on a deferred interrupt.
+ 
+        The counter is never decremented below zero.
+        """
         with self.lock:
             count = self.count = max(0, self.count-1)
             if count == 0:
                 self.call_flag.clear()
 
     def reset(self):
-        """Forcibly reset inner concurrency tracking integers clearing pending cancellation events back onto zero parameters."""
+        """Force-reset the nesting counter to zero and clear the pending-interrupt flag.
+ 
+        Use this only in emergency cleanup paths (e.g. after an unhandled
+        exception) where normal :meth:`enable` pairing is not possible.
+        """
         with self.lock: # pragma: no cover
             self.count = 0
             self.call_flag.clear()
 
     def is_called(self) -> bool:
-        """Validate if a keyboard interrupt happened while transaction isolation boundaries were active.
-
+        """Return whether a SIGINT was received while inside a protected section.
+ 
+        Returns ``True`` only if the pending-interrupt flag is set *and* the
+        nesting counter is still greater than zero (i.e. the signal arrived
+        inside an active protected section that has not yet been fully exited).
+ 
         Returns:
-            bool: True if SIGINT was captured during isolated operations, False otherwise.
+            bool: ``True`` if a deferred interrupt is pending, ``False`` otherwise.
         """
         if self.call_flag.is_set():
             with self.lock: # pragma: no cover
@@ -205,12 +275,21 @@ class INT_Handler:
         return False
 
     def handler(self, signum, frame): #pragma: no cover
-        """Callback handler managing operational signal indicators states routing parameters.
-
+        """SIGINT signal handler installed at construction time.
+ 
+        If no protected section is active (``count == 0``), the default
+        interrupt handler is invoked immediately, which raises
+        :exc:`KeyboardInterrupt` in the normal way.
+ 
+        If a protected section is active (``count > 0``), the signal is
+        captured silently and recorded via the pending-interrupt flag so
+        that :meth:`is_called` returns ``True`` after the section exits.
+ 
         Args:
-            signum (int): The identifier matching incoming signal codes (e.g., SIGINT).
-            frame (Any): Current system execution stack frame trace pointer context references.
+            signum (int): Signal number (always ``signal.SIGINT`` here).
+            frame (frame): Current stack frame at the point the signal arrived.
         """
+
         with self.lock:
             count = self.count
             if count == 0:
@@ -227,7 +306,15 @@ INT_manager = INT_Handler()
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class FileLockException(BlockingIOError):
-    """Custom exception class thrown when internal file locking resource allocations timeout or hit collision errors."""
+    """Raised when a :class:`FileLock` operation cannot be completed.
+ 
+    Thrown in two situations:
+ 
+    * A non-blocking lock acquisition (``block=False``) fails because
+      another process already holds an incompatible lock.
+    * A lock acquisition is attempted after the :class:`FileLock` has
+      been closed or is being destroyed (mode ``'x'``).
+    """
     pass # pylint: disable=unnecessary-pass
 
 #---------------------------------------------------------------------
@@ -235,9 +322,31 @@ class FileLockException(BlockingIOError):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class FileLock:
-    """High-performance thread-safe and process-safe synchronization locking mechanism manager proxy.
-
-    Coordinates multi-threaded read/write exclusion barriers around structural database assets files pools.
+    """Combined thread-level and process-level read/write lock backed by OS file locks.
+ 
+    Wraps a set of OS-level file-lock callables to provide:
+ 
+    * **Shared read locks** (``mode='r'``) – multiple threads *and*
+      processes may hold a read lock simultaneously.
+    * **Exclusive write locks** (``mode='w'``) – only one thread in one
+      process may hold a write lock; all readers are excluded.
+    * **Re-entrant acquisition** – the same thread may call
+      :meth:`acquire` multiple times; each call must be matched by a
+      :meth:`release` call.
+    * **Lock upgrade** – a thread holding a read lock may promote it to
+      a write lock without fully releasing via ``switch=True`` in
+      :meth:`acquire`.
+    * **SIGINT protection** – write locks automatically engage
+      :class:`INT_Handler` so that ``Ctrl+C`` is deferred until the
+      write section completes.
+ 
+    Internal mode values stored in ``_mode``:
+ 
+    * ``''``  – no lock held.
+    * ``'r'`` – shared read lock active.
+    * ``'w'`` – exclusive write lock active.
+    * ``'p'`` – pending: a thread is waiting for the OS-level lock.
+    * ``'x'`` – closed/destroyed; no new acquisitions are permitted.
     """
     __slots__ = ('_rlock', '_wlock', '_unlock', '_close', '_remove', \
                 '_lock', '_cond', '_idents', '_mode', 'SIGINT')
@@ -249,17 +358,21 @@ class FileLock:
             close:Callable[[], None],
             remove:Callable[[], None]):
 
-        """Initialize lock control environments tying mechanisms straight onto chosen driver handles parameters rules.
-
+        """Initialise the lock with OS-level locking callables.
+ 
         Args:
-            rlock (Callable[[bool], None]): read LCK lock function
-            wlock (Callable[[bool], None]): write LCK lock function
-            unlock (Callable[[], None]): LCK unlock function
-            close (Callable[[], None]): close LCK function
-            remove (Callable[[], None]): remove LCK function
-
+            rlock (Callable[[bool], None]): Acquire a shared (read) OS-level
+                file lock.  The single ``bool`` argument indicates whether the
+                call should block.
+            wlock (Callable[[bool], None]): Acquire an exclusive (write)
+                OS-level file lock.  The single ``bool`` argument indicates
+                whether the call should block.
+            unlock (Callable[[], None]): Release the current OS-level file lock.
+            close (Callable[[], None]): Close the underlying lock file handle.
+            remove (Callable[[], None]): Delete the lock file from disk.
+ 
         Raises:
-            TypeError: If the incoming asset driver fails core framework datatype matching rules verification checkpoints.
+            TypeError: If any of the five arguments is not callable.
         """
         if not callable(rlock) or not callable(wlock) or not callable(unlock) or not callable(close) or not callable(remove):
             raise TypeError
@@ -276,23 +389,38 @@ class FileLock:
         self.SIGINT = INT_manager
 
     def __repr__(self) -> str:
-        """Generate summary tracking indicators metrics describing active lock status criteria templates.
-
+        """Return a diagnostic string showing the lock's current state.
+ 
         Returns:
-            str: Diagnostic status metrics representation presentation text layout string text.
+            str: A string of the form
+            ``<FileLock lock:<bool> mode:<mode> at <hex_address>>``.
+            ``lock`` is ``1`` when a read or write lock is active, ``0``
+            otherwise; ``mode`` is one of ``''``, ``'r'``, ``'w'``,
+            ``'p'``, or ``'x'``.
         """
         return f'<{type(self).__name__} lock:{int(self.is_locked)} mode:{self._mode} at {hex(id(self))}>'
 
     def __del__(self):
-        """Systematically release outstanding acquired lock layers ensuring clear background thread disconnection cleanups loops."""
+        """Clean up on garbage collection: release all pending locks and close the lock file."""
         self.release_all()
         self._close()
 
     def release_all(self) -> bool: # pragma: no cover
-        """Forcibly clear outstanding threads registries resetting allocation states metrics fields.
-
+        """Wait for all threads to release their locks, then mark the lock as destroyed.
+ 
+        Blocks until ``_idents`` is empty (every thread has called
+        :meth:`release` enough times to drop its count to zero).  Once
+        drained, the mode is set to ``'x'`` to prevent any new
+        :meth:`acquire` calls from succeeding.  If a write lock was
+        active, the SIGINT handler is re-enabled before closing.
+ 
+        This method is called by :meth:`__del__` and should not normally
+        be called directly.
+ 
         Returns:
-            bool: True if parameters resolve and wake pending queues entities cleanly, False if lock primitives fail.
+            bool: ``True`` if the internal mutex was acquired and the
+            shutdown sequence completed.  ``False`` if the mutex itself
+            could not be acquired (should not happen in practice).
         """
         if not self._lock.acquire(): # pylint: disable=consider-using-with
             return False
@@ -314,7 +442,12 @@ class FileLock:
         return True
 
     def reset_lock(self) -> None: # pragma: no cover
-        """systematically purge and delete physical transaction lock tracker files nodes anchors from disk storage devices pools."""
+        """Delete the lock file from disk, ignoring the error if it does not exist.
+ 
+        Use this to clean up a stale lock file left behind by a crashed
+        process.  Only call this when no other process holds or awaits
+        the lock.
+        """
         try:
             self._remove()
         except FileNotFoundError:
@@ -322,28 +455,41 @@ class FileLock:
 
     @property
     def is_locked(self) -> bool:
-        """Check if any transaction thread currently holds active exclusive control flags markers indices.
-
+        """Whether any thread currently holds a read or write lock.
+ 
         Returns:
-            bool: True if the internal active transaction indicator is set, False otherwise.
+            bool: ``True`` if ``mode`` is ``'r'`` or ``'w'``, ``False``
+            otherwise.
         """
         return self._mode == 'r' or self._mode == 'w'
 
     @property
     def mode(self) -> str:
-        """Get the current operational access lock rule character indicator code token text format.
-
+        """Current lock mode as a single character string.
+ 
         Returns:
-            str: Status string token ('r' for read shared lock, 'w' for write exclusive lock, or empty '').
+            str: One of:
+ 
+            * ``''``  – no lock held.
+            * ``'r'`` – shared read lock active.
+            * ``'w'`` – exclusive write lock active.
+            * ``'p'`` – a thread is blocked waiting for the OS-level lock.
+            * ``'x'`` – lock is closed; no new acquisitions permitted.
         """
         return self._mode
 
     @contextmanager
     def rlock(self): # pragma: no cover
-        """Context manager abstraction handling safe shared reading transaction loop isolation blocks rules workflows parameters.
-
+        """Context manager that acquires a shared read lock and releases it on exit.
+ 
         Yields:
-            None: Context controller manager lifecycle initialization yield lane track.
+            None: Control is yielded to the ``with`` block with the read lock held.
+ 
+        Example:
+            ::
+ 
+                with file_lock.rlock():
+                    data = read_from_file()
         """
         self.acquire(read_only=True)
         try:
@@ -353,10 +499,19 @@ class FileLock:
 
     @contextmanager
     def wlock(self): # pragma: no cover
-        """Context manager abstraction handling exclusive transaction barrier limits preventing mutative concurrency overlaps cross execution lines.
-
+        """Context manager that acquires an exclusive write lock and releases it on exit.
+ 
+        SIGINT (``Ctrl+C``) is deferred while the write lock is held and
+        re-enabled automatically on release.
+ 
         Yields:
-            None: Context controller manager lifecycle initialization yield lane track.
+            None: Control is yielded to the ``with`` block with the write lock held.
+ 
+        Example:
+            ::
+ 
+                with file_lock.wlock():
+                    write_to_file(data)
         """
         self.acquire(read_only=False)
         try:
@@ -366,18 +521,25 @@ class FileLock:
             self.release()
 
     def has_SIGINT(self) -> bool:
-        """Verify if a cancellation signal triggered while thread operations were isolated inside critical transactional logic boundaries.
-
+        """Return whether a ``Ctrl+C`` was received while a write lock was held.
+ 
+        This delegates to :meth:`INT_Handler.is_called` on the shared
+        :data:`INT_manager` instance.
+ 
         Returns:
-            bool: True if an interruption happened, False otherwise.
+            bool: ``True`` if a deferred SIGINT is pending, ``False`` otherwise.
         """
         return self.SIGINT.is_called()
 
     def can_lock(self) -> bool:
-        """Test and verify if the storage system allows immediate write lock allocation profiles setup without blocking.
-
+        """Test whether an exclusive write lock can be acquired immediately without blocking.
+ 
+        Attempts a non-blocking ``acquire(block=False, read_only=False)``
+        and releases it straight away.
+ 
         Returns:
-            bool: True if system resources are ready for non-blocking lock setup, False otherwise.
+            bool: ``True`` if the write lock was obtained (and released),
+            ``False`` if another holder would have caused a block.
         """
         try:
             self.acquire(block=False, read_only=False)
@@ -390,29 +552,56 @@ class FileLock:
             self.release()
 
     def get_count(self, thread_id:int) -> int:
-        """Get number of this thread acquired count
-
+        """Return the re-entrance count for a given thread.
+ 
+        Each call to :meth:`acquire` increments the count for the calling
+        thread; each :meth:`release` decrements it.  The OS-level lock is
+        released only when the count returns to zero.
+ 
+        Args:
+            thread_id (int): Thread identifier as returned by
+                :func:`threading.get_ident`.
+ 
         Returns:
-            int: number of acquired count for this thread
+            int: Number of times the thread has acquired this lock without
+            a matching release.  Returns ``0`` if the thread holds no lock.
         """
         return self._idents.get(thread_id, 0)
 
     def acquire(self, block:bool=True, read_only:bool=False, switch:bool=False) -> int:
-        """Request and secure process isolation locks matching shared reading or exclusive writing transaction guidelines parameters.
-
-        Handles complex scenario workflows like downgrading and upward re-escalation from read tokens straight to write tokens.
-
+        """Acquire a read or write lock for the calling thread.
+ 
+        Thread-level re-entrance is supported: calling ``acquire`` again
+        from a thread that already holds a compatible lock simply increments
+        the re-entrance counter and returns immediately.
+ 
+        **Lock promotion (** ``switch=True`` **)** – a thread that currently
+        holds a read lock may atomically promote it to a write lock.  The
+        read lock is released and the write lock is acquired without
+        allowing other threads to sneak in between.
+ 
         Args:
-            block (bool, optional): True = block mode, False = non-block mode
-            read_only (bool, optional): Choose shared multi-reader capabilities instead of unique execution write slots properties. Defaults to False.
-            switch (bool, optional): switch to read/write mode without release
-
+            block (bool, optional): If ``True`` (default), block until the
+                lock becomes available.  If ``False``, raise
+                :exc:`FileLockException` immediately when the lock cannot
+                be acquired.
+            read_only (bool, optional): If ``True``, acquire a shared read
+                lock (multiple threads/processes may hold it simultaneously).
+                If ``False`` (default), acquire an exclusive write lock.
+            switch (bool, optional): If ``True``, upgrade the current
+                thread's read lock to a write lock without fully releasing.
+                Only valid when the calling thread already holds a read lock.
+                Defaults to ``False``.
+ 
         Returns:
-            int: The active unique execution thread identifier key integer address logging resource allocation controls.
-
+            int: The calling thread's identifier (as returned by
+            :func:`threading.get_ident`).
+ 
         Raises:
-            RuntimeError: If primary application mutex components break or fail thread lock synchronization steps.
-            FileLockException: If thread operations trigger timeout thresholds limits or encounter non-blocking lock collisions.
+            RuntimeError: If the internal threading mutex cannot be acquired.
+            FileLockException: If ``block=False`` and the lock is held by
+                another thread or process, or if the lock has been closed
+                (mode ``'x'``).
         """
         if not self._lock.acquire(): # pylint: disable=consider-using-with
             raise RuntimeError
@@ -550,13 +739,22 @@ class FileLock:
         return ident
 
     def release(self) -> int:
-        """Relinquish acquired concurrency control privileges yielding structural access metrics keys back onto common system execution pools.
-
+        """Release one acquisition of the lock for the calling thread.
+ 
+        Decrements the re-entrance counter for the calling thread.  When
+        the counter reaches zero and no other threads hold the lock, the
+        OS-level file lock is released and SIGINT handling is re-enabled
+        (if a write lock was held).
+ 
+        Calling ``release`` from a thread that does not hold the lock has
+        no effect.
+ 
         Returns:
-            int: The active executing thread location identifier number integer value.
-
+            int: The calling thread's identifier (as returned by
+            :func:`threading.get_ident`).
+ 
         Raises:
-            RuntimeError: If multi-threaded file locks primitive synchronization drivers break execution pathways models.
+            RuntimeError: If the internal threading mutex cannot be acquired.
         """
         if not self._lock.acquire(): # pylint: disable=consider-using-with
             raise RuntimeError

@@ -35,20 +35,17 @@ SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
 
 class JFlag(IntFlag):
-    """
-    Enumeration flag to control write/delete behavior in database operations.
-    """
+    """Enumeration flag to control write/delete behavior in database operations."""
 
     REVERT  = 0x01  # allow to revert after write/delete operation
     SPLIT   = 0x02  # allow to split large row into two
 
     @classmethod
     def _missing_(cls, value):
-        """
-        Handle missing values by parsing string combinations into valid IntFlags.
+        """Handle missing values by parsing string combinations into valid IntFlags.
 
         Args:
-            value (Any): The string representation of flags.
+            value (Any): The string representation of flags (e.g., ``'rs'``).
 
         Returns:
             JFlag: The combined flag instance.
@@ -66,11 +63,11 @@ class JFlag(IntFlag):
         return super()._missing_(value)
 
     def __str__(self):
-        """
-        Return a string representation of the currently active flags.
+        """Return a string representation of the currently active flags.
 
         Returns:
-            str: A string where each character represents an active flag's initial.
+            str: A string where each character represents an active flag's initial 
+            (e.g., ``'rs'``), or ``'_'`` if inactive.
         """
         ret = ''
         for flag in JFlag:
@@ -86,14 +83,11 @@ class JFlag(IntFlag):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JDbKey:
-    """
-    A lightweight, read-only interface for interacting strictly with the keys of a JDbReader instance.
-    """
+    """A lightweight, read-only interface for interacting strictly with the keys of a :class:`JDbReader` instance."""
     __slots__ = ('jdb', )
 
     def __init__(self, jdb:JDbReader):
-        """
-        Initialize the JDbKey instance.
+        """Initialize the JDbKey instance.
 
         Args:
             jdb (JDbReader): The parent database reader instance to bind to.
@@ -101,8 +95,7 @@ class JDbKey:
         self.jdb:JDbReader = jdb
 
     def __repr__(self) -> str:
-        """
-        Return the string representation of the JDbKey instance.
+        """Return the string representation of the JDbKey instance.
 
         Returns:
             str: The object's memory address and class name.
@@ -112,9 +105,11 @@ class JDbKey:
     def __getitem__(self, key:Any) -> Union[dict,tuple,None]:
         """
         Retrieve key metadata or filter keys based on a variety of condition types.
-
+        
+        Supports string lookups, slice ranges, datetimes, regular expressions, 
+        and custom evaluation functions.
             Args:
-                key (Any): The filter criteria which can be a string, slice, date, regex pattern, function, or iterable.
+                key (Any): The filter criteria.
                     - str | bool | bytes
                         - val = jdb.keys['name']
 
@@ -153,7 +148,7 @@ class JDbKey:
                         >>> matches = jdb.keys[{1:0, 2:1, 3:2, 'a':3}]
 
             Returns:
-                Union[dict, tuple, None]: Metadata tuple if a single string is passed, or a dictionary of matched keys to their metadata.
+                dict | tuple | None: Metadata tuple if a single string is passed, a dictionary of matched keys to their metadata, or ``None`` if not found.
         """
         if isinstance(key, str):
             if key.find(SEP_SYM) >= 0 and key not in self.jdb:
@@ -223,8 +218,7 @@ class JDbKey:
         raise AttributeError('read only')
 
     def __len__(self) -> int:
-        """
-        Get the total number of records in the associated database.
+        """Get the total number of records in the associated database.
 
         Returns:
             int: The record count.
@@ -232,18 +226,17 @@ class JDbKey:
         return len(self.jdb)
 
     def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, **kwargs) -> Generator[str]:
-        """
-        Execute a search query returning matching keys or key-metadata pairs as a generator.
-
+        """Execute a search query returning matching keys as a generator.
+        
         Args:
-            keys (Optional[Any], optional): Condition for filtering keys. Defaults to None.
-            vals (Optional[Any], optional): Condition for filtering values. Defaults to None.
-            date (Optional[Any], optional): Date range filter. Defaults to None.
+            keys (Any, optional): Condition for filtering keys. Defaults to ``None``.
+            vals (Any, optional): Condition for filtering values. Defaults to ``None``.
+            date (Any, optional): Date range filter. Defaults to ``None``.
             limit (int, optional): Maximum number of results to yield. Defaults to 0 (no limit).
             **kwargs: Additional filtering arguments.
 
         Yields:
-            str: Matched key
+            str: Matched key.
 
         Example:
             >>> jdb = JDb()
@@ -262,9 +255,8 @@ class JDbKey:
             yield from self
 
     def __iter__(self) -> Generator[str]:
-        """
-        Iterate over all keys present in the database.
-
+        """Iterate over all keys present in the database.
+        
         Yields:
             str: The next key in the database.
         """
@@ -273,14 +265,13 @@ class JDbKey:
             yield from jdb.io.key_table
 
     def __contains__(self, keys:Set[str]) -> bool:
-        """
-        Check if the current key table is a superset of the provided keys.
-
+        """Check if the current key table is a superset of the provided keys.
+        
         Args:
             keys (Set[str]): A set of keys to check.
 
         Returns:
-            bool: True if all provided keys exist in the database, False otherwise.
+            bool: ``True`` if all provided keys exist in the database, ``False`` otherwise.
 
         Example:
             >>> jdb = JDb()
@@ -291,14 +282,13 @@ class JDbKey:
         return self.is_superset(keys)
 
     def __eq__(self, keys:Union[set,dict,JDbReader,JDbKey]) -> bool:
-        """
-        Compare the current keys with another collection or database.
-
+        """Compare the current keys with another collection or database.
+        
         Args:
-            keys (Union[set, dict, JDbReader, JDbKey]): The target to compare against.
+            keys (set | dict | JDbReader | JDbKey): The target to compare against.
 
         Returns:
-            bool: True if the keys are identical, False otherwise.
+            bool: ``True`` if the keys are identical, ``False`` otherwise.
         
         Example:
             >>> jdb = JDb()
@@ -782,19 +772,7 @@ class JDbKey:
 
                 return
 
-            if isinstance(key, Condition):
-                key_table = io.key_table
-                n_records = io.n_records
-                for _key,_val in jdb.item_iter(key):
-                    row_id = key_table[row_id]
-                    if n_records > row_id >= 0:
-                        _key0, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
-                        if _key0 == _key:
-                            old_date, new_date = io_conv_date(days)
-                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
-                return
-
-            if isinstance(key, (slice, dt_date, datetime)):
+            if isinstance(key, (slice, dt_date, datetime, Condition)):
                 yield from jdb.f_key_iter(fp, key)
                 return
 
@@ -917,8 +895,7 @@ class JDbKey:
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JDbReader(JDbBase):
-    """
-    Read-only base class for JDb. 
+    """Read-only base class for JDb operations.
 
     Handles data retrieval, filtering, and caching logic without allowing 
     data modification. Designed for safe, concurrent read operations.
@@ -1528,13 +1505,13 @@ class JDbReader(JDbBase):
         """
         return self.symmetric_difference(keys)
 
-    def f_slice(self, fp_dict:dict, key:Union[dt_date,datetime,Condition,slice,Any]) -> tuple:
+    def f_slice(self, fp_dict:dict, key:Union[dt_date,datetime,Condition,slice]) -> tuple:
         """
         Compute row and version iteration boundaries for a given slice or datetime constraint.
 
         Args:
             fp_dict (dict): Active file pointer dictionary.
-            key (Union[dt_date, datetime, Any]): The time or slice specification for filtering.
+            key (Union[dt_date, datetime, Condition, slice]): The time or slice specification for filtering.
 
         Returns:
             tuple: A tuple containing (slice_obj, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date).
@@ -1728,8 +1705,7 @@ class JDbReader(JDbBase):
                         if io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
                                 self.safe_line = io.n_records
-                                if chg_keys: chg_keys.clear()
-
+                                chg_keys.clear()
                                 return fp_dict
 
                         is_latest = False # pragma: no cover
@@ -1739,7 +1715,7 @@ class JDbReader(JDbBase):
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None:
+                    if key_fp is not None: # pragma: no cover
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
@@ -1748,7 +1724,7 @@ class JDbReader(JDbBase):
                     io.read_header(key_fp)
                     if not io.is_updated() or not is_latest:
                         io.load_keys(key_fp, force=data_type==0)
-                        if _cache: _cache.clear()
+                        _cache.clear()
                         self.fsize = io.file_size
 
                 except FileNotFoundError:
@@ -1759,7 +1735,7 @@ class JDbReader(JDbBase):
                     fp_dict[-1] = key_fp
 
                 self.safe_line = self.io.n_records
-                if chg_keys: chg_keys.clear()
+                chg_keys.clear()
                 return fp_dict
 
             except: # pragma: no cover
@@ -1797,8 +1773,7 @@ class JDbReader(JDbBase):
             th_cnt = th_table.get(ident, 0) - 1
             try:
                 io = self.io
-                is_dirty = not io.is_updated()
-                if is_dirty:
+                if not io.is_updated():
                     if file_lock.mode == 'w':
                         key_fp = fp_dict.get(-1, None)
                         if key_fp is None: # pragma: no cover
@@ -1831,10 +1806,10 @@ class JDbReader(JDbBase):
             finally:
                 if th_cnt <= 0:
                     chg_keys.clear()
-                    is_dirty = is_dirty and file_lock.mode == 'w'
+                    is_dirty = file_lock.mode == 'w'
                     for fp in fp_dict.values():
                         if fp is not None:
-                            if is_dirty:
+                            if is_dirty: # pragma: no cover
                                 files_obj.fsync(fp.fileno())
                             fp.close()
 
@@ -1848,15 +1823,16 @@ class JDbReader(JDbBase):
 
     @contextmanager
     def open(self, read_only:bool=True, no_raise:bool=False) -> Generator[Dict[int,IO]]:
-        """
-        Context manager to acquire thread-safe read/write access to the database files.
+        """Context manager to acquire thread-safe read/write access to the database files.
 
         Args:
-            read_only (bool, optional): Whether to request a shared read lock vs exclusive write lock. Defaults to True.
-            no_raise (bool, optional): If True, suppresses exceptions and attempts to reset corrupted DB headers. Defaults to False.
+            read_only (bool, optional): Request a shared read lock instead of an exclusive write lock. 
+                Defaults to ``True``.
+            no_raise (bool, optional): If ``True``, suppresses exceptions and attempts to reset 
+                corrupted headers. Defaults to ``False``.
 
         Yields:
-            Dict[int, IO]: A dictionary of open file pointers.
+            Dict[int, IO]: A dictionary of open file pointers mapped by their IDs.
         """
         if not self.lock.acquire(): # 70% faster vs with self.lock
             raise RuntimeError
@@ -1896,10 +1872,10 @@ class JDbReader(JDbBase):
                     if read_only:
                         if io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
+                                self.safe_line = io.n_records
+                                chg_keys.clear()
                                 sync_id = io.sync_id
                                 fsize = io.file_size
-                                self.safe_line = io.n_records
-                                if chg_keys: chg_keys.clear()
                                 yield fp_dict
                                 return
 
@@ -1910,7 +1886,7 @@ class JDbReader(JDbBase):
 
                     data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
-                    if key_fp is not None:
+                    if key_fp is not None: # pragma: no cover
                         key_fp.flush()
                         key_fp.seek(0)
                     else:
@@ -1919,7 +1895,7 @@ class JDbReader(JDbBase):
                     io.read_header(key_fp)
                     if not io.is_updated() or not is_latest:
                         io.load_keys(key_fp, force=data_type==0)
-                        if _cache: _cache.clear()
+                        _cache.clear()
                         self.fsize = io.file_size
 
                 except FileNotFoundError:
@@ -1929,10 +1905,10 @@ class JDbReader(JDbBase):
                     io, key_fp = self._init_KEY()
                     fp_dict[-1] = key_fp
 
+                self.safe_line = io.n_records
+                chg_keys.clear()
                 sync_id = io.sync_id
                 fsize = io.file_size
-                self.safe_line = io.n_records
-                if chg_keys: chg_keys.clear()
                 yield fp_dict
 
             except JKeyError as e: # pragma: no cover
@@ -1982,10 +1958,10 @@ class JDbReader(JDbBase):
                     print(Style(f'\n{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io._key_limit}|Exception:{e}: try to reset KEY header', yellow=1))
                     io, key_fp = self._init_KEY()
                     fp_dict[-1] = key_fp
-                    sync_id = io.sync_id
-                    fsize = io.file_size
                     chg_keys.clear()
                     self.safe_line = io.n_records
+                    sync_id = io.sync_id
+                    fsize = io.file_size
                     yield fp_dict
 
                 else:
@@ -1994,8 +1970,7 @@ class JDbReader(JDbBase):
             finally:
                 try:
                     io = self.io
-                    is_dirty = not io.is_updated()
-                    if is_dirty:
+                    if not io.is_updated():
                         if file_lock.mode == 'w':
                             if not is_error:
                                 key_fp = fp_dict.get(-1, None)
@@ -2020,7 +1995,7 @@ class JDbReader(JDbBase):
                     th_cnt -= 1
                     if th_cnt <= 0:
                         chg_keys.clear()
-                        is_dirty = is_dirty and file_lock.mode == 'w'
+                        is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
                         for fp in fp_dict.values():
                             if fp is not None:
                                 if is_dirty:
@@ -2076,8 +2051,7 @@ class JDbReader(JDbBase):
 
     @property
     def dir_name(self) -> str:
-        """
-        Get the parent directory path of the primary DB file.
+        """Get the parent directory path of the primary DB file.
 
         Returns:
             str: Directory path.
@@ -2086,8 +2060,7 @@ class JDbReader(JDbBase):
 
     @property
     def file_name(self) -> str:
-        """
-        Get the file name of the primary DB KEY file.
+        """Get the file name of the primary DB KEY file.
 
         Returns:
             str: File name.
@@ -3757,16 +3730,15 @@ class JDbReader(JDbBase):
             return self.io.key_table, self.io.file_table
 
     def get(self, key:str, default_val:Any=None, copy:bool=True) -> Any:
-        """
-        Safely fetch a value for a specific key, returning a default if not found.
+        """Safely fetch a value for a specific key, returning a default if not found.
 
         Args:
             key (str): The target key.
-            default_val (Any, optional): Value to return upon missing key. Defaults to None.
-            copy (bool, optional): Retrieve a deep copy to prevent mutation. Defaults to True.
+            default_val (Any, optional): Value to return upon missing key. Defaults to ``None``.
+            copy (bool, optional): Retrieve a deep copy to prevent mutation. Defaults to ``True``.
 
         Returns:
-            Any: The stored value or default.
+            Any: The stored value or the default value.
         """
         with self.open(read_only=True) as fp:
             io = self.io
@@ -3893,14 +3865,13 @@ class JDbReader(JDbBase):
             return self.f_read_row(fp, row_id, with_value)
 
     def get_bytes(self, key:str) -> bytes:
-        """
-        Extract the raw, compressed (if applicable) binary payload of a stored value without deserializing it.
+        """Extract the raw, compressed binary payload of a stored value without deserializing it.
 
         Args:
             key (str): The key mapping to the payload.
 
         Returns:
-            bytes: Raw binary block. Returns empty bytes if key not found.
+            bytes: Raw binary block. Returns empty bytes if the key is not found.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_bytes(fp, key)
@@ -4511,7 +4482,7 @@ class JDbReader(JDbBase):
         io_read_key = io.read_key
         new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, slice_obj)
         start, stop, step = new_slice.start, new_slice.stop, new_slice.step
-        if key_rules and step == 1:
+        if key_rules:
             for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop):
                 if not match_KEY_rules(_key, key_rules):
                     continue
@@ -4523,7 +4494,7 @@ class JDbReader(JDbBase):
                 old_date, new_date = io_conv_date(days)
                 # pylint: disable= too-many-boolean-expressions
                 if chk_new_date and (min_date and new_date < min_date or max_date and new_date >= max_date) or \
-                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date):
+                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date): # pragma: no cover
                     continue
 
                 yield __key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
@@ -4540,8 +4511,8 @@ class JDbReader(JDbBase):
                         not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date):
                     continue
 
-                if key_rules and (not n_records > row_id >= 0 or not match_KEY_rules(_key, key_rules)):
-                    continue
+                if row_id >= n_records:
+                    _key = f'|{_key}|~~{ver}~\t\t'
 
                 yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
 

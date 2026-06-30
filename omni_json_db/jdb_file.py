@@ -15,18 +15,21 @@ try:
 
     OPEN_FLAGS = O_APPEND | O_CREAT
     def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
-        """Acquire a non-blocking shared (read) lock on a physical file descriptor.
+        """Acquire a shared (read) OS-level file lock.
 
         Args:
-            fd (int): An existing file descriptor. If 0, a new file descriptor will be opened.
-            LCK_file (str): System path pointing to the targeted lock file.
-            block (bool): True = blocking mode, False = non-blocking mode
+            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
+                a new descriptor/object will be opened.
+            LCK_file (str): The system path pointing to the targeted lock file.
+            block (bool, optional): If ``True``, block until the lock can be acquired. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
 
         Returns:
-            int: The active file descriptor holding the shared lock.
+            int | IO: The active file descriptor or file object holding the shared lock.
 
         Raises:
-            BlockingIOError: If the file lock cannot be acquired immediately because another thread/process holds an exclusive lock.
+            BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
+                because another process holds an exclusive lock.
         """
         if fd is None:
             fd = os_open(LCK_file, OPEN_FLAGS)
@@ -44,18 +47,21 @@ try:
             raise BlockingIOError from e
 
     def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
-        """Acquire a non-blocking exclusive (write) lock on a physical file descriptor.
+        """Acquire an exclusive (write) OS-level file lock.
 
         Args:
-            fd (int): An existing file descriptor. If 0, a new file descriptor will be opened.
-            LCK_file (str): System path pointing to the targeted lock file.
-            block (bool): True = wait until lock file, False = non-blocking mode
+            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
+                a new descriptor/object will be opened.
+            LCK_file (str): The system path pointing to the targeted lock file.
+            block (bool, optional): If ``True``, block until the lock can be acquired. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
 
         Returns:
-            int: The active file descriptor holding the exclusive lock.
+            int | IO: The active file descriptor or file object holding the exclusive lock.
 
         Raises:
-            BlockingIOError: If the lock cannot be acquired immediately due to existing readers or writers.
+            BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
+                due to existing readers or writers.
         """
         if fd is None:
             fd = os_open(LCK_file, OPEN_FLAGS)
@@ -73,10 +79,10 @@ try:
             raise BlockingIOError from e
 
     def file_unlock(fd:int):  # pragma: no cover
-        """Release the acquired file lock and safely close the associated file descriptor.
+        """Release the file lock and safely close the file descriptor/object.
 
         Args:
-            fd (int): The open file descriptor to unlock and terminate.
+            fd (int | IO): The open file descriptor or file object to unlock and close.
         """
         if fd is not None:
             try:
@@ -89,18 +95,21 @@ except ImportError:
     from portalocker import LOCK_SH, LOCK_NB, LOCK_EX, lock as pl_lock, unlock as pl_unlock, LockException
 
     def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
-        """Acquire a non-blocking shared (read) lock on a file object via cross-platform portalocker fallback.
+        """Acquire a shared (read) OS-level file lock.
 
         Args:
-            fd (IO): An existing open file-like streaming handle. If None, a new file object is initialized.
-            LCK_file (str): System path pointing to the targeted lock file.
-            block (bool): True = wait until lock file, False = non-blocking mode
+            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
+                a new descriptor/object will be opened.
+            LCK_file (str): The system path pointing to the targeted lock file.
+            block (bool, optional): If ``True``, block until the lock can be acquired. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
 
         Returns:
-            IO: The stream interface object holding the active shared read lock.
+            int | IO: The active file descriptor or file object holding the shared lock.
 
         Raises:
-            BlockingIOError: If the shared lock cannot be established immediately.
+            BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
+                because another process holds an exclusive lock.
         """
         if fd is None:
             fd = open(LCK_file, 'a+')
@@ -118,18 +127,21 @@ except ImportError:
             raise BlockingIOError from e
 
     def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
-        """Acquire a non-blocking exclusive (write) lock on a file object via cross-platform portalocker fallback.
+        """Acquire an exclusive (write) OS-level file lock.
 
         Args:
-            fd (IO): An existing open file-like streaming handle. If None, a new file object is initialized.
-            LCK_file (str): System path pointing to the targeted lock file.
-            block (bool): True = wait until lock file, False = non-blocking modes
+            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
+                a new descriptor/object will be opened.
+            LCK_file (str): The system path pointing to the targeted lock file.
+            block (bool, optional): If ``True``, block until the lock can be acquired. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
 
         Returns:
-            IO: The stream interface object holding the active exclusive write lock.
+            int | IO: The active file descriptor or file object holding the exclusive lock.
 
         Raises:
-            BlockingIOError: If the exclusive lock cannot be established immediately.
+            BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
+                due to existing readers or writers.
         """
         if fd is None:
             fd = open(LCK_file, 'a+')
@@ -147,10 +159,10 @@ except ImportError:
             raise BlockingIOError from e
 
     def file_unlock(fd:IO):  # pragma: no cover
-        """Release the portalocker-managed file lock and safely terminate the file object stream.
+        """Release the file lock and safely close the file descriptor/object.
 
         Args:
-            fd (IO): The open file object stream interface to unlock and close.
+            fd (int | IO): The open file descriptor or file object to unlock and close.
         """
         if fd is not None:
             try:
@@ -164,22 +176,22 @@ except ImportError:
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JBytesIO(RawIOBase):
-    """A highly optimized, raw in-memory binary stream interface managing mutable bytearray buffers.
+    """An optimized, in-memory binary stream interface managing a mutable bytearray buffer.
 
-    Inherits from `io.RawIOBase` to provide standard I/O streaming integration compatibility layers.
+    Inherits from :class:`io.RawIOBase` to provide standard I/O streaming integration.
     """
     __slots__ = ('buf', 'idx')
 
     def __init__(self, buffer:bytearray, *args, **kwargs):
-        """Initialize the JBytesIO stream interface instance wrapper with a mutable byte storage target.
+        """Initialize the stream interface with a mutable byte storage target.
 
         Args:
-            buffer (bytearray): The mutable byte array serving as underlying storage framework.
-            *args: Variable length arguments passed directly onto RawIOBase initializer routines.
-            **kwargs: Keyword arguments passed directly onto RawIOBase initializer routines.
+            buffer (bytearray): The mutable byte array serving as the underlying storage.
+            *args: Variable length arguments passed directly to ``RawIOBase``.
+            **kwargs: Keyword arguments passed directly to ``RawIOBase``.
 
         Raises:
-            TypeError: If the provided buffer object violates standard bytearray definitions constraints.
+            TypeError: If the provided buffer is not a ``bytearray``.
         """
         super().__init__(*args, **kwargs)
         self.buf = bytearray() if buffer is None else buffer
@@ -194,13 +206,13 @@ class JBytesIO(RawIOBase):
         super().__del__()
 
     def readable(self) -> bool: # pragma: no cover
-        """Determine if the underlying memory stream state actively allows reading procedures.
+        """Determine if the stream supports reading.
 
         Returns:
-            bool: Always returns True if the stream pipeline remains open.
+            bool: ``True`` if the stream is open and readable.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -208,16 +220,18 @@ class JBytesIO(RawIOBase):
         return True
 
     def readline(self, size:Optional[int]=-1) -> bytes:
-        """Extract a single line array up to the nearest newline trailing character marker boundary.
+        """Read and return one line from the stream.
+
+        Reads until a newline (``\\n``) is found or the stream ends.
 
         Args:
-            size (Optional[int], optional): Maximum capacity ceiling threshold constraining total lookahead bytes. Defaults to -1.
+            size (int, optional): The maximum number of bytes to read. Defaults to -1 (no limit).
 
         Returns:
-            bytes: Raw array string containing the segment sequence elements including the line break symbol.
+            bytes: The read line, including the trailing newline character if present.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -239,16 +253,17 @@ class JBytesIO(RawIOBase):
         return bytes(buf[idx:next_idx])
 
     def readlines(self, size:Optional[int]=None) -> list: # pragma: no cover
-        """Extract all remaining segmented row matrices elements sequences wrapped as a collection list object.
+        """Read and return a list of lines from the stream.
 
         Args:
-            size (Optional[int], optional): Dimensional constraint limit regulating the overall byte reading scope width. Defaults to None.
+            size (int, optional): The maximum number of bytes to read across all lines. 
+                Defaults to ``None`` (read all lines).
 
         Returns:
-            list: A list array of raw bytes segments tracking rows layout arrays.
+            list: A list of byte strings, each representing a line.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -278,17 +293,19 @@ class JBytesIO(RawIOBase):
         return lines
 
     def seek(self, offset:int, whence:int=SEEK_SET) -> int:
-        """Shift the absolute structural stream navigation indexing cursor position parameter.
+        """Change the stream position to the given byte offset.
 
         Args:
-            offset (int): Displaced length magnitude integer modifying the track vector pointer location.
-            whence (int, optional): Anchor evaluation baseline configuration rules flag (SEEK_SET, SEEK_CUR, SEEK_END). Defaults to SEEK_SET.
+            offset (int): The byte offset relative to the position indicated by ``whence``.
+            whence (int, optional): The reference point. ``SEEK_SET`` (0) for start of stream, 
+                ``SEEK_CUR`` (1) for current position, ``SEEK_END`` (2) for end of stream. 
+                Defaults to ``SEEK_SET``.
 
         Returns:
-            int: The newly repositioned operational memory pointer absolute index address position.
+            int: The new absolute stream position.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state or invalid seek modes.
+            ValueError: If the stream is closed or an invalid ``whence`` value is provided.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -313,13 +330,13 @@ class JBytesIO(RawIOBase):
         raise ValueError
 
     def seekable(self) -> bool: # pragma: no cover
-        """Determine if stream navigation repositioning procedures are supported.
+        """Determine if stream navigation is supported.
 
         Returns:
-            bool: Always returns True if the resource state is active.
+            bool: Always returns ``True`` if the stream is open.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -327,13 +344,13 @@ class JBytesIO(RawIOBase):
         return True
 
     def tell(self) -> int:
-        """Extract the exact current absolute index cursor displacement address coordinate location metric.
+        """Return the current stream position.
 
         Returns:
-            int: Numerical value indicating pointer address tracking position inside memory space.
+            int: The current absolute byte offset from the start of the stream.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -341,16 +358,19 @@ class JBytesIO(RawIOBase):
         return self.idx
 
     def truncate(self, size:Optional[int]=None):
-        """Resize storage capacity thresholds forcing absolute tail adjustments.
+        """Resize the stream to the given size in bytes.
+
+        If the size is smaller than the current size, the stream is truncated.
 
         Args:
-            size (Optional[int], optional): Boundary length parameter setting the target truncate cut. Defaults to None.
+            size (int, optional): The target size in bytes. If ``None``, truncates to 
+                the current stream position. Defaults to ``None``.
 
         Returns:
-            int: The absolute index representing the terminal boundary length of the array after truncation.
+            int: The new size of the stream.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -374,13 +394,13 @@ class JBytesIO(RawIOBase):
         return idx
 
     def writable(self) -> bool: # pragma: no cover
-        """Determine if stream alteration or modification write pipeline behaviors are available.
+        """Determine if the stream supports writing.
 
         Returns:
-            bool: Always returns True if the stream controller state remains open.
+            bool: Always returns ``True`` if the stream is open.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -388,13 +408,13 @@ class JBytesIO(RawIOBase):
         return True
 
     def writelines(self, lines): # pragma: no cover
-        """Sequentially commit an iterable list collection mapping lines bytes content entries straight to storage.
+        """Write a list of lines to the stream.
 
         Args:
-            lines (Any): An iterable container processing individual byte arrays or structures.
+            lines (Any): An iterable of byte-like objects to write.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -418,16 +438,16 @@ class JBytesIO(RawIOBase):
         self.idx = idx
 
     def read(self, size:Optional[int]=-1) -> bytes:
-        """Extract a structured segment continuous array block sequence matching a target width span parameter.
+        """Read up to size bytes from the stream.
 
         Args:
-            size (Optional[int], optional): Target limit value indicating total sequential element count to fetch. Defaults to -1.
+            size (int, optional): The maximum number of bytes to read. Defaults to -1 (read all).
 
         Returns:
-            bytes: Copied binary payload tracking items extracted from current workspace positions.
+            bytes: The extracted binary data.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -440,13 +460,13 @@ class JBytesIO(RawIOBase):
         return bytes(part)
 
     def readall(self) -> bytes: # pragma: no cover
-        """Extract every remaining byte configuration sequence element left untracked behind cursor indices pointers.
+        """Read and return all remaining bytes in the stream.
 
         Returns:
-            bytes: Unread layout array section sequence containing terminal binary contents.
+            bytes: The remaining binary data.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -458,16 +478,16 @@ class JBytesIO(RawIOBase):
         return bytes(part)
 
     def readinto(self, b) -> int: # pragma: no cover
-        """Populate a pre-allocated external mutable data frame object directly with internal streaming buffer items.
+        """Read bytes directly into a pre-allocated, mutable byte-like object.
 
         Args:
-            b (Any): The destination mutable storage object array (e.g., bytearray) to write items into in-place.
+            b (bytearray): The mutable object to populate.
 
         Returns:
-            int: The total count value tracking bytes committed into the destination target layer.
+            int: The number of bytes successfully read.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -479,16 +499,16 @@ class JBytesIO(RawIOBase):
         return len(b)
 
     def write(self, b) -> int:
-        """Commit raw binary segments matrices bytes payload straight into active tracking index slots.
+        """Write the given bytes-like object to the stream.
 
         Args:
-            b (Union[bytes, bytearray]): Raw stream sequence input configuration layer to write.
+            b (bytes | bytearray): The raw binary data to write.
 
         Returns:
-            int: Total count verification number logging actual bytes committed.
+            int: The number of bytes successfully written.
 
         Raises:
-            ValueError: If execution runs against an explicitly closed stream instance state.
+            ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
@@ -524,7 +544,7 @@ class JBytesIO(RawIOBase):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JFilesBase(metaclass=ABCMeta): # pragma: no cover
-    """Abstract Base Class (ABC) defining explicit structural workspace pipeline blueprints for database filesystem drivers."""
+    """Abstract Base Class defining the standard interface for database filesystem drivers."""
     @abstractmethod
     def __eq__(self, obj) -> bool: ...
     @abstractmethod
@@ -573,26 +593,27 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JMemFiles(JFilesBase):
-    """Transient in-memory virtual filesystem backend simulation implementation bypassing storage devices hardware limits.
+    """In-memory virtual filesystem backend for transient database operations.
 
-    Manages layout matrices and dataset segments arrays completely within memory using mutable structures wrappers.
+    Manages layout matrices and dataset segments entirely within RAM using 
+    mutable bytearrays, bypassing physical storage devices.
     """
     __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond')
 
     def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
-        """Initialize volatile in-memory transient array datasets mapping virtual backend tables.
+        """Initialize a volatile in-memory storage manager.
 
         Args:
-            KEY_file (Optional[bytearray], optional): In-memory buffer tracking key index structure lines maps. Defaults to None.
-            VAL_table (Optional[dict], optional): Repository tracking mapped file_ids onto internal rows bytearrays blocks contents. Defaults to None.
-            LCK_file (Optional[bytearray], optional): Mutex tracker array mapping shared concurrent access status bits. Defaults to None.
-            lock (Optional[Lock], optional): Primitive synchronization engine tracking multi-threaded operations flows boundaries. Defaults to None.
-            cond (Optional[Condition], optional): condition variable object for blocking mode
-            timestamp (Optional[float], optional): Baseline initialization timestamp mapping creation timeline markers records. Defaults to None.
-            name (Optional[str], optional): File object name
+            KEY_file (bytearray, optional): Buffer for index mapping. Defaults to a new bytearray.
+            VAL_table (dict, optional): Dictionary tracking ``file_id`` to content bytearrays.
+            LCK_file (bytearray, optional): Mutex tracker array. Defaults to a new bytearray.
+            lock (Lock, optional): Primitive synchronization engine.
+            cond (Condition, optional): Condition variable for blocking concurrency.
+            timestamp (float, optional): Baseline creation timestamp.
+            name (str, optional): The virtual file object name.
 
         Raises:
-            TypeError: If input values fail framework datatype matching specifications.
+            TypeError: If input parameters do not match required native types.
         """
         if KEY_file is None:
             KEY_file = bytearray()
@@ -636,72 +657,72 @@ class JMemFiles(JFilesBase):
         self.name = name
 
     def __repr__(self) -> str:
-        """Generate tracking diagnostic indicators parameters monitoring object state details.
+        """Generate a string representation of the memory file state.
 
         Returns:
-            str: Telemetry presentation tracking pointer identity configurations details.
+            str: Diagnostic telemetry regarding memory allocations.
         """
         return f'<{type(self).__name__} KEY{self.get_KEY()}:{len(self.KEY_file)}@{hex(id(self.KEY_file))} +{len(self.VAL_table)} at {hex(id(self))}>'
 
     def __eq__(self, obj) -> bool:
-        """Compare transient memory allocations checking structural source equivalence parameters trackers.
+        """Check if two memory instances share the exact same underlying key buffer.
 
         Args:
             obj (Any): Target entity evaluation candidate.
 
         Returns:
-            bool: True if underlying byte buffers share structural properties matching internal benchmarks.
+            bool: ``True`` if both objects wrap the identical in-memory bytearray.
         """
         return isinstance(obj, JMemFiles) and obj.KEY_file == self.KEY_file
 
     def get_KEY(self) -> str:
-        """Identify primary core index data file designation token label.
+        """Get the primary identifier tag for this memory instance.
 
         Returns:
-            str: Always returns volatile code placeholder string starting with `<MEM`.
+            str: A placeholder string starting with ``<MEM``.
         """
         return f'<MEM.{self.name}>' if self.name else '<MEM>'
 
     def get_folder(self) -> str: # pragma: no cover
-        """Identify parent directory folder configuration profiles.
+        """Get the parent directory path.
 
         Returns:
-            str: Empty string as records exist unbound to storage folders trees nodes paths.
+            str: Always an empty string ``''`` in transient memory environments.
         """
         return ''
 
     def get_name(self) -> str:
-        """Identify tracking label signature mapping active address descriptors metrics.
+        """Get the descriptive file signature.
 
         Returns:
-            str: Descriptive placeholder tracking internal identity index tags text.
+            str: The memory signature string including the memory address.
         """
         return f'{self.get_KEY()}@{hex(id(self.KEY_file))}'
 
     def get_path(self, folder:str='') -> str:
-        """Retrieve complete directory locations tracking variables mappings on local sheets layers.
+        """Resolve the path mapping for the file.
 
         Args:
-            folder (str, optional): Context configuration placeholder. Defaults to ''.
+            folder (str, optional): Target layer customization. Defaults to ``''``.
 
         Returns:
-            str: Empty string because pathing rules are absent inside transient environments.
+            str: Always an empty string ``''`` in transient memory environments.
         """
         return ''
 
     def copy(self) -> JMemFiles:
-        """Clone driver parameters tracking transient state objects reference points maps structures.
+        """Create a duplicate instance referencing the same memory buffers.
 
         Returns:
-            JMemFiles: Replicated virtual storage management context instance.
+            JMemFiles: A replicated virtual storage controller.
         """
         return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name)
 
     def fsync(self, fd:int) -> None: # pragma: no cover
-        """Force write of fd to disk.
-        
+        """Mock file synchronization. Does nothing in memory mode.
+
         Args:
-            fd(int): Target fd
+            fd (int): Target file descriptor.
         """
         if fd >= 0:
             try:
@@ -710,40 +731,40 @@ class JMemFiles(JFilesBase):
                 print(fd, e)
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
-        """Validate if specified layout keys resolve fine within volatile partition contexts criteria blocks.
+        """Validate if the layout keys resolve to a volatile partition context.
 
         Args:
-            KEY_file (Union[str,JFilesBase]): Allocation identifier tracking targeted structural maps files context.
-            name (str): Label matching targeted workspace cluster boundaries text.
+            KEY_file (str | JFilesBase): Allocation identifier.
+            name (str): Label matching targeted group boundaries.
 
         Returns:
-            bool: True if key equals default runtime constraints string constants.
+            bool: ``True`` if the target is a memory group.
         """
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file.startswith('<MEM.') and KEY_file[-1] == '>'
 
     def create_group(self, name:str) -> JMemFiles:
-        """Spawn virtual child dataset storage segments maps bound inside transient scopes spaces rules profiles.
+        """Create a child dataset partition in memory.
 
         Args:
-            name (str): Partition context identity token string classification label.
+            name (str): The cluster group name.
 
         Returns:
-            JMemFiles: Empty virtual memory storage manager workspace pipeline handle.
+            JMemFiles: A new empty memory storage manager.
         """
         return JMemFiles(name=f'{self.name}.{name}' if self.name else name)
 
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO:
-        """Initialize in-memory file interface wrappers matching chosen virtual row content segments parts blocks.
+        """Initialize an in-memory file stream for a specific value block.
 
         Args:
-            file_id (int, optional): Segment index number code identifying target partition layer maps. Defaults to 0.
-            mode (str, optional): Functional access configurations rule mapping. Defaults to 'rb'.
-            buffering (int, optional): Buffer allocation value mapping variables configuration context rules metrics. Defaults to 0.
-            **kwargs: Extra attributes ignored by virtual ram streaming controllers.
+            file_id (int, optional): The ID of the partition to open. Defaults to 0.
+            mode (str, optional): Access mode (e.g., ``'rb'``). Defaults to ``'rb'``.
+            buffering (int, optional): Ignored for memory arrays. Defaults to 0.
+            **kwargs: Extra parameters (ignored).
 
         Returns:
-            IO: Memory streaming wrapper instance handling reading and writing against specific array tracks directly.
+            IO: A :class:`JBytesIO` wrapper for reading and writing memory arrays.
         """
         VAL_file = self.VAL_table.get(file_id, None)
         if VAL_file is None:
@@ -752,13 +773,13 @@ class JMemFiles(JFilesBase):
         return JBytesIO(VAL_file)
 
     def VAL_remove(self, file_id:int=0) -> bool:
-        """Clear memory array elements unlinking selected partition byte targets completely from table maps registries.
+        """Clear memory array elements unlinking selected partitions.
 
         Args:
-            file_id (int, optional): Targeted partition tracker layer identification number code index value. Defaults to 0.
+            file_id (int, optional): The ID of the partition to delete. Defaults to 0.
 
         Returns:
-            bool: True if cleanup execution maps confirm structural clearance, False otherwise.
+            bool: ``True`` if successfully cleared, ``False`` if not found.
         """
         buffer = self.VAL_table.pop(file_id, None)
         if buffer is not None:
@@ -768,42 +789,42 @@ class JMemFiles(JFilesBase):
         return False
 
     def VAL_exist(self, file_id:int=0) -> bool:
-        """Check if designated database file segment partition layers maps are allocated inside registries records.
+        """Check if a specific segment block exists in memory.
 
         Args:
-            file_id (int, optional): Core partition code tracker integer. Defaults to 0.
+            file_id (int, optional): The partition ID. Defaults to 0.
 
         Returns:
-            bool: True if active tracks map onto valid storage arrays targets blocks.
+            bool: ``True`` if the byte block exists.
         """
         buffer = self.VAL_table.get(file_id, None)
         return buffer is not None
 
     def VAL_size(self, file_id:int=0) -> int:
-        """Calculate the VAL file size
+        """Calculate the size of a specific in-memory partition block.
 
         Args:
-            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+            file_id (int, optional): The partition ID. Defaults to 0.
         
         Returns:
-            int: +ve = file size in byte, -ve = not exist
+            int: The size in bytes, or ``-1`` if the block does not exist.
         """
         buffer = self.VAL_table.get(file_id, None)
         return -1 if buffer is None else len(buffer)
 
     def KEY_open(self, mode:str='rb', buffering:int=-1, **kwargs) -> IO:
-        """Open raw stream tracking descriptors mapping transient core index allocations.
+        """Open a raw stream tracking the primary key index in memory.
 
         Args:
-            mode (str, optional): Verification operation profiles specification token code text. Defaults to 'rb'.
-            buffering (int, optional): Buffer parameters sizing constraints markers variables values. Defaults to -1.
-            **kwargs: Extra execution runtime attributes.
+            mode (str, optional): Operation modes (e.g., ``'rb'``). Defaults to ``'rb'``.
+            buffering (int, optional): Ignored. Defaults to -1.
+            **kwargs: Extra attributes.
 
         Returns:
-            IO: Virtual stream handler managing read/write changes onto master key index tables sheets fields.
+            IO: Virtual stream handler managing the master key bytearray.
 
         Raises:
-            FileNotFoundError: If read modes strike completely unallocated data sheets contexts structures.
+            FileNotFoundError: If reading is attempted on an uninitialized context.
         """
         if not self.KEY_file and mode.startswith('r'):
             raise FileNotFoundError
@@ -811,29 +832,33 @@ class JMemFiles(JFilesBase):
         return JBytesIO(self.KEY_file)
 
     def KEY_size(self) -> int:
-        """Calculate total index structural tracking sheets array width byte parameters.
+        """Calculate the total size of the key index buffer.
 
         Returns:
-            int: Number of elements currently tracking allocations size across local bytearray rows blocks.
+            int: The number of bytes tracking the main index.
         """
         return len(self.KEY_file)
 
     def KEY_date(self) -> int:
-        """Extract recorded simulation unix timestamps logged during core initialization setup events timelines.
+        """Get the UNIX timestamp of the memory instance creation.
 
         Returns:
-            int: Integer timestamp code indicating active version session baseline creation moments tracks.
+            int: The integer timestamp.
         """
         return int(self.timestamp)
 
     def LCK_rlock(self, block:bool=False):
-        """Acquire volatile thread shared reader locks blocking writers but encouraging parallel reader paths.
+        """Acquire a shared reader lock for the memory instance.
+
+        Allows multiple threads to read concurrently while blocking write threads.
 
         Args:
-            block (bool): True = blocking mode, False = non-blocking mode
+            block (bool, optional): If ``True``, wait until the lock is available. 
+                If ``False``, raise immediately if a writer is active. Defaults to ``False``.
 
         Raises:
-            BlockingIOError: If an exclusive write session lock context is currently active under another execution context thread.
+            BlockingIOError: If an exclusive write lock is held by another thread.
+            RuntimeError: If the lock file has been marked as closed/removed.
         """
         current_id = id(self)
         with self.lock:
@@ -855,13 +880,17 @@ class JMemFiles(JFilesBase):
             raise RuntimeError(f'closed {LCK_file}')
 
     def LCK_wlock(self, block:bool=False):
-        """Acquire volatile transaction exclusive writer barriers freezing alternative threads operations execution metrics.
+        """Acquire an exclusive writer lock for the memory instance.
+
+        Prevents other threads from reading or writing while held.
 
         Args:
-            block (bool): True = blocking mode, False = non-blocking mode
+            block (bool, optional): If ``True``, wait until the lock is available. 
+                If ``False``, raise immediately. Defaults to ``False``.
     
         Raises:
-            BlockingIOError: If existing active transaction records indicate reading or writing overlapping activities.
+            BlockingIOError: If active transaction records indicate overlapping activities.
+            RuntimeError: If the lock file has been marked as closed/removed.
         """
         current_id = id(self)
         with self.lock:
@@ -889,7 +918,7 @@ class JMemFiles(JFilesBase):
             raise RuntimeError(f'closed {LCK_file}')
 
     def LCK_unlock(self):
-        """Release session concurrency tracking markers yielding resource block access rules control indicators back to pools."""
+        """Release session concurrency locks, returning access control to the pool."""
         current_id = id(self)
         with self.lock:
             LCK_file = self.LCK_file
@@ -906,11 +935,11 @@ class JMemFiles(JFilesBase):
             self.cond.notify_all()
 
     def LCK_close(self): # pragma: no cover
-        """Placeholder system stream shutdown routine tracking pipeline variables preservation parameters limits."""
+        """Placeholder system stream shutdown routine. Does nothing in memory mode."""
         return
 
     def LCK_remove(self): # pragma: no cover
-        """Reset virtual concurrency tracker values initializing lock bytes matrices structures layers directly back to zero values."""
+        """Reset concurrency tracker values, clearing the lock bytes structure."""
         with self.lock:
             LCK_file = self.LCK_file
             LCK_file[-1] = True # set remove flag
@@ -925,21 +954,22 @@ class JMemFiles(JFilesBase):
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 class JDiskFiles(JFilesBase):
-    """Production file-system storage driver implementing physical disk storage for database operations blocks.
+    """Production file-system storage driver implementing physical disk storage.
 
-    Translates logical indexing layers properties straight into file nodes segments maps paths allocations on local storage media.
+    Maps database operations and logical indexing directly to file nodes and 
+    segments on the local storage media.
     """
     __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file')
 
     def __init__(self, KEY_file:str):
-        """Initialize and configure a database management context pointing toward real storage resources anchors.
+        """Initialize a database management context pointing to real disk storage.
 
         Args:
-            KEY_file (str): Full target system text string path locating primary database data elements indexes sheets.
+            KEY_file (str): The absolute or relative file path locating the primary database index.
 
         Raises:
-            TypeError: If incoming workspace path context breaks standard text string verification.
-            ValueError: If string configuration evaluation checks resolve completely white-spaced or empty.
+            TypeError: If ``KEY_file`` is not a string.
+            ValueError: If ``KEY_file`` is empty or entirely whitespace.
         """
         if not isinstance(KEY_file, str):
             raise TypeError
@@ -967,56 +997,56 @@ class JDiskFiles(JFilesBase):
                             (KEY_file + '+{group_key}')
 
     def __repr__(self) -> str:
-        """Generate string descriptions summarizing primary driver tracking configurations metrics.
+        """Generate string descriptions summarizing the active driver configuration.
 
         Returns:
-            str: Identity properties tracking presentation text layout details.
+            str: Identity properties presenting the target file layout.
         """
         return f'<{type(self).__name__} KEY:{self.file_name} at {hex(id(self))}>'
 
     def __eq__(self, obj) -> bool:
-        """Evaluate structural file layout identity alignment properties across active instances paths registrations.
+        """Evaluate if two disk drivers point to the same physical file.
 
         Args:
-            obj (Any): Candidate comparison storage manager instance selector entity.
+            obj (Any): Candidate comparison storage manager instance.
 
         Returns:
-            bool: True if path coordinates variables precisely match absolute path strings values targets rules.
+            bool: ``True`` if path coordinates precisely match.
         """
         return isinstance(obj, JDiskFiles) and obj.KEY_file == self.KEY_file
 
     def get_KEY(self) -> str:
-        """Extract the exact physical workspace entry address matching core key index arrays layout files path.
+        """Extract the exact physical path to the core key index file.
 
         Returns:
-            str: System descriptor string path string.
+            str: The system descriptor path string.
         """
         return self.KEY_file
 
     def get_folder(self) -> str: # pragma: no cover
-        """Extract the absolute workspace parent directory path reference.
+        """Extract the absolute workspace parent directory path.
 
         Returns:
-            str: Target directory tree path string.
+            str: The target directory path.
         """
         return self.dir_name
 
     def get_name(self) -> str:
-        """Extract isolated structural primary dataset filename reference string token text descriptor.
+        """Extract the specific filename of the database.
 
         Returns:
-            str: File identity element code text name label.
+            str: The base filename string.
         """
         return self.file_name
 
     def get_path(self, folder:str='') -> str:
-        """Assemble accurate physical storage descriptors target addresses locating file system tree nodes.
+        """Assemble the absolute path locating the database file.
 
         Args:
-            folder (str, optional): Target layer customization subdirectory constraint code string. Defaults to ''.
+            folder (str, optional): An optional subdirectory to append. Defaults to ``''``.
 
         Returns:
-            str: Absolute resolved system system node path string.
+            str: The resolved absolute system path.
         """
         if folder == '':
             return self.KEY_file
@@ -1024,18 +1054,18 @@ class JDiskFiles(JFilesBase):
         return path_join(self.dir_name, folder, self.file_name)
 
     def copy(self) -> JDiskFiles:
-        """Construct an absolute replica workspace instance referencing identical target files system storage parameters.
+        """Create a duplicate driver instance pointing to the exact same file target.
 
         Returns:
-            JDiskFiles: Duplicate disk space storage driver context interface controller.
+            JDiskFiles: Duplicate disk space storage driver context.
         """
         return JDiskFiles(self.KEY_file)
 
     def fsync(self, fd:int) -> None:
-        """Force write of fd to disk.
+        """Force the operating system to flush internal buffers to the physical disk.
         
         Args:
-            fd(int): Target fd
+            fd (int): Target open file descriptor.
         """
         if fd >= 0:
             try:
@@ -1044,44 +1074,44 @@ class JDiskFiles(JFilesBase):
                 print(fd, e)
 
     def is_group(self, KEY_file:Union[str, JFilesBase], name:str) -> bool:
-        """Cross-verify group naming schema structures ensuring correct cluster namespace allocations alignments.
+        """Cross-verify group naming structures ensuring correct namespace allocations.
 
         Args:
-            KEY_file (Union[str,JFilesBase]): Absolute file node layout address indicator parameter string path.
-            name (str): Selector token text descriptor matching target group workspace boundaries tags context fields.
+            KEY_file (str | JFilesBase): The file node indicator path.
+            name (str): Label matching targeted group workspace boundaries.
 
         Returns:
-            bool: True if criteria tests locate matching layouts configuration blueprints rules.
+            bool: ``True`` if criteria tests locate matching configurations.
         """
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file.startswith('<MEM.') or KEY_file == self.group_KEY_file.format(group_key=name)
 
     def create_group(self, name:str) -> JDiskFiles:
-        """Assemble an isolated disk space subdirectory tree driver instance configured for a specific partition domain cluster.
+        """Assemble an isolated disk subdirectory tree configured for a partition group.
 
         Args:
-            name (str): Cluster classification identity label parameter key code text format layout selector.
+            name (str): Cluster classification identity label.
 
         Returns:
-            JDiskFiles: Dedicated subfolder disk system management component profile framework instance handle.
+            JDiskFiles: Dedicated subfolder disk management framework instance.
         """
         return JDiskFiles(self.group_KEY_file.format(group_key=name))
 
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, encoding:Optional[str]=None, **kwargs) -> IO:
-        """Open streaming data lines interfaces channels pointing straight into physical contents segments blocks partitions files.
+        """Open a standard file stream for a specific value partition (VAL file).
 
         Args:
-            file_id (int, optional): Data slot track segmentation integer index number value selector code. Defaults to 0.
-            mode (str, optional): Open operational access parameters strategy indicator string code. Defaults to 'rb'.
-            buffering (int, optional): Operational pipeline stream array buffering system density constraints width. Defaults to 0.
-            encoding (Optional[str], optional): String serialization processing algorithm format specifications token context. Defaults to None.
-            **kwargs: Extra parameters passed down seamlessly onto native filesystem initialization routines frameworks.
+            file_id (int, optional): The ID of the partition file to open. Defaults to 0.
+            mode (str, optional): The file access mode (e.g., ``'rb'``, ``'ab'``). Defaults to ``'rb'``.
+            buffering (int, optional): Buffer size policy. Defaults to 0.
+            encoding (str, optional): Character encoding (only applies to text modes). Defaults to ``None``.
+            **kwargs: Extra parameters passed to the native Python ``open()``.
 
         Returns:
-            IO: Open system stream file object interface pointing toward the designated storage blocks data file slot.
+            IO: An open file object pointing to the specific storage block file.
 
         Raises:
-            FileNotFoundError: If reading modes encounter absent resource targets entries paths on disk.
+            FileNotFoundError: If a read mode targets a non-existent file segment.
         """
         path = self.VAL_file.format(file_id=file_id)
         try:
@@ -1093,13 +1123,13 @@ class JDiskFiles(JFilesBase):
             raise
 
     def VAL_remove(self, file_id:int=0) -> bool:
-        """Unlink physical storage contents chunk segment partition files data nodes cleanly from file system layers.
+        """Delete a physical value partition file from the file system.
 
         Args:
-            file_id (int, optional): Targeted contents partition reference number code selection index. Defaults to 0.
+            file_id (int, optional): Targeted contents partition index. Defaults to 0.
 
         Returns:
-            bool: True if data file node unlinking process completes without error, False otherwise.
+            bool: ``True`` if the node is successfully unlinked, ``False`` otherwise.
         """
         path = self.VAL_file.format(file_id=file_id)
         if path_exists(path):
@@ -1114,25 +1144,25 @@ class JDiskFiles(JFilesBase):
         return False
 
     def VAL_exist(self, file_id:int=0) -> bool:
-        """Validate if specified layout row blocks sections items exist inside physical disk tracks boundaries.
+        """Validate if a specified value partition file exists on the physical disk.
 
         Args:
-            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+            file_id (int, optional): Partition locator code integer. Defaults to 0.
 
         Returns:
-            bool: True if targeted files system location check tests discover live resources records, False otherwise.
+            bool: ``True`` if the file exists on the system.
         """
         path = self.VAL_file.format(file_id=file_id)
         return path_exists(path)
 
     def VAL_size(self, file_id:int=0) -> int:
-        """Calculate the VAL file size
+        """Calculate the size of the specific VAL file.
 
         Args:
-            file_id (int, optional): Classification partition track locator code integer number index. Defaults to 0.
+            file_id (int, optional): Partition locator code integer. Defaults to 0.
 
         Returns:
-            int: +ve = file size in byte, -ve = not exist
+            int: The size in bytes, or ``-1`` if the file does not exist.
         """
         path = self.VAL_file.format(file_id=file_id)
         if path_exists(path):
@@ -1142,19 +1172,19 @@ class JDiskFiles(JFilesBase):
         return -1
 
     def KEY_open(self, mode:str='rb', buffering:int=-1, encoding:Optional[str]=None, **kwargs) -> IO:
-        """Acquire persistent transactional stream pointers connected straight onto the core master index database keys sheets files records.
+        """Acquire persistent transactional stream pointers connected to the core index file.
 
         Args:
-            mode (str, optional): Target operational mode rules specification string descriptor layout context text. Defaults to 'rb'.
-            buffering (int, optional): Local input output operational array sizing parameters buffers limits boundaries. Defaults to -1.
-            encoding (Optional[str], optional): Explicit character translation blueprint configuration code rules. Defaults to None.
-            **kwargs: Extra arguments passed down directly to storage management engines layers wrappers factories.
+            mode (str, optional): Target operational mode (e.g., ``'rb'``). Defaults to ``'rb'``.
+            buffering (int, optional): IO array sizing buffer limits. Defaults to -1.
+            encoding (str, optional): Explicit character translation rules. Defaults to ``None``.
+            **kwargs: Extra arguments passed down directly to native Python ``open()``.
 
         Returns:
-            IO: Active file descriptor stream interface binding data operations directly to primary dataset structural maps indexes tracks.
+            IO: Active file stream connecting directly to the index dataset.
 
         Raises:
-            FileNotFoundError: If lookups fail encountering missing system sheets targets across specified execution tracks parameters paths.
+            FileNotFoundError: If a lookup fails encountering missing files across specified paths.
         """
         try:
             return open(self.KEY_file, mode=mode, buffering=buffering, encoding=encoding, **kwargs)
@@ -1165,10 +1195,10 @@ class JDiskFiles(JFilesBase):
             raise
 
     def KEY_size(self) -> int:
-        """Measure current overall real byte allocations size metrics reporting primary database index index file stats.
+        """Extract baseline UNIX timestamp marking index file creation/modification.
 
         Returns:
-            int: Structural layout allocation tracking measures integer representing file width size parameters.
+            int: The integer timestamp log from the file system metadata.
         """
         if path_exists(self.KEY_file):
             file_stat = os_stat(self.KEY_file)
@@ -1189,39 +1219,41 @@ class JDiskFiles(JFilesBase):
         return 0
 
     def LCK_rlock(self, block:bool=False):
-        """Request and secure a platform-safe shared reader lock on file layer blocking writers but enabling read parallelism features.
+        """Secure a platform-safe shared reader lock blocking writers but enabling read parallelism.
 
         Args:
-            block (bool): True = blocking mode, False = non-blocking mode
+            block (bool, optional): If ``True``, block until the lock becomes available. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
     
         Raises:
-            BlockingIOError: If existing active transaction records indicate reading or writing overlapping activities.
+            BlockingIOError: If an exclusive writer is currently active.
         """
         self.LCK_fp = file_rlock(self.LCK_fp, self.LCK_file, block=block)
 
     def LCK_wlock(self, block:bool=False):
-        """Request and secure a platform-safe exclusive write barrier lock blocking parallel transactions modifications across execution boundaries threads.
+        """Secure a platform-safe exclusive write barrier lock blocking parallel transactions.
 
         Args:
-            block (bool): True = blocking mode, False = non-blocking mode
+            block (bool, optional): If ``True``, block until the lock becomes available. 
+                If ``False``, attempt non-blocking mode. Defaults to ``False``.
     
         Raises:
-            BlockingIOError: If existing active transaction records indicate reading or writing overlapping activities.
+            BlockingIOError: If existing active transactions (readers or writers) overlap.
         """
         self.LCK_fp = file_wlock(self.LCK_fp, self.LCK_file, block=block)
 
     def LCK_unlock(self):
-        """Relinquish secured filesystem concurrency lock structures allowing outstanding queue entities processing paths access permissions."""
+        """Relinquish secured filesystem concurrency locks."""
         if self.LCK_fp is not None:
             file_unlock(self.LCK_fp)
             self.LCK_fp = None
 
     def LCK_close(self): # pragma: no cover
-        """Disengage background isolation primitives handlers streams closing file locks safely avoiding resource starvation profile leaks."""
+        """Disengage isolation streams and safely close the lock file descriptor."""
         self.LCK_unlock()
 
     def LCK_remove(self): # pragma: no cover
-        """Purge system lock indicators files physically from disk storage pools completely erasing active synchronization markers tracks."""
+        """Purge system lock indicators physically from disk storage."""
         self.LCK_close()
         try:
             os_remove(self.LCK_file)

@@ -3758,12 +3758,42 @@ class TestJDb(unittest.TestCase):
             ret = jdb[float(sync_id):]
             self.assertEqual(ret, expect2)
 
+            jdb[expect2] = 0
+            try:
+                _fp1 = jdb.f_open(read_only=False)
+                try:
+                    fp2 = jdb.f_open(read_only=False)
+                    for key,val in expect2.items():
+                        jdb.f_write(fp2, key, val)
+                finally:
+                    jdb.f_close()
+                    fp2 = None
+            finally:
+                jdb.f_close()
+                fp2 = None
+            self.assertEqual(jdb[expect2], expect2)
+
+            jdb[expect2] = 1
+            try:
+                _fp1 = jdb.f_open(read_only=False)
+                try:
+                    fp2 = jdb.f_open(read_only=True)
+                    for key,val in expect2.items():
+                        jdb.f_write(fp2, key, val)
+                finally:
+                    jdb.f_close()
+                    fp2 = None
+            finally:
+                jdb.f_close()
+                fp2 = None
+            self.assertEqual(jdb[expect2], expect2)
+
+            jdb[expect2] = 2
             with jdb.open(read_only=False) as fp:
                 for key,val in expect2.items():
                     jdb.f_write(fp, key, val)
 
-            ret = jdb[float(sync_id):]
-            self.assertEqual(ret, expect2)
+            self.assertEqual(jdb[expect2], expect2)
 
             chg = {}
             with jdb.open() as fp:
@@ -3953,6 +3983,7 @@ class TestJDb(unittest.TestCase):
 
             matches = jdb2[::Key.endswith(('2', '3'))]
             self.assertGreaterEqual(len(matches), 2)
+
             del jdb2[::Key.endswith(('2', '3'))]
             matches = jdb2[::Key.endswith(('2', '3'))]
             self.assertEqual(len(matches), 0)
@@ -5196,6 +5227,10 @@ class TestJDb(unittest.TestCase):
             matches = dict(jdb.item_iter(-1))
             self.assertEqual(jdb[keys], matches)
 
+            matches_2 = dict(jdb.item_iter(Query().語言.has('意大利文')))
+            if keys == '意大利':
+                self.assertEqual(matches, matches_2)
+
             keys = jdb.keys[0.]
             matches = dict(jdb.item_iter(0.))
             self.assertEqual(jdb[keys], matches)
@@ -5676,6 +5711,7 @@ class TestJDb(unittest.TestCase):
                 jdb.key_table.clear()
                 row_id = jdb.key_table.pop('xxxx1', -1)
                 self.assertEqual(row_id, -1)
+                jdb.key_table.clear()
                 row_id = jdb.key_table.pop('xxx1', -1)
                 self.assertEqual(row_id, 1)
                 with self.assertRaises(KeyError):
@@ -6888,6 +6924,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(info2[-2], str(today))
             info3 = dict(jdb.keys.item_iter('kk3'))
             self.assertEqual(info2, info3.get('kk3',None))
+            info4 = dict(jdb.keys.item_iter(Query()._id == 'kk3'))
+            self.assertEqual(info3, info4)
             for key,val in jdb1.keys.item_iter(slice(None)):
                 self.assertEqual(jdb.keys[key], val)
 

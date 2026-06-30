@@ -88,15 +88,55 @@ QUERY_OPS = {
 
 @lru_cache(maxsize=256)
 def _compile_rule(rule:str, flags:int=0) -> Pattern:
+    """Compile and cache a regular expression pattern.
+
+    Args:
+        rule (str): The regular expression string to compile.
+        flags (int, optional): Regex flags (e.g., ``re.IGNORECASE``). Defaults to 0.
+
+    Returns:
+        re.Pattern: The compiled regular expression object.
+    """
     return re_compile(rule, flags=flags)
 
 @lru_cache(maxsize=256)
 def _compile_path_glob(pattern: str) -> Pattern:
-    """Compile and cache a glob path pattern to regex."""
+    """Compile and cache a glob-style path pattern into a regular expression.
+
+    Converts single-character wildcards (``?``) to regex dots (``.``) and 
+    standardises greedy asterisks (``*``) for dictionary key matching.
+
+    Args:
+        pattern (str): The glob pattern string (e.g., ``'addr*'`` or ``'*c?ty'``).
+
+    Returns:
+        re.Pattern: The compiled regular expression object for exact path matching.
+    """
     return re_compile(f'^{PATH_RE_sub(".*", pattern.replace("?", "."))}$')
 
 @lru_cache(maxsize=256)
 def _lower_cmd(cmd:str) -> Tuple[bool,bool,str]:
+    """Parse a command string to identify operator flags and negation.
+
+    Determines if the command is negated (starts with ``!``) and if it is 
+    a built-in operator (starts with ``$``). Automatically lowercases the 
+    operator name for standardized evaluation.
+
+    Args:
+        cmd (str): The command key to evaluate (e.g., ``'$gt'``, ``'!$eq'``, ``'name'``).
+
+    Returns:
+        Tuple[bool, bool, str]: A tuple containing:
+            * ``reverse_it`` (bool): ``True`` if the command starts with ``!``.
+            * ``is_cmd`` (bool): ``True`` if the string indicates an operator (starts with ``$``).
+            * ``cmd_string`` (str): The parsed, lowercased command string (or original key).
+
+    Example:
+        >>> _lower_cmd('!$EQ')
+        (True, True, '$eq')
+        >>> _lower_cmd('username')
+        (False, False, 'username')
+    """
     reverse_it = cmd.startswith('!')
     cmd = cmd[1:] if reverse_it else cmd
     if cmd and cmd[0] == '$':
@@ -108,121 +148,204 @@ def _lower_cmd(cmd:str) -> Tuple[bool,bool,str]:
 _CONDITION_DEFAULTS = {'$and': [], '$or': [], '$not': {}}
 
 class Condition(dict):
+    """Represents a logical query condition, inheriting from ``dict``.
+
+    Provides overloaded bitwise operators to easily combine multiple query 
+    conditions using MongoDB-style logical operators (``$and``, ``$or``, ``$not``).
+    """
+
     __slots__ = ()
 
     def copy(self) -> Condition:
+        """Create a shallow copy of the Condition.
+
+        Returns:
+            Condition: A new Condition instance with identical key-value pairs.
+        """
         return Condition(super().copy())
 
     def __missing__(self, key:str) -> None: # pragma: no cover
+        """Handle missing keys by providing default empty structures for logical operators.
+
+        Args:
+            key (str): The requested dictionary key.
+
+        Returns:
+            Any: ``[]`` for ``$and``/``$or``, or ``{}`` for ``$not``.
+
+        Raises:
+            KeyError: If the key is not a recognized logical operator.
+        """
         if key in _CONDITION_DEFAULTS:
             return _CONDITION_DEFAULTS[key]
         raise KeyError(key)
 
     def __and__(self, other:Condition) -> Condition:
+        """Combine two conditions using the logical AND (``&``) operator.
+
+        Args:
+            other (Condition): The condition to combine with the current one.
+
+        Returns:
+            Condition: A new Condition wrapped in an ``$and`` operator array.
+        """
         left  = self['$and']  if '$and' in self and len(self) == 1 else [dict(self)]
         right = other['$and'] if '$and' in other and len(other) == 1 else [dict(other)]
         return Condition({'$and': left + right})
 
     def __or__(self, other:Condition) -> Condition:
+        """Combine two conditions using the logical OR (``|``) operator.
+
+        Args:
+            other (Condition): The condition to combine with the current one.
+
+        Returns:
+            Condition: A new Condition wrapped in an ``$or`` operator array.
+        """
         left  = self['$or']  if '$or' in self  and len(self) == 1 else [dict(self)]
         right = other['$or'] if '$or' in other and len(other) == 1 else [dict(other)]
         return Condition({'$or': left + right})
 
     def __invert__(self) -> Condition:
+        """Negate the current condition using the logical NOT (``~``) operator.
+
+        Returns:
+            Condition: A new Condition wrapped in a ``$not`` operator dictionary.
+        """
         return Condition({'$not': dict(self)})
 
     def __repr__(self) -> str:
         return f'Condition({dict.__repr__(self)})'
 
 class Query:
+    """A builder class for constructing MongoDB-style query dictionaries safely.
+
+    Provides a fluent, Pythonic interface to generate query filters using 
+    magic methods (``==``, ``>``) and chained method calls.
+
+    Args:
+        _path (str, optional): The initial path segment for the query. Defaults to ``''``.
+
+    Example:
+        >>> q = Query()
+        >>> condition = (q.age > 18) & (q.name.startswith("Al"))
+        >>> print(condition)
+        Condition({'$and': [{'age': {'$gt': 18}}, {'name': {'$sw': 'Al'}}]})
+    """
     __slots__ = ('_path', )
 
     def __init__(self, _path:str = ''):
         object.__setattr__(self, '_path', _path)
 
     def __getattr__(self, name:str) -> Query:
+        """Extend the query path using attribute access (e.g., ``q.user.name``)."""
         path = self._path
         return Query(f'{path}.{name}' if path else name)
 
     def __getitem__(self, segment:Any) -> Query:
+        """Extend the query path using item access (e.g., ``q['user']['name']``)."""
         path = self._path
         seg  = str(segment)
         return Query(f'{path}.{seg}' if path else seg)
 
     def _cond(self, op:str, val:Any) -> Condition:
+        """Internal helper to construct a Condition dictionary for a specific operator."""
         path = self._path
         return Condition({path: {op: val}} if path else {op: val})
 
     def __eq__(self, val:Any) -> Condition:
+        """Build an equality condition (``==``)."""
         path = self._path
         return Condition({path: val} if path else {}) if path else NotImplemented
 
     def __ne__(self, val:Any) -> Condition:
+        """Build a not-equal condition (``!=``). Maps to ``$ne``."""
         return self._cond('$ne', val)
 
     def __gt__(self, val:Any) -> Condition:
+        """Build a greater-than condition (``>``). Maps to ``$gt``."""
         return self._cond('$gt', val)
 
     def __ge__(self, val:Any) -> Condition:
+        """Build a greater-than-or-equal condition (``>=``). Maps to ``$gte``."""
         return self._cond('$gte', val)
 
     def __lt__(self, val:Any) -> Condition:
+        """Build a less-than condition (``<``). Maps to ``$lt``."""
         return self._cond('$lt', val)
 
     def __le__(self, val:Any) -> Condition:
+        """Build a less-than-or-equal condition (``<=``). Maps to ``$lte``."""
         return self._cond('$lte', val)
 
     def has(self, val:Union[str,tuple]) -> Condition:
+        """Check if the target string or collection contains the value. Maps to ``$has``."""
         return self._cond('$has', val)
 
     def ihas(self, val:Union[str,tuple]) -> Condition:
+        """Check if the target string contains the value (case-insensitive). Maps to ``$ihas``."""
         return self._cond('$ihas', val)
 
     def not_has(self, val:Union[str,tuple]) -> Condition:
+        """Check if the target string or collection does *not* contain the value. Maps to ``$nhas``."""
         return self._cond('$nhas', val)
 
     def startswith(self, prefix:Union[str,tuple]) -> Condition:
+        """Check if the target string starts with the given prefix. Maps to ``$sw``."""
         return self._cond('$sw', prefix)
 
     def endswith(self, suffix:Union[str,tuple]) -> Condition:
+        """Check if the target string ends with the given suffix. Maps to ``$ew``."""
         return self._cond('$ew', suffix)
 
     def between(self, lo:Union[str,int,float], hi:Union[str,int,float]) -> Condition:
+        """Check if the target value falls strictly between two bounds. Maps to ``$between``."""
         return self._cond('$between', (lo, hi))
 
     def near(self, target:Union[int,float], tol:Union[int,float]) -> Condition:
+        """Check if the target value is within a specified tolerance of a number. Maps to ``$near``."""
         return self._cond('$near', (target, tol))
 
     def mod(self, div:Union[int,float], rem:Union[int,float]) -> Condition:
+        """Check if the target value divided by ``div`` leaves a remainder of ``rem``. Maps to ``$mod``."""
         return self._cond('$mod', (div, rem))
 
     def size_of(self, size:Union[int,Tuple[int]]) -> Condition:
+        """Check if the length of the target collection matches the given size. Maps to ``$size``."""
         return self._cond('$size', size)
 
     def exists(self, fields:Union[Any,Tuple[Any]]) -> Condition:
+        """Check if the specified keys/fields exist in the target dictionary. Maps to ``$exists``."""
         return self._cond('$exists', fields)
 
     def type_of(self, _type:str) -> Condition:
+        """Check if the target value matches a specific data type. Maps to ``$type``."""
         return self._cond('$type', _type)
 
     def any_in(self, col:Union[tuple,list,set]) -> Condition:
+        """Check if *any* element of the target iterable exists within the provided collection. Maps to ``$anyin``."""
         return self._cond('$anyin', col)
 
     def matches(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
+        """Check if the target string contains a regex pattern match. Maps to ``$re``."""
         rx = _compile_rule(pattern, flags) if isinstance(pattern, str) else pattern
         return self._cond('$re', rx)
 
     def fullmatch(self, pattern:Union[str,Pattern], flags:int=0) -> Condition:
+        """Check if the target string perfectly matches a regex pattern. Maps to ``$match``."""
         rx = _compile_rule(pattern, flags) if isinstance(pattern, str) else pattern
         return self._cond('$match', rx)
 
     def test(self, func:Union[Callable[[Any],bool],Callable[[str,Any],bool]]) -> Condition:
+        """Evaluate the target using a custom callback function. Maps to ``$func``."""
         return self._cond('$func', func)
 
     def one_of(self, collection:Any) -> Condition:
+        """Check if the target value exists within the provided collection. Maps to ``$in``."""
         return self._cond('$in', collection)
 
     def not_in(self, collection:Any) -> Condition:
+        """Check if the target value does *not* exist within the provided collection. Maps to ``$nin``."""
         return self._cond('$nin', collection)
 
     def __repr__(self) -> str:
@@ -230,19 +353,21 @@ class Query:
 
 #-----------------------------------------------------------------------------
 def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
-    """
-    Evaluate if a KEY matches a given set of conditions or MongoDB-like operators.
+    """Evaluate whether a document key matches a specified set of rules or MongoDB-like operators.
 
-    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
-    `$has`, `$re`, `$re2`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
+    Supports various operations including comparative (``$gt``, ``$ge``, ``$lt``, ``$le``), 
+    equality (``$eq``, ``$ne``), inclusion (``$in``, ``$has``), regular expressions 
+    (``$re``, ``$re2``), custom functions (``$func``), string matching (``$sw``, ``$ew``), 
+    size constraints (``$size``), and logical operators (``$not``, ``$or``, ``$nor``, ``$and``).
 
     Args:
-        key (str): The key associated with the value being evaluated.
-        rules (Any): The dictionary of rules/operators or a direct match condition.
+        key (str): The string key to be evaluated.
+        rules (Any): A dictionary of operators mapping to their conditions, or a direct 
+            match condition (e.g., string, regex pattern, callable).
         level (int, optional): The current recursion depth. Defaults to 0.
     
     Returns:
-        bool: True if the value satisfies all specified rules, False otherwise.
+        bool: ``True`` if the key satisfies all specified rules, ``False`` otherwise.
 
     Example:
         >>> rules = {'$has': 'ob'}
@@ -376,10 +501,8 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
 
             elif cmd == '$func':
                 if callable(rule): # pragma: no cover
-                    arg_cnt = rule.__code__.co_argcount
                     try:
-                        if arg_cnt == 1:
-                            is_matched = (not rule(key)) if reverse_it else rule(key)
+                        is_matched = (not rule(key)) if reverse_it else rule(key)
                     except Exception as e: # pragma: no cover
                         print(e)
 
@@ -415,7 +538,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-        elif cmd == '_id':
+        elif cmd == '_id': # pragma: no cover
             is_matched = match_KEY_rules(key, rule, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
 
@@ -424,20 +547,22 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
     return True
 
 def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->bool:
-    """
-    Evaluate if a DATE matches a given set of conditions or MongoDB-like operators.
+    """Evaluate whether a document's creation or modification date matches a set of rules.
 
-    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
-    `$has`, `$re`, `$re2`, `$func`, `$not`, `$or`, `$nor` and `$and`.
+    Supports operations such as ``$gt``, ``$ge``, ``$lt``, ``$le``, ``$eq``, ``$ne``, 
+    ``$in``, ``$has``, ``$re``, ``$func``, logical grouping, and time-deltas. If `rules` 
+    is provided as an integer, it evaluates a date range relative to today (e.g., ``0`` for 
+    today, positive for future windows, negative for past windows).
 
     Args:
-        cdate (date): KEY created date
-        mdate (date): KEY modified date
-        rules (Any): The dictionary of rules/operators or a direct match condition.
+        cdate (datetime.date): The created date of the key/document.
+        mdate (datetime.date): The modified date of the key/document.
+        rules (Any): A dictionary of operators and their targets, a date object, 
+            an integer (representing a day offset from today), or a direct match condition.
         level (int, optional): The current recursion depth. Defaults to 0.
     
     Returns:
-        bool: True if the value satisfies all specified rules, False otherwise.
+        bool: ``True`` if the dates satisfy all specified rules, ``False`` otherwise.
 
     Example:
         >>> today = dt.date.today()
@@ -625,12 +750,10 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
 
             elif cmd == '$func':
                 if callable(rule):
-                    arg_cnt = rule.__code__.co_argcount
                     try:
-                        if arg_cnt == 2:
-                            is_matched = (not rule(cdate, mdate)) if reverse_it else rule(cdate, mdate)
-                    except: # pragma: no cover
-                        pass
+                        is_matched = (not rule(cdate, mdate)) if reverse_it else rule(cdate, mdate)
+                    except Exception as e: # pragma: no cover
+                        print(e)
 
             elif cmd == '$not':
                 is_matched = not match_DATE_rules(cdate, mdate, rule, level=level+1)
@@ -656,7 +779,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-        elif cmd == '_date':
+        elif cmd == '_date': # pragma: no cover
             is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
 
@@ -665,30 +788,37 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
     return True
 
 def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int=0, ANY:bool=False, ALL:bool=False) -> bool:
-    """
-    Evaluate if a value matches a given set of conditions or MongoDB-like operators.
+    """Evaluate whether a data value matches a set of rules or MongoDB-like operators.
 
-    Supports operations such as `$gt`, `$ge`, `$gte`, `$lt`, `$le`, `$lte`, `$eq`, `$ne`, `$in`, 
-    `$has`, `$re`, `$re2`, `$regex`, `$func`, `$size`, `$not`, `$or`, `$nor` and `$and`.
+    This function performs deep evaluation of values, supporting nested dictionaries, 
+    iterables, and path wildcards. It supports an extensive list of operators including 
+    comparisons (``$gt``, ``$gte``), array operators (``$any``, ``$all``, ``$none``, 
+    ``$size``, ``$anyin``), string queries (``$has``, ``$sw``, ``$re``), type checking 
+    (``$type``), existence (``$exists``), and complex logic (``$and``, ``$or``).
+
+    When applied to iterables (except strings/bytes) alongside ``ANY`` or ``ALL``, 
+    the evaluation recurses through the elements.
 
     Args:
         key (str): The key associated with the value being evaluated.
         val (Any): The actual data value to be checked.
-        rules (Any): The dictionary of rules/operators or a direct match condition.
-        cdate (date): KEY created date.
-        mdate (date): KEY modified date.        
+        rules (Any): A dictionary of evaluation rules/operators or a direct match condition.
+        cdate (datetime.date): The created date associated with the data.
+        mdate (datetime.date): The modified date associated with the data.        
         level (int, optional): The current recursion depth. Defaults to 0.
-        ANY (bool, optional): If True, checks if any element in an iterable value matches. Defaults to False.
-        ALL (bool, optional): If True, checks if all element in an iterable value matches. Defaults to False.
+        ANY (bool, optional): If ``True``, evaluates to ``True`` if *any* element in 
+            an iterable value matches the rules. Defaults to ``False``.
+        ALL (bool, optional): If ``True``, evaluates to ``True`` if *all* elements in 
+            an iterable value match the rules. Defaults to ``False``.
 
     Returns:
-        bool: True if the value satisfies all specified rules, False otherwise.
+        bool: ``True`` if the value satisfies all specified rules, ``False`` otherwise.
 
     Example:
         >>> rules = {'$gt': 10, '$lt': 20}
-        >>> match_VAL_rules("age", 15, rules)
+        >>> match_VAL_rules("age", 15, rules, cdate, mdate)
         True
-        >>> match_VAL_rules("name", "Alice", {"$re": r"Al.*"})
+        >>> match_VAL_rules("name", "Alice", {"$re": r"Al.*"}, cdate, mdate)
         True
     """
     is_dict = isinstance(val, dict)
@@ -894,17 +1024,13 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                         is_matched = (not is_matched) if reverse_it else is_matched
 
             elif cmd == '$func':
-                if callable(rule): # pragma: no cover
+                if callable(rule):
                     arg_cnt = rule.__code__.co_argcount
                     try:
-                        if arg_cnt == 2:
-                            is_matched = (not rule(key, val)) if reverse_it else (rule(key, val))
-
-                        elif arg_cnt == 1:
-                            is_matched = (not rule(val)) if reverse_it else (rule(val))
-
-                    except: # pragma: no cover
-                        pass
+                        is_matched = rule(key, val) if arg_cnt == 2 else rule(val)
+                        is_matched = (not is_matched) if reverse_it else is_matched
+                    except Exception as e: # pragma: no cover
+                        print(e)
 
             elif cmd == '$size':
                 if hasattr(val, '__iter__'):
@@ -1048,7 +1174,18 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
     return True
 
 def _iter_all_node(node:Any) -> Generator[Any]:
-    """Recursively yield every node in a nested dict/list structure."""
+    """Recursively traverse and yield every node in a nested structure.
+
+    Navigates through nested dictionaries, lists, and tuples, yielding the 
+    root node followed by all child elements recursively.
+
+    Args:
+        node (Any): The root structure to traverse (e.g., ``dict``, ``list``, or scalar).
+
+    Yields:
+        Generator[Any, None, None]: An iterator that yields each nested element.
+    """
+
     yield node
 
     if isinstance(node, dict):
@@ -1060,47 +1197,42 @@ def _iter_all_node(node:Any) -> Generator[Any]:
             yield from _iter_all_node(v)
 
 def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date, mdate:dt_date, level:int) -> bool:
-    """
-    Recursively navigate val following path segments (parts).
-    Supports '*'/'**'/'?' wildcard and glob patterns (e.g. 'addr*', '*c?ty').
-    ANY semantics: returns True if any matching path satisfies the rule.
+    """Recursively navigate a value following path segments to apply filter rules.
+    
+    Supports resolving complex dictionary/list hierarchies using literals, indexes, 
+    wildcards (``*``, ``**``, ``?``), and glob patterns (e.g., ``addr*``, ``*city``). 
+    The function applies 'ANY' semantics: it returns ``True`` if any matching resolved 
+    path satisfies the given rules.
 
     Args:
-        key_parts (List[str]): Ordered list of remaining path segments to traverse, produced by splitting a separator-delimited path string (e.g. 'addr*.city' becomes ['addr*', 'city']). Each element is consumed one level per recursive call. Accepted forms for each segment are:
-            - Literal string  : exact dict key lookup (e.g. 'meta', 'address').
-            - Integer string  : zero-based index for list/tuple access (e.g. '0', '2').
-            - `?` wildcard    :
-                    - On dict : '?' is a single-char wildcard in the key name (regex '.').
-                                N '?'s match keys of exactly N characters.
-                                e.g. '?' -> 1-char keys; 'addr?' -> 5-char keys starting with 'addr'.
-                    - On list :  N '?'s select the N-th decade of indices (0-based).
-                                '?'  -> indices 0–9   (decade 1)
-                                '??' -> indices 10–19 (decade 2)
+        key_parts (List[str]): Ordered list of remaining path segments to traverse, typically 
+            produced by splitting a delimited path string (e.g. ``'addr*.city'`` becomes 
+            ``['addr*', 'city']``). Supported segment types include:
 
-            - `*` wildcard    : '*' expands to every dict value or every sequence element.
-            - `**` wildcard   : '**' expands to every dict value or every sequence element recursively.
-            - Glob pattern    : a string containing '*' matched against dict key names
-                                (e.g. 'addr*', '*city', 'a*z'); only supported on dicts.
-            - Operator segment : a segment starting with '$' or '!$' (no leading space), applied as a query operator at the leaf (e.g. '$has', '!$eq'). 
-                                Add a leading space to treat it as a literal dict key instead.
-            An empty list is the base case: the filter rule is applied directly to the current val without further navigation.
-        key (str): The key associated with the value being evaluated.
-        val (Any): The actual data value to be checked.
-        rules (Any): The dictionary of rules/operators or a direct match condition.
-        cdate (date): KEY created date.
-        mdate (date): KEY modified date.        
-        level (int, optional): The current recursion depth. Defaults to 0.
+            * **Literal string:** Exact dictionary key lookup.
+            * **Integer string:** Zero-based index for list/tuple access.
+            * **``?`` wildcard:** - On dict: Matches keys of exactly N characters (e.g. ``??`` matches 2-char keys).
+              - On list: Selects the N-th decade of indices (e.g. ``?`` = 0–9, ``??`` = 10-19).
+            * **``*`` wildcard:** Expands to every dictionary value or sequence element.
+            * **``**`` wildcard:** Recursively expands to every node in the structure.
+            * **Glob pattern:** A string with ``*`` matched against dict keys (e.g. ``a*z``).
+            * **Operator segment:** Starts with ``$`` or ``!$``, applied as a query operator 
+              at the leaf. Add a leading space to treat as a literal key.
+
+        key (str): The original key associated with the root value.
+        val (Any): The current node's data value during traversal.
+        rules (Any): A dictionary of rules/operators or a direct match condition.
+        cdate (datetime.date): The created date associated with the data.
+        mdate (datetime.date): The modified date associated with the data.        
+        level (int): The current recursion depth.
         
     Returns:
-        bool: True if the value satisfies all specified rules, False otherwise.
+        bool: ``True`` if any navigated path satisfies the rules, ``False`` otherwise.
 
-    Examples:
-        key_parts=['addr*','city']          -> match any key starting with 'addr', check .city
-        key_parts=['*','0']                 -> any child's element at index 0
-        key_parts=['tags','*']              -> any element inside .tags
-        key_parts=['addr*', 'c*y', '$eq']   -> key_parts=['addr*', 'c*y'], rules={'$eq':rules}
+    Example:
+        >>> _match_PATH(['addr*', 'city'], 'user', user_dict, {'$eq': 'Paris'}, cdate, mdate, 0)
+        True
     """
-
     if not key_parts:
         return match_VAL_rules(key, val, rules, cdate, mdate, level=level+1)
 
