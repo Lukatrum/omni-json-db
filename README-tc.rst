@@ -975,27 +975,33 @@ Pythonic 查詢範例
 
    # 基礎比較：尋找年齡大於 28 的用戶
    res = jdb.find(User.age > 28)
-   # 輸出: {'user_1', 'user_3'}
+   assert set(res) == {'user_1', 'user_3'}
 
    # 邏輯組合 (AND & OR)：尋找 30 歲以下的開發者或管理員
    res = jdb.find((User.role == 'developer') & (User.age < 30) | (User.role == 'admin'))
-   # 輸出: {'user_1', 'user_2'}
+   assert set(res) == {'user_1', 'user_2'}
 
    # 陣列查詢：尋找標籤中包含 'python' 的用戶
    res = jdb.find(User.tags.has('python'))
-   # 輸出: {'user_1', 'user_3'}
+   assert set(res) == {'user_1', 'user_3'}
 
    # 路徑萬用字元：在所有欄位中遞迴執行正規表達式搜尋 (尋找包含 example.com 的電子郵件)
    res = jdb.find(User['**'].matches(r'.@example\.com'))
-   # 輸出: {'user_1'}
+   assert set(res) == {'user_1'}
 
    # 進階過濾：尋找「沒有」'email' 欄位的用戶 (~ 為 NOT 運算子)
    res = jdb.find(~User.exists('email'))
-   # 輸出: {'user_2', 'user_3'}
+   assert set(res) == {'user_2', 'user_3'}
 
    # Lambda 測試：尋找年齡為偶數的用戶
    res = jdb.find(User.age.test(lambda age: age % 2 == 0))
-   # 輸出: {'user_1', 'user_4'}
+   assert set(res) == {'user_1', 'user_4'}
+
+   # 修改 admin 為 Administrator
+   res = jdb.update_if(User.role == 'admin', {'role': 'Administrator'})
+   assert res == 1 and (User.role == 'Administrator') in jdb
+   
+   jdb.show();
 
 方法與運算子參考 
 ^^^^^^^^^^^^^^^

@@ -372,6 +372,11 @@ class TestJDb(unittest.TestCase):
             jdb += users
             self.assertEqual(jdb, users)
 
+            self.assertTrue((user.age > 30) in jdb)
+            self.assertFalse((user.age <= 10) | (user.age >= 99) in jdb)
+            self.assertFalse(user.name.endswith('an') in jdb)
+            self.assertTrue(user.name.startswith('A') in jdb)
+
             jdb.keys[user.name == 'Alice'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
             jdb.keys[user.role.ihas('develop')] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
             jdb.keys[user.age >= 35] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
@@ -740,6 +745,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_6'})
 
             # -------------------------------------
+            res = jdb.update_if(user.role == 'admin', {'role': 'Administrator'})
+            self.assertEqual(res, 1)
+
+            res = jdb[user.role.endswith('trator')]
+            self.assertEqual(set(res), {'user_1'})
+
             cond = (user.age >= 32) & (user.age <= 50)
             res = jdb[cond]
             self.assertEqual(set(res), {'user_3', 'user_5', 'user_6'})
@@ -1655,6 +1666,15 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'*ores.*.!$le': 95})
             self.assertEqual(res, res2)
 
+            res = jdb.update_if({'role.$ew': 'admin'}, {'role':'Administrator'})
+            self.assertEqual(res, 1)
+
+            res = jdb.update_if({'role.$ew': 'admin'}, {'role':'Administrator'})
+            self.assertEqual(res, 0)
+
+            res = jdb.find(vals={'role.$has':'trator'})
+            self.assertEqual(set(res), {'user_1'})
+
             #----------------------------------------------------------
             del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
@@ -2226,6 +2246,12 @@ class TestJDb(unittest.TestCase):
             self.assertFalse(jmem2.is_latest())
             jmem.sync(with_child=True)
             self.assertTrue(jmem2.is_latest())
+
+            jmem -= jmem
+            self.assertEqual(len(jmem), 0)
+
+            jdb -= jdb
+            self.assertEqual(len(jdb), 0)
 
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
@@ -3760,6 +3786,7 @@ class TestJDb(unittest.TestCase):
 
             jdb[expect2] = 0
             try:
+                jdb.io.data_type = 0
                 _fp1 = jdb.f_open(read_only=False)
                 try:
                     fp2 = jdb.f_open(read_only=False)

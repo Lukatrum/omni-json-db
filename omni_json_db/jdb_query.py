@@ -741,8 +741,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     date_s = JSON_RE_sub('', date_s) if cmd[-1] == '2' else date_s
                     use_fullmatch = cmd == '$match'
                     for _rule in _rules:
-                        is_matched = _rule.fullmatch(date_s) if use_fullmatch else \
-                                    _rule.search(date_s)
+                        is_matched = _rule.fullmatch(date_s) if use_fullmatch else _rule.search(date_s)
                         if not is_matched:
                             break
 
@@ -997,31 +996,26 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                             _rules.append(_compile_rule(_rule))
 
                 if _rules:
-                    if not isinstance(val, str):
-                        try:
-                            if isinstance(val, (bytes, bytearray)):
-                                val_s = val.decode('utf8')
-                            else:
-                                val_s = json_dumps(val)
-                                if isinstance(val_s, bytes):
-                                    val_s = val_s.decode('utf8')
+                    try:
+                        if isinstance(val, (bytes, bytearray)):
+                            val_s = val.decode('utf8')
+                        elif not isinstance(val, str):
+                            val_s = json_dumps(val)
+                            val_s = val_s.decode('utf8') if isinstance(val_s, bytes) else val_s
+                        else:
+                            val_s = val
 
-                        except: # pragma: no cover
-                            val_s = None
-
-                    else: # pragma: no cover
-                        val_s = val
-
-                    if val_s is not None:
                         use_fullmatch = cmd == '$match'
                         val_s = JSON_RE_sub('', val_s) if cmd[-1] == '2' else val_s
                         for _rule in _rules:
-                            is_matched = _rule.fullmatch(val_s) if use_fullmatch else \
-                                        _rule.search(val_s)
+                            is_matched = _rule.fullmatch(val_s) if use_fullmatch else _rule.search(val_s)
                             if not is_matched:
                                 break
 
                         is_matched = (not is_matched) if reverse_it else is_matched
+
+                    except Exception as e: # pragma: no cover
+                        print(e)
 
             elif cmd == '$func':
                 if callable(rule):
@@ -1029,6 +1023,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     try:
                         is_matched = rule(key, val) if arg_cnt == 2 else rule(val)
                         is_matched = (not is_matched) if reverse_it else is_matched
+
                     except Exception as e: # pragma: no cover
                         print(e)
 

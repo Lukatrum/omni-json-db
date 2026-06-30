@@ -1217,12 +1217,12 @@ class JDbReader(JDbBase):
         with self.open(read_only=True) as fp:
             return self.f_read(fp, key, copy=True)
 
-    def __contains__(self, keys:Set[str]) -> bool:
+    def __contains__(self, keys:Union[str,Set[str],Condition]) -> bool:
         """
         Check if the current key table is a superset of the provided keys.
 
         Args:
-            keys (Set[str]): A set of keys to check.
+            keys (str | Set[str] | Condition): A set of keys to check.
 
         Returns:
             bool: True if all provided keys exist in the database, False otherwise.
@@ -1231,8 +1231,12 @@ class JDbReader(JDbBase):
             >>> jdb = JDb()
             >>> jdb['user_1', 'user_2', 'user_3'] = 0
             >>> {'user_1', 'user_2'} in jdb
-            True
+            >>> 'user_1 in jdb
+            >>> Query().age > 999 in jdb
         """
+        if isinstance(keys, Condition):
+            return next(self.find_iter(keys, limit=1), None) is not None
+
         return self.is_superset(keys)
 
     def __eq__(self, jdb:Union[set,dict,JDbReader,JDbKey]) -> bool:
@@ -1707,8 +1711,9 @@ class JDbReader(JDbBase):
                         key_fp = fp_dict.get(-1, None)
                         return fp_dict
 
+                    data_type = io._data_type
                     if read_only:
-                        if io.is_updated():
+                        if data_type != 0 and io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
                                 self.safe_line = io.n_records
                                 chg_keys.clear()
@@ -1717,9 +1722,8 @@ class JDbReader(JDbBase):
                         is_latest = False # pragma: no cover
                     else:
                         io.update_days()
-                        is_latest = files_obj.KEY_size() == io.file_size
+                        is_latest = data_type != 0 and files_obj.KEY_size() == io.file_size
 
-                    data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
                     if key_fp is not None: # pragma: no cover
                         key_fp.flush()
@@ -1875,8 +1879,9 @@ class JDbReader(JDbBase):
                         yield fp_dict
                         return
 
+                    data_type = io._data_type
                     if read_only:
-                        if io.is_updated():
+                        if data_type != 0 and io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
                                 self.safe_line = io.n_records
                                 chg_keys.clear()
@@ -1888,9 +1893,8 @@ class JDbReader(JDbBase):
                         is_latest = False
                     else:
                         io.update_days()
-                        is_latest = files_obj.KEY_size() == io.file_size
+                        is_latest = data_type != 0 and files_obj.KEY_size() == io.file_size
 
-                    data_type = io._data_type
                     key_fp = fp_dict.get(-1, None)
                     if key_fp is not None: # pragma: no cover
                         key_fp.flush()

@@ -1034,27 +1034,33 @@ For developers who prefer a Pythonic and object-oriented syntax for filtering da
 
    # Basic Comparison: Find users older than 28
    res = jdb.find(User.age > 28)
-   # Output: {'user_1', 'user_3'}
+   assert set(res) == {'user_1', 'user_3'}
 
    # Logical Combinations (AND & OR): Find developers under 30 OR admins
    res = jdb.find((User.role == 'developer') & (User.age < 30) | (User.role == 'admin'))
-   # Output: {'user_1', 'user_2'}
+   assert set(res) == {'user_1', 'user_2'}
 
    # Array Query: Find users whose tags include 'python'
    res = jdb.find(User.tags.has('python'))
-   # Output: {'user_1', 'user_3'}
+   assert set(res) == {'user_1', 'user_3'}
 
    # Path Wildcard: Regex search across all fields recursively (Find email containing example.com)
    res = jdb.find(User['**'].matches(r'.@example\.com'))
-   # Output: {'user_1'}
+   assert set(res) == {'user_1'}
 
    # Advanced Filters: Find users who DO NOT have an 'email' field (~ is the NOT operator)
    res = jdb.find(~User.exists('email'))
-   # Output: {'user_2', 'user_3'}
+   assert set(res) == {'user_2', 'user_3'}
 
    # Lambda Test: Find users whose age is an even number
    res = jdb.find(User.age.test(lambda age: age % 2 == 0))
-   # Output: {'user_1', 'user_4'}
+   assert set(res) == {'user_1', 'user_4'}
+
+   # rename admin to Administrator
+   res = jdb.update_if(User.role == 'admin', {'role': 'Administrator'})
+   assert res == 1 and (User.role == 'Administrator') in jdb
+   
+   jdb.show();
 
 Methods & Operators Reference
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

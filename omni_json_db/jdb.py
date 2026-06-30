@@ -2397,6 +2397,30 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=default_val, replace=True, insert=True, is_list=False, **kwargs)
 
+    def update_if(self, condition: Union[Condition,dict], patch: dict) -> int:
+        """Merge `patch` into every record (dict value) matching `condition`.
+        
+        Args:
+            conditon (Condition | dict): Condition for key/date/value filtering.
+            patch (Any): if condition is matched, update the corresponding value.
+
+        Returns:
+            int: the number of records updated.
+        """
+        count = 0
+        with self.open(read_only=True) as fp:
+            matched_keys = {key:val for key,val in self.find_iter(vals=condition, with_value=True) if isinstance(val, dict)}
+            if matched_keys:
+                _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp) # switch to write mode
+                has_SIGINT = self.file_lock.has_SIGINT
+                f_write = self.f_write
+                for key,val in matched_keys.items():
+                    if has_SIGINT(): break
+                    new_val = {**val, **patch}
+                    if new_val != val and f_write(fp, key, new_val):
+                        count += 1
+        return count
+
     def replace(self, records:Dict[str,Any], default_val:Optional[Any]=None, **kwargs) -> Dict[str,Any]:
         """Batch rewrite pre-existing record lines parameters properties fields metrics values profiles avoiding adding unknown outliers into index pools blocks.
 
