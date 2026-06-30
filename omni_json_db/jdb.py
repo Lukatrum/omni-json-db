@@ -449,7 +449,7 @@ class JDb(JDbReader):
                     old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
                     new_val = func(key, deepcopy(old_val))
                     if new_val != old_val:
-                        self.f_write(fp, key, new_val)
+                        self.f_write(fp, key, new_val, compare=False)
                 else:
                     self.f_write(fp, key, val)
 
@@ -479,7 +479,7 @@ class JDb(JDbReader):
                             old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=True)
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, _key, new_val)
+                                f_write(fp, _key, new_val, compare=False)
 
                     else:
                         for _key in matched_keys:
@@ -541,7 +541,7 @@ class JDb(JDbReader):
                         old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
                         new_val = func(_key, deepcopy(old_val))
                         if new_val != old_val:
-                            f_write(fp, _key, new_val)
+                            f_write(fp, _key, new_val, compare=False)
                     else:
                         f_write(fp, _key, val)
 
@@ -556,7 +556,7 @@ class JDb(JDbReader):
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
                 new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
-                    self.f_write(fp, key, new_val)
+                    self.f_write(fp, key, new_val, compare=False)
             else:
                 self.f_write(fp, key, val)
 
@@ -2314,8 +2314,8 @@ class JDb(JDbReader):
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=True)
                 new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
-                    if self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize):
-                        return new_val
+                    self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, compare=False)
+                    return new_val
 
                 return old_val
 
@@ -2417,7 +2417,8 @@ class JDb(JDbReader):
                 for key,val in matched_keys.items():
                     if has_SIGINT(): break
                     new_val = {**val, **patch}
-                    if new_val != val and f_write(fp, key, new_val):
+                    if new_val != val:
+                        f_write(fp, key, new_val, compare=False)
                         count += 1
         return count
 
@@ -2609,14 +2610,12 @@ class JDb(JDbReader):
                 if isinstance(csv_file, str) else (csv_file, False) # pylint: disable=consider-using-with
 
         csv_fp.seek(0)
-        #pass;0;assert hasattr(csv_fp, 'close')
         try:
             with self.open(read_only=False) as fp:
                 has_SIGINT = self.file_lock.has_SIGINT
                 io = self.io
                 # [BUG: python 3.7] marshal.dumps(Ordereddict) throw exception
                 fix_it = io.data_type_str.endswith('+M')
-                # key_table = io.key_table
                 reader = DictReader(csv_fp, **kwargs)
                 for ii,row in enumerate(reader):
                     if has_SIGINT(): break
@@ -2905,7 +2904,7 @@ class JDb(JDbReader):
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
-                    else:
+                    else: # pragma: no cover
                         # not insert and not replace [do nothing]
                         pass
 
@@ -2974,8 +2973,8 @@ class JDb(JDbReader):
                             old_val = f_read(fp, str_key, row=row, copy=False)
                             new_val = func(str_key, deepcopy(old_val))
                             if new_val != old_val:
-                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize):
-                                    chg_table[str_key] = new_val
+                                f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, compare=False)
+                                chg_table[str_key] = new_val
 
                             continue
 
@@ -2988,9 +2987,8 @@ class JDb(JDbReader):
                 if insert:
                     if func:
                         new_val = func(str_key, None)
-                        if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize):
-                            chg_table[str_key] = new_val
-
+                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize)
+                        chg_table[str_key] = new_val
                         continue
 
                     f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize)
@@ -4035,7 +4033,7 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         return True
 
-    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> bool:
+    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, compare:bool=True) -> bool:
         """ Low-level pipeline method: serialize, compress, and record dynamic Python value entries mapping into target filesystem tracks safely.
 
         Args:
@@ -4045,6 +4043,7 @@ class JDb(JDbReader):
             days (int, optional): Calendar modification timing tracking parameter representation number. Defaults to -1.
             flags (Optional[JFlag], optional): strategic behavioral modifiers flags. Defaults to None.
             max_wsize (Optional[int], optional): Maximum search lookahead steps window constraint index number. Defaults to None.
+            compare (bool, optional) : compare old value and new value before writing it. Defaults to True
 
         Returns:
             bool: True if serialization persistence completes smoothly, False if transaction logic drops inputs.
@@ -4072,7 +4071,7 @@ class JDb(JDbReader):
         _cache = self._cache
         cache_limit = self._cache_limit
         row = self.io.key_table[key]
-        checked = False
+        checked = not compare
         while True:
             if row >= 0:
                 # (Exist + Value|Header)
@@ -4094,7 +4093,7 @@ class JDb(JDbReader):
                 _type_id, _type_val, _type_size = self._encode_row(key, val)
                 # (Exist + Header)
                 if row_size == 0:
-                    if _type_id == file_id and _type_val == offset and _type_size == val_size:
+                    if not checked and _type_id == file_id and _type_val == offset and _type_size == val_size:
                         # (Exist + Header == CHG + Header)
                         if file_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
                             self._set_child(key, val)
