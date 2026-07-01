@@ -27,7 +27,7 @@ from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
 
-MAX_BLOCK_SIZE = 2**20
+MAX_BLOCK_SIZE = 2**18 # 256KB
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1804,11 +1804,11 @@ class JDb(JDbReader):
                     try:
                         val_fp_d = self.files_obj.VAL_open(file_id, 'wb', buffering=VAL_FILE_BUF_SIZE)
                         try:
-                            val_fp_s = bak_jdb.files_obj.VAL_open(file_id, 'rb', buffering=VAL_FILE_BUF_SIZE)
                             buf_size = VAL_FILE_BUF_SIZE
+                            val_fp_s = bak_jdb.files_obj.VAL_open(file_id, 'rb', buffering=buf_size)
+                            buf = bytearray(buf_size)
                             while buf_size == VAL_FILE_BUF_SIZE:
-                                buf = val_fp_s.read(VAL_FILE_BUF_SIZE)
-                                buf_size = len(buf)
+                                buf_size = val_fp_s.readinto(buf)
                                 if buf_size > 0:
                                     val_fp_d.write(buf)
                                     print('.', end='', flush=True)
@@ -1842,11 +1842,11 @@ class JDb(JDbReader):
                     else:
                         key_fp_d.seek(0)
                     try:
-                        key_fp_s = bak_jdb.files_obj.KEY_open('rb', buffering=KEY_FILE_BUF_SIZE)
                         buf_size = KEY_FILE_BUF_SIZE
+                        key_fp_s = bak_jdb.files_obj.KEY_open('rb', buffering=buf_size)
+                        buf = bytearray(buf_size)
                         while buf_size == KEY_FILE_BUF_SIZE:
-                            buf = key_fp_s.read(KEY_FILE_BUF_SIZE)
-                            buf_size = len(buf)
+                            buf_size = key_fp_s.readinto(buf)
                             if buf_size > 0:
                                 key_fp_d.write(buf)
                                 print('r', end='', flush=True) # pragma: no cover
@@ -2028,9 +2028,12 @@ class JDb(JDbReader):
             src_io, src_fp, key_fp_s = self.f_get_fp(src_fp)
             src_index_size = src_io.index_size
             src_io.seek(key_fp_s, 0)
+            src_line = bytearray(src_index_size)
             for row_id in range(src_io.n_records):
-                row = key_fp_s.read(src_index_size).rstrip(b'\n \x00')
-                _index_size = max(_index_size, len(row)+2)
+                _size = key_fp_s.readinto(src_line)
+                if _size == src_index_size:
+                    row = src_line.rstrip(b'\n \x00')
+                    _index_size = max(_index_size, len(row)+2)
 
             if index_size is None:
                 index_size = _index_size
@@ -4234,46 +4237,44 @@ class JDb(JDbReader):
                 if new_row_size >= new_val_size and val_size == new_val_size:
                     # (Exist + Value vs CHG + Value)
                     if not checked:
-                        rd_data = b''
+                        is_same = True
+                        rd_size = min(MAX_BLOCK_SIZE, new_val_size)
+                        buf = bytearray(rd_size)
                         try:
                             val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
                             val_fp.seek(offset)
-                            rd_size = min(MAX_BLOCK_SIZE, new_val_size)
-                            n_block = new_val_size // rd_size
-                            for ii in range(n_block):
-                                _ix = ii * rd_size
-                                _rd_data = val_fp.read(rd_size)
-                                _wr_data = data[_ix:_ix+rd_size]
-                                if _rd_data != _wr_data:
-                                    if ii == 0 and io.zip_type_str == 'gz' and new_val_size >= 16:
-                                        # [FIX] gzip random at 5th byte
-                                        # len(gzip.compress(b''')) == 20 bytes
-                                        _rd_data = bytearray(_rd_data)
-                                        _rd_data[4] = data[4]
-                                        if _rd_data != _wr_data:
-                                            rd_data = b''
+                            if new_val_size > 0:
+                                _ix = 0
+                                n_block = new_val_size // rd_size
+                                for ii in range(n_block):
+                                    val_fp.readinto(buf)
+                                    _next_ix = _ix + rd_size
+                                    if buf != data[_ix:_next_ix]:
+                                        if ii == 0 and new_val_size >= 16 and io.zip_type_str == 'gz':
+                                            # [FIX] gzip random at 5th+4 bytes
+                                            # len(gzip.compress(b'')) == 20 bytes
+                                            buf[4:8] = data[4:8]
+                                            if buf != data[_ix:_next_ix]:
+                                                is_same = False
+                                                break
+                                        else:
+                                            is_same = False
                                             break
-                                    else:
-                                        rd_data = b''
-                                        break
 
-                                rd_data += _rd_data
-
-                            if rd_data:
-                                rd_size = len(rd_data)
-                                rd_data = (rd_data + val_fp.read(new_val_size-rd_size)) if new_val_size > rd_size else rd_data
-
-                                # (Exist + Value == CHG + Value)
-                                if rd_data == data:
-                                    if cache_limit != 0:
-                                        self._update_cache(key, val, copy=True)
-
-                                    return False
-
-                                # rd_data = None
+                                    _ix = _next_ix
 
                         except KeyError: # pragma: no cover
                             pass
+
+                        if is_same:
+                            rd_size = new_val_size - _ix
+                            is_same = (val_fp.read(rd_size) == data[_ix:_ix+rd_size]) if rd_size > 0 else (rd_size == 0)
+                            # (Exist + Value == CHG + Value)
+                            if is_same:
+                                if cache_limit != 0:
+                                    self._update_cache(key, val, copy=True)
+
+                                return False
 
                 # (Exist + Value != CHG + Value) use dead/new row
                 io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)

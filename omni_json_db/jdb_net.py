@@ -175,7 +175,7 @@ class JNetIO(RawIOBase):
         """Disconnect and release the remote file handle on the server."""
         with self.lock:
             if self.closed: return # pragma: no cover
-            dump_and_send(self.sock, (self.file, 'close', [], {}))
+            dump_and_send(self.sock, (self.file, 'close', (), {}))
             resp = recv_and_load(self.sock)
             if not resp.get('ok'): # pragma: no cover
                 pass # do nothing
@@ -197,7 +197,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, [self.file, 'readline', [size], {}])
+            dump_and_send(self.sock, (self.file, 'readline', (size,), {}))
             resp = recv_and_load(self.sock)
             if not resp.get('ok'): # pragma: no cover
                 cmd = resp.get("cmd", "")
@@ -224,7 +224,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'readlines', [size], {}))
+            dump_and_send(self.sock, (self.file, 'readlines', (size,), {}))
             resp = recv_and_load(self.sock)
             if not resp.get('ok'):
                 cmd = resp.get("cmd", "")
@@ -233,7 +233,7 @@ class JNetIO(RawIOBase):
                     raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
                 raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
 
-        return resp.get('ret', [])
+        return resp.get('ret', ())
 
     def seek(self, offset:int, whence:int=0) -> int:
         """Change the stream position on the remote server.
@@ -253,7 +253,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'seek', [offset, whence], {}))
+            dump_and_send(self.sock, (self.file, 'seek', (offset, whence), {}))
             resp = recv_and_load(self.sock)
             if not resp.get('ok'): # pragma: no cover
                 cmd = resp.get("cmd", "")
@@ -313,7 +313,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'tell', [], {}))
+            dump_and_send(self.sock, (self.file, 'tell', (), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -341,7 +341,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'truncate', [size], {}))
+            dump_and_send(self.sock, (self.file, 'truncate', (size,), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -366,7 +366,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'writelines', [lines], {}))
+            dump_and_send(self.sock, (self.file, 'writelines', (lines,), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'):
@@ -392,7 +392,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'read', [size], {}))
+            dump_and_send(self.sock, (self.file, 'read', (size,), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -417,7 +417,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'readall', [], {}))
+            dump_and_send(self.sock, (self.file, 'readall', (), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'):
@@ -429,7 +429,7 @@ class JNetIO(RawIOBase):
 
         return resp.get('ret', b'')
 
-    def readinto(self, b) -> int: # pragma: no cover
+    def readinto(self, b) -> int:
         """Read bytes directly into a pre-allocated buffer from the network.
 
         Args:
@@ -445,7 +445,8 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'readinto', [b], {}))
+            size = len(b)
+            dump_and_send(self.sock, (self.file, 'read', (size,), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'):
@@ -455,7 +456,10 @@ class JNetIO(RawIOBase):
                 raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
             raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
 
-        return resp.get('ret', 0)
+        rx_buf = resp.get('ret', 0)
+        rx_size = len(rx_buf)
+        b[:rx_size] = rx_buf
+        return rx_size
 
     def write(self, b) -> int:
         """Write raw binary data to the remote server.
@@ -473,7 +477,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'write', [b], {}))
+            dump_and_send(self.sock, (self.file, 'write', (b,), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -497,7 +501,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 return
 
-            dump_and_send(self.sock, (self.file, 'flush', [], {}))
+            dump_and_send(self.sock, (self.file, 'flush', (), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -518,7 +522,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError('I/O operation on closed file.')
 
-            dump_and_send(self.sock, (self.file, 'fileno', [], {}))
+            dump_and_send(self.sock, (self.file, 'fileno', (), {}))
             resp = recv_and_load(self.sock)
 
         if not resp.get('ok'): # pragma: no cover
@@ -600,7 +604,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_KEY', [], {}))
+                dump_and_send(self.sock, ('KEY', 'get_KEY', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -622,7 +626,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_folder', [], {}))
+                dump_and_send(self.sock, ('KEY', 'get_folder', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -644,7 +648,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_name', [], {}))
+                dump_and_send(self.sock, ('KEY', 'get_name', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -669,7 +673,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_path', [], {'folder':folder}))
+                dump_and_send(self.sock, ('KEY', 'get_path', (), {'folder':folder}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -705,7 +709,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'fsync', [], {'fd':fd}))
+                dump_and_send(self.sock, ('KEY', 'fsync', (), {'fd':fd}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -732,7 +736,7 @@ class JNetFiles(JFilesBase):
         with self.lock:
             if self.sock and not self.sock._closed:
                 KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
-                dump_and_send(self.sock, ('KEY', 'is_group', [], {'KEY_file':KEY_file, 'name':name}))
+                dump_and_send(self.sock, ('KEY', 'is_group', (), {'KEY_file':KEY_file, 'name':name}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -814,7 +818,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'remove', [], {}))
+                dump_and_send(self.sock, (f'VAL.{file_id}', 'remove', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -839,7 +843,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'exist', [], {}))
+                dump_and_send(self.sock, (f'VAL.{file_id}', 'exist', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -864,7 +868,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'size', [], {}))
+                dump_and_send(self.sock, (f'VAL.{file_id}', 'size', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -886,7 +890,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'size', [], {}))
+                dump_and_send(self.sock, ('KEY', 'size', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -908,7 +912,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'date', [], {}))
+                dump_and_send(self.sock, ('KEY', 'date', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -930,7 +934,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'rlock', [block], {}))
+                dump_and_send(self.sock, ('LCK', 'rlock', (block,), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -952,7 +956,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'wlock', [block], {}))
+                dump_and_send(self.sock, ('LCK', 'wlock', (block,), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -971,7 +975,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'unlock', [], {}))
+                dump_and_send(self.sock, ('LCK', 'unlock', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -986,7 +990,7 @@ class JNetFiles(JFilesBase):
         with self.lock:
             if self.sock and not self.sock._closed:
                 try:
-                    dump_and_send(self.sock, ('LCK', 'close', [], {}))
+                    dump_and_send(self.sock, ('LCK', 'close', (), {}))
                     resp = recv_and_load(self.sock)
 
                     if resp.get('ok'):
@@ -1003,7 +1007,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'remove', [], {}))
+                dump_and_send(self.sock, ('LCK', 'remove', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):

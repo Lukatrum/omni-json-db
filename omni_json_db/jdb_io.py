@@ -704,8 +704,10 @@ class KeyTable:
         try:
             fp = self.files_obj.KEY_open('rb')
             fp.seek(HEADER_SIZE)
+            line = bytearray(index_size)
             for row_id in range(jio.n_records):
-                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                fp.readinto(line)
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
                 if is_empty or not get_found_flag(row_id):
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
@@ -2263,16 +2265,19 @@ class JIo(JIoBase):
                 files_obj = self.files_obj.copy()
                 KEY_loads = self.KEY_loads
                 index_size = self.index_size
+                line = bytearray(index_size)
                 fp = files_obj.KEY_open('rb')
                 if reverse:
                     for row_id in range(stop_row-1, start_row-1, -1):
                         fp.seek(HEADER_SIZE + row_id * index_size)
-                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                        fp.readinto(line)
+                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
                         yield _key, row_id
                 else:
                     fp.seek(HEADER_SIZE + start_row * index_size)
                     for row_id in range(start_row, stop_row):
-                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                        fp.readinto(line)
+                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
                         yield _key, row_id
 
             finally:
@@ -2936,9 +2941,11 @@ class JIo(JIoBase):
                 self.update_file_table()
                 if records < n_records:
                     KEY_loads = self.KEY_loads
+                    line = bytearray(index_size)
                     fp.seek(HEADER_SIZE + records * index_size)
                     for row in range(records, n_records):
-                        key,file_id,offset,row_size,_val_size = KEY_loads(fp.read(index_size))[:5]
+                        fp.readinto(line)
+                        key,file_id,offset,row_size,_val_size = KEY_loads(line)[:5]
                         key_table[key] = row
                         if row_size > 0:
                             file_table[file_id] = max(file_table[file_id], offset + row_size)
@@ -2974,14 +2981,17 @@ class JIo(JIoBase):
                         key_table.clear()
                     else:
                         KEY_loads = self.KEY_loads
+                        line = bytearray(index_size)
                         fp.seek(HEADER_SIZE + n_records * index_size)
                         for row in range(n_records, min(n_lines, n_records+remv_diff)):
-                            del_rec = KEY_loads(fp.read(index_size))
+                            fp.readinto(line)
+                            del_rec = KEY_loads(line)
                             old_row = key_table.pop(del_rec[0], -1)
                             if n_records > old_row >= 0:
                                 cur_pos = fp.tell()
                                 fp.seek(HEADER_SIZE + old_row * index_size)
-                                new_rec = KEY_loads(fp.read(index_size))
+                                fp.readinto(line)
+                                new_rec = KEY_loads(line)
                                 key_table[new_rec[0]] = old_row
                                 fp.seek(cur_pos)
 
@@ -3049,9 +3059,10 @@ class JIo(JIoBase):
                     break
 
         else: # M, S
+            line = bytearray(index_size)
             while lines < n_lines:
-                line = fp.read(index_size)
-                if not line or len(line) != index_size: # pragma: no cover
+                rd_size = fp.readinto(line)
+                if rd_size != index_size: # pragma: no cover
                     break
 
                 try:
@@ -3107,19 +3118,20 @@ class JIo(JIoBase):
         self._KEY_rows.pop(dst_row, None)
         self._DEAD_rows.pop(dst_row, None)
 
-        size = self.index_size
-        src_pos = HEADER_SIZE + src_row * size
-        dst_pos = HEADER_SIZE + dst_row * size
+        index_size = self.index_size
+        src_pos = HEADER_SIZE + src_row * index_size
+        dst_pos = HEADER_SIZE + dst_row * index_size
         if fp.tell() != src_pos:
             fp.seek(src_pos)
-        data = fp.read(size)
 
+        line = bytearray(index_size)
+        fp.readinto(line)
         if src_pos != dst_pos:
             if fp.tell() != dst_pos:
                 fp.seek(dst_pos)
-            fp.write(data)
+            fp.write(line)
 
-        return data if not decode else self.KEY_loads(data)
+        return line if not decode else self.KEY_loads(line)
 
     def shift_keys(self, fp:IO, start:int, offset:int=1, size:int=1, block_size:Optional[int]=None): # pragma: no cover
         """Displace continuous series of index row metadata entries horizontally to allocate open layout rows block zones.
@@ -3143,6 +3155,7 @@ class JIo(JIoBase):
         _KEY_rows = self._KEY_rows
         _DEAD_rows = self._DEAD_rows
         src_row = min(start+size, n_lines)
+
         for row_id in range(n_blocks):
             _KEY_rows.pop(row_id, None)
             _DEAD_rows.pop(row_id, None)

@@ -34,6 +34,8 @@ _UInt64_x2_unpack = Struct("QQ").unpack
 SEP_SYM = ':::' # ignore to use re symbols (+-*?.{}()[]^$|\)
 SEP_LEN = len(SEP_SYM)
 
+_MISSING = object()
+
 class JFlag(IntFlag):
     """Enumeration flag to control write/delete behavior in database operations."""
 
@@ -1215,7 +1217,7 @@ class JDbReader(JDbBase):
 
         # str | bytes | int | float | bool
         with self.open(read_only=True) as fp:
-            return self.f_read(fp, key, copy=True)
+            return self.f_read(fp, key, copy=True, default_val=_MISSING)
 
     def __contains__(self, keys:Union[str,Set[str],Condition]) -> bool:
         """
@@ -4233,36 +4235,39 @@ class JDbReader(JDbBase):
         """
         key = str(key) if not isinstance(key, str) else key
 
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+
         # Priority: cache > file
         _cache = self._cache
-        if _cache and key in _cache:
-            if row is None or self.io.key_table[key] == row:
-                val = _cache.get(key, None)
-                _cache.move_to_end(key, last=True)
-                return deepcopy(val) if copy else val
+        if _cache:
+            if row is None or io.key_table[key] == row:
+                val = _cache.get(key, _MISSING)
+                if val is not _MISSING:
+                    _cache.move_to_end(key, last=True)
+                    return deepcopy(val) if copy else val
 
         if row is None:
-            row = self.io.key_table[key]
+            row = io.key_table[key]
             if row < 0:
-                if default_val is not None:
+                if default_val is not _MISSING:
                     return default_val
 
                 raise JKeyError(key)
 
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         if row >= io.n_records: # pragma: no cover
             io.key_table.pop(key, -1)
-            if default_val is not None:
+            if default_val is not _MISSING:
                 return default_val
 
             raise JKeyError(key)
 
         _key, file_id, offset, row_size, val_size, _ver, _days = io.read_key(key_fp, row)
         if key != _key:
-            if _cache and _key in _cache:
-                val = _cache.get(_key, None)
-                _cache.move_to_end(_key, last=True)
-                return deepcopy(val) if copy else val
+            if _cache:
+                val = _cache.get(_key, _MISSING)
+                if val is not _MISSING:
+                    _cache.move_to_end(_key, last=True)
+                    return deepcopy(val) if copy else val
 
         if row_size == 0:
             val = self._decode_row(file_id, offset, _key, val_size)

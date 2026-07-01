@@ -4503,6 +4503,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
+            sync_id = jdb.sync_id
+            jdb['key2'] = _val
+            self.assertEqual(jdb['key2'], _val)
+            self.assertEqual(jdb.sync_id, sync_id)
+
             jdb['key1'] = _val = '1' * (min_value_size)
             self.assertEqual(jdb.n_records, 3)
             self.assertGreaterEqual(jdb.n_lines, jdb.n_records)
@@ -6214,6 +6219,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
             sync_id = jdb.sync_id
+            with jdb.open() as fp:
+                for key,val in expect.items():
+                    jdb.f_write(fp, key, val)
+            self.assertEqual(jdb.sync_id, sync_id)
+            self.assertEqual(jdb, expect)
+
             expect2 = {f'yyy{i}' : list(range(i+1)) for i in range(test_size)}
             chg = jdb.update(expect2)
             self.assertEqual(chg, expect2)
@@ -8363,6 +8374,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb_a.keys ^ jdb_a.keys, ret)
 
     def test_process(self):
+        def _chg_func(jdb, key, val, wait1, wait2):
+            with jdb.open(read_only=True) as fp:
+                time.sleep(wait1)
+                jdb.f_write(fp, key, val)
+                time.sleep(wait2)
+
         for config in self.jdb_configs:
             st_time = time.perf_counter()
             filename = config['KEY_file']
@@ -8662,6 +8679,29 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, last)
             self.assertEqual(jdb, jdb1)
             self.assertLess(jdb.n_lines, n_lines+100)
+
+            sync_id = jdb.sync_id
+            th0 = threading.Thread(target=_chg_func, args=(jdb0, 'NEW_VAL', list(range(4)), 0.01, 0.02))
+            th0.start()
+
+            th1 = threading.Thread(target=_chg_func, args=(jdb1, 'NEW_VAL', list(range(8)), 0.02, 0.01))
+            th1.start()
+
+            th2 = threading.Thread(target=_chg_func, args=(jdb2, 'NEW_VAL', list(range(16)), 0.03, 0.))
+            th2.start()
+
+            th0.join()
+            th1.join()
+            with jdb.open() as fp:
+                time.sleep(0.03)
+                jdb.f_write(fp, 'NEW_VAL', list(range(32)))
+
+            th2.join()
+
+            self.assertEqual(jdb, jdb0)
+            self.assertEqual(jdb, jdb1)
+            self.assertEqual(jdb, jdb2)
+            self.assertEqual(sync_id+4, jdb.sync_id)
 
             error = jdb.check_error()
             self.assertTrue(not error, Style(f'{filename}:{jdb} {current_state}', red=1))

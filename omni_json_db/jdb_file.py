@@ -182,11 +182,11 @@ class JBytesIO(RawIOBase):
     """
     __slots__ = ('buf', 'idx')
 
-    def __init__(self, buffer:bytearray, *args, **kwargs):
+    def __init__(self, buffer:Optional[bytearray], *args, **kwargs):
         """Initialize the stream interface with a mutable byte storage target.
 
         Args:
-            buffer (bytearray): The mutable byte array serving as the underlying storage.
+            buffer (Optional[bytearray]): The mutable byte array serving as the underlying storage.
             *args: Variable length arguments passed directly to ``RawIOBase``.
             **kwargs: Keyword arguments passed directly to ``RawIOBase``.
 
@@ -242,21 +242,22 @@ class JBytesIO(RawIOBase):
         if idx >= max_size:
             return b''
 
+        mv_buf = memoryview(buf)
         max_idx = max_size if size is None or size < 0 else min(max_size, idx+size)
         next_idx = buf.find(b'\n', idx, max_idx)
         if next_idx < 0: # pragma: no cover
             self.idx = max_idx
-            return bytes(buf[idx:max_idx])
+            return mv_buf[idx:max_idx].tobytes()
 
         next_idx = min(max_idx, next_idx+1)
         self.idx = next_idx
-        return bytes(buf[idx:next_idx])
+        return mv_buf[idx:next_idx].tobytes()
 
-    def readlines(self, size:Optional[int]=None) -> list: # pragma: no cover
+    def readlines(self, hint:Optional[int]=None) -> list: # pragma: no cover
         """Read and return a list of lines from the stream.
 
         Args:
-            size (int, optional): The maximum number of bytes to read across all lines. 
+            hint (int, optional): The maximum number of bytes to read across all lines. 
                 Defaults to ``None`` (read all lines).
 
         Returns:
@@ -271,25 +272,20 @@ class JBytesIO(RawIOBase):
         idx = self.idx
         buf = self.buf
         max_size = len(buf)
-        if idx >= max_size:
-            return []
-
         lines = []
-        max_idx = max_size if size is None or size < 0 else min(max_size, idx+size)
-        while idx < max_idx:
-            next_idx = buf.find(b'\n', idx, max_idx)
-            if next_idx < 0:
-                if idx < max_idx:
-                    lines.append(bytes(buf[idx:max_idx]))
+        if idx >= max_size:
+            return lines
 
-                idx = max_idx
+        total_read = 0
+        while True:
+            line = self.readline()
+            if not line:
+                break
+            lines.append(line)
+            total_read += len(line)
+            if hint is not None and hint > 0 and total_read >= hint: # pylint: disable=chained-comparison
                 break
 
-            next_idx = min(max_idx, next_idx+1)
-            lines.append(bytes(buf[idx:next_idx]))
-            idx = next_idx
-
-        self.idx = idx
         return lines
 
     def seek(self, offset:int, whence:int=SEEK_SET) -> int:
@@ -310,24 +306,23 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        max_size = len(self.buf)
-        idx = self.idx
         if whence == SEEK_SET:
             next_idx = offset
-            self.idx = next_idx
-            return next_idx
 
-        if whence == SEEK_END:
-            next_idx = max_size+offset
-            idx = self.idx = next_idx
-            return idx
+        elif whence == SEEK_END:
+            next_idx = len(self.buf)+offset
 
-        if whence == SEEK_CUR:
-            next_idx = idx+offset
-            idx = self.idx = next_idx
-            return idx
+        elif whence == SEEK_CUR:
+            next_idx = self.idx+offset
 
-        raise ValueError
+        else:
+            raise ValueError(f"Invalid whence ({whence}, should be 0, 1 or 2)")
+
+        if next_idx < 0:
+            raise ValueError("negative seek position")
+
+        self.idx = next_idx
+        return next_idx
 
     def seekable(self) -> bool: # pragma: no cover
         """Determine if stream navigation is supported.
@@ -376,22 +371,15 @@ class JBytesIO(RawIOBase):
             raise ValueError('I/O operation on closed file.')
 
         buf = self.buf
+        size = self.idx if size is None else size
         max_size = len(buf)
-        if size is None:
-            idx = self.idx
-            if idx < max_size:
-                del buf[idx:]
-                idx = self.idx = len(buf)
-            else:
-                idx = self.idx = max_size
-        else: # pragma: no cover
-            if size < max_size:
-                del buf[:size]
-                idx = self.idx = len(buf)
-            else:
-                idx = self.idx = max_size
+        if size < max_size:
+            del buf[size:]
+            new_size = len(buf)
+        else:
+            new_size = max_size
 
-        return idx
+        return new_size
 
     def writable(self) -> bool: # pragma: no cover
         """Determine if the stream supports writing.
@@ -419,23 +407,8 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        buf = self.buf
-        idx = self.idx
-        max_size = len(buf)
-        if idx > max_size:
-            fill_size = idx - max_size
-            buf[max_size:idx] = b'\x00' * fill_size
-            max_size = len(buf)
-
         for line in lines:
-            next_idx = idx + len(line)
-            if idx >= max_size:
-                buf.extend(line)
-            else:
-                buf[idx:next_idx] = line
-            idx = next_idx
-
-        self.idx = idx
+            self.write(line)
 
     def read(self, size:Optional[int]=-1) -> bytes:
         """Read up to size bytes from the stream.
@@ -452,12 +425,13 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        buf = self.buf
-        max_size = len(buf)
-        next_idx = max_size if size is None or size < 0 else min(max_size, self.idx+size)
-        part = buf[self.idx:next_idx]
+        mv_buf = memoryview(self.buf)
+        max_size = len(mv_buf)
+        idx = self.idx
+        next_idx = max_size if size is None or size < 0 else min(max_size, idx+size)
+        result = mv_buf[idx:next_idx].tobytes()
         self.idx = next_idx
-        return bytes(part)
+        return result
 
     def readall(self) -> bytes: # pragma: no cover
         """Read and return all remaining bytes in the stream.
@@ -468,16 +442,9 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
+        return self.read(-1)
 
-        buf = self.buf
-        next_idx = len(buf)
-        part = buf[self.idx:next_idx]
-        self.idx = next_idx
-        return bytes(part)
-
-    def readinto(self, b) -> int: # pragma: no cover
+    def readinto(self, b) -> int:
         """Read bytes directly into a pre-allocated, mutable byte-like object.
 
         Args:
@@ -492,11 +459,16 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        buf = self.buf
-        next_idx = len(buf)
-        b[:] = bytes(buf[self.idx:next_idx])
-        self.idx = next_idx
-        return len(b)
+        mv_buf = memoryview(self.buf)
+        idx = self.idx
+        rest_size = len(mv_buf) - idx
+        rd_size = min(len(b), rest_size)
+        if rd_size > 0:
+            next_idx = idx+rd_size
+            b[:rd_size] = mv_buf[idx:next_idx]
+            self.idx = next_idx
+
+        return max(rd_size, 0)
 
     def write(self, b) -> int:
         """Write the given bytes-like object to the stream.
@@ -522,7 +494,7 @@ class JBytesIO(RawIOBase):
         max_size = len(buf)
         if idx > max_size:
             fill_size = idx - max_size
-            buf[max_size:idx] = b'\x00' * fill_size
+            buf.extend(b'\x00' * fill_size)
             max_size = len(buf)
 
         if idx >= max_size:
