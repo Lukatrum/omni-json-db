@@ -18,7 +18,7 @@ TYPE_MAP = {
     'none': type(None),
 }
 
-QUERY_OPS = {
+QUERY_OPS = frozenset({
     # --- MongoDB syntax
     'AND',          # {'$and': [A, B, ..]}                  # (A and B and ..)
                     # {A, B, ...}                           # {$gt:.., $lt:100, ...}
@@ -84,7 +84,33 @@ QUERY_OPS = {
     'TYPE',         # {'$type': chk}                        # type(Value) == chk
     'EXISTS',       # {'$exists': chk}                      # chk in Value
                     # {'$exists': {...}}                    # all(chk in Value for chk in {...})
-}
+    # ---- Transform operator
+    'LOWER',        # {'$lower': chk}                       # Value.lower() == chk
+    'UPPER',        # {'$upper': chk}                       # Value.upper() == chk
+    'STRIP',        # {'$strip': chk}                       # Value.strip() == chk
+    'ABS',          # {'$abs': chk}                         # Value.abs_() == chk
+    'LEN',          # {'$len': chk}                         # Value.len_() == chk
+    'MIN',          # {'$min': chk}                         # Value.min_() == chk
+    'MAX',          # {'$max': chk}                         # Value.max_() == chk
+    'SUM',          # {'$sum': chk}                         # Value.sum_() == chk
+    'AVG',          # {'$avg': chk}                         # Value.avg() == chk
+    'STD',          # {'$std': chk}                         # Value.std() == chk
+    'MID',          # {'$mid': chk}                         # Value.mid() == chk
+})
+
+TRANSFORM_OPS = frozenset({
+    '$lower',   # lower()                 'Alice'       -> 'alice'
+    '$upper',   # upper()                 'alice'       -> 'ALICE'
+    '$strip',   # strip()                 '  hi  '      -> 'hi'
+    '$abs',     # abs()                   -3.14         -> 3.14
+    '$len',     # len()                   [1,2,3]       -> 3
+    '$min',     # min(iterable)           [3,1,4]       -> 1
+    '$max',     # max(iterable)           [3,1,4]       -> 4
+    '$sum',     # sum(iterable)           [3,1,4]       -> 8
+    '$avg',     # arithmetic mean         [1,2,3]       -> 2.0
+    '$std',     # population std-dev      [2,4,4,4,5,5,7,9] -> 2.0
+    '$mid',     # median element/char     [1,0,4,5,3]   -> 3  (index len//2)
+})
 
 @lru_cache(maxsize=256)
 def _compile_rule(rule:str, flags:int=0) -> Pattern:
@@ -351,7 +377,227 @@ class Query:
     def __repr__(self) -> str:
         return f"Query('{self._path}')"
 
+    def lower(self) -> Query:
+        """Apply ``str.lower()`` in the path chain. Maps to ``$lower``.
+
+        Example:
+            >>> Query().name.lower().has('alice')
+            Condition({'name.$lower': {'$has': 'alice'}})
+        """
+        path = self._path
+        return Query(f'{path}.$lower' if path else '$lower')
+
+    def upper(self) -> Query:
+        """Apply ``str.upper()`` in the path chain. Maps to ``$upper``."""
+        path = self._path
+        return Query(f'{path}.$upper' if path else '$upper')
+
+    def strip(self) -> Query:
+        """Apply ``str.strip()`` in the path chain. Maps to ``$strip``."""
+        path = self._path
+        return Query(f'{path}.$strip' if path else '$strip')
+
+    def abs_(self) -> Query:
+        """Apply ``abs()`` in the path chain. Maps to ``$abs``.
+
+        Named ``abs_`` (not ``abs``) to avoid shadowing the Python builtin.
+
+        Example:
+            >>> Query().delta.abs_() < 0.1
+            Condition({'delta.$abs': {'$lt': 0.1}})
+        """
+        path = self._path
+        return Query(f'{path}.$abs' if path else '$abs')
+
+    def len_(self) -> Query:
+        """Apply ``len()`` in the path chain. Maps to ``$len``.
+
+        Named ``len_`` (not ``len``) to avoid shadowing the Python builtin.
+        Works on ``str``, ``list``, ``tuple``, ``dict``, ``set``, ``bytes``.
+
+        Example:
+            >>> Query().tags.len_() >= 3
+            Condition({'tags.$len': {'$gte': 3}})
+        """
+        path = self._path
+        return Query(f'{path}.$len' if path else '$len')
+
+    def sum_(self) -> Query:
+        """Apply ``sum()`` in the path chain. Maps to ``$sum``.
+
+        Named ``sum_`` (not ``sum``) to avoid shadowing the Python builtin.
+        Works on ``str``, ``list``, ``tuple``, ``dict``, ``set``, ``bytes``.
+
+        Example:
+            >>> Query().tags.sum() == 3
+            Condition({'tags.$sum': 3})
+        """
+        path = self._path
+        return Query(f'{path}.$sum' if path else '$sum')
+
+    def min_(self) -> Query:
+        """Apply ``min()`` in the path chain. Maps to ``$min``.
+
+        Named ``min_`` (not ``min``) to avoid shadowing the Python builtin.
+        Applicable to non-string iterables (``list``, ``tuple``, ``set``).
+
+        Example:
+            >>> Query().scores.min_() >= 60
+            Condition({'scores.$min': {'$gte': 60}})
+        """
+        path = self._path
+        return Query(f'{path}.$min' if path else '$min')
+
+    def max_(self) -> Query:
+        """Apply ``max()`` in the path chain. Maps to ``$max``.
+
+        Named ``max_`` (not ``max``) to avoid shadowing the Python builtin.
+
+        Example:
+            >>> Query().scores.max_() == 100
+            Condition({'scores.$max': {'$eq': 100}})
+        """
+        path = self._path
+        return Query(f'{path}.$max' if path else '$max')
+
+    def avg(self) -> Query:
+        """Apply arithmetic mean in the path chain. Maps to ``$avg``.
+
+        Returns ``None`` (no-match) for empty sequences.
+
+        Example:
+            >>> Query().scores.avg().between(70, 90)
+            Condition({'scores.$avg': {'$between': (70, 90)}})
+        """
+        path = self._path
+        return Query(f'{path}.$avg' if path else '$avg')
+
+    def std(self) -> Query:
+        """Apply population standard deviation in the path chain. Maps to ``$std``.
+
+        Uses population std-dev (divides by ``n``).  Returns ``0.0`` for
+        single-element sequences and ``None`` for empty ones.
+
+        Example:
+            >>> Query().readings.std() < 2.0
+            Condition({'readings.$std': {'$lt': 2.0}})
+        """
+        path = self._path
+        return Query(f'{path}.$std' if path else '$std')
+
+    def mid(self) -> Query:
+        """Return the middle element/character in the path chain. Maps to ``$mid``.
+
+        Uses index ``len(val) // 2``.  Works on ``list``, ``tuple``, ``str``,
+        ``bytes``.
+
+        Example:
+            >>> Query().tags.mid() == 'python'
+            Condition({'tags.$mid': {'$eq': 'python'}})
+        """
+        path = self._path
+        return Query(f'{path}.$mid' if path else '$mid')
+
 #-----------------------------------------------------------------------------
+def _apply_transform(op: str, val: Any) -> Any:
+    """Apply a single in-path value-transform operator.
+
+    These operators reshape the current value in a dot-notation path chain
+    before handing it to the next segment or leaf query operator.  They
+    never produce a final match/no-match decision themselves.
+
+    Args:
+        op (str): One of the ``TRANSFORM_OPS`` strings (e.g. ``'$lower'``).
+        val (Any): The current value to transform.
+
+    Returns:
+        Any: The transformed value, or ``None`` if the operator is not
+        applicable to this value's type (caller should treat ``None`` as
+        no-match).
+
+    Raises:
+        Nothing – all internal errors are caught and surfaced as ``None``.
+
+    Semantics of each operator:
+
+    * ``$lower`` / ``$upper`` / ``$strip`` – ``str`` only; returns ``None``
+      for non-strings.
+    * ``$abs`` – ``int`` / ``float`` only.
+    * ``$len`` – any object with ``__len__``; includes ``str``, ``list``,
+      ``dict``, ``tuple``, ``set``.
+    * ``$min`` / ``$max`` – non-string iterables only (use ``$len`` +
+      comparison for character counts on strings).
+    * ``$avg`` – non-string iterable; returns ``None`` for empty sequences.
+    * ``$std`` – population standard deviation (divides by ``n``); returns
+      ``0.0`` for a single-element sequence, ``None`` for empty.
+    * ``$mid`` – returns ``val[len(val) // 2]``; works on any subscriptable
+      with ``__len__`` (string, list, tuple, bytes).
+    """
+    try:
+        if op == '$lower':
+            return val.lower() if isinstance(val, str) else None
+
+        if op == '$upper':
+            return val.upper() if isinstance(val, str) else None
+
+        if op == '$strip':
+            return val.strip() if isinstance(val, str) else None
+
+        if op == '$abs':
+            return abs(val) if isinstance(val, (int, float)) else None
+
+        if op == '$len':
+            return len(val) if hasattr(val, '__len__') else None
+
+        if isinstance(val, (str, bytes)):
+            return None                         # strings excluded from aggregates
+
+        if op == '$min':
+            return min(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$max':
+            return max(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$sum':
+            return sum(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$avg':
+            items = val if isinstance(val, (list, tuple, set)) else \
+                    (val,) if val.__hash__ else ()
+
+            n = len(items)
+            return sum(items) / n if n else None
+
+        if op == '$std':
+            items = val if isinstance(val, (list, tuple, set)) else \
+                    (val,) if val.__hash__ else ()
+
+            n = len(items)
+            if n == 0: return None
+            if n == 1: return 0.0
+            mean = sum(items) / n
+            return (sum((x - mean) ** 2 for x in items) / n) ** 0.5
+
+        if op == '$mid':
+            items = val if isinstance(val, (list, tuple)) else \
+                    list(val) if isinstance(val, set) else \
+                    (val,) if val.__hash__ else ()
+
+            n = len(val) if hasattr(val, '__len__') else None
+            if n:
+                sorted_val = sorted(val)
+                return sorted_val[n // 2]
+
+            return None
+
+    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+        return None
+
+    return None
+
 def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
     """Evaluate whether a document key matches a specified set of rules or MongoDB-like operators.
 
@@ -538,6 +784,42 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
+            elif cmd in TRANSFORM_OPS:
+                transformed = _apply_transform(cmd, key)
+                if transformed is not None:
+                    is_matched = match_KEY_rules(transformed, rule, level=level+1)
+                    is_matched = (not is_matched) if reverse_it else is_matched
+            else:
+                for sep in './|\\':
+                    idx = cmd.find(sep)
+                    if idx < 0: continue
+                    parts = cmd.split(sep)
+                    _key = key
+                    _rule = rule
+                    _check = True
+                    _reverse_it = reverse_it
+                    _size = len(parts)
+                    for ii, part in enumerate(parts):
+                        __reverse_it = part.startswith('!')
+                        _part = part[1:] if __reverse_it else part
+                        if _part in TRANSFORM_OPS:
+                            transformed = _apply_transform(_part, _key)
+                            if transformed is None:
+                                _check = False
+                                break
+                            _key = transformed
+                        elif ii+1 >= _size:
+                            _rule = {_part: _rule}
+                        else:
+                            _check = False
+                            break
+                        _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
+
+                    if _check:
+                        is_matched = match_KEY_rules(_key, _rule, level=level+1)
+                        is_matched = (not is_matched) if _reverse_it else is_matched
+                    break
+
         elif cmd == '_id': # pragma: no cover
             is_matched = match_KEY_rules(key, rule, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
@@ -594,7 +876,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                     date_list = sorted(date_list)
                     rules = {'$ge': date_list[0], '$le': date_list[-1]}
                 elif date_list:
-                    rules = {'$eq': date_list[0]}
+                    rules = {'$has': date_list[0]}
                 else:
                     return False
             else:
@@ -1114,6 +1396,43 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                     except IndexError: # pragma: no cover
                         pass
 
+            elif cmd in TRANSFORM_OPS:
+                transformed = _apply_transform(cmd, val)
+                if transformed is not None:
+                    is_matched = match_VAL_rules(key, transformed, rule, cdate, mdate, level=level+1)
+                    is_matched = (not is_matched) if reverse_it else is_matched
+
+            else:
+                for sep in './|\\':
+                    idx = cmd.find(sep)
+                    if idx < 0: continue
+                    parts = cmd.split(sep)
+                    _val = val
+                    _rule = rule
+                    _check = True
+                    _reverse_it = reverse_it
+                    _size = len(parts)
+                    for ii, part in enumerate(parts):
+                        __reverse_it = part.startswith('!')
+                        _part = part[1:] if __reverse_it else part
+                        if _part in TRANSFORM_OPS:
+                            transformed = _apply_transform(_part, _val)
+                            if transformed is None:
+                                _check = False
+                                break
+                            _val = transformed
+                        elif ii+1 >= _size:
+                            _rule = {_part: _rule}
+                        else:
+                            _check = False
+                            break
+                        _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
+
+                    if _check:
+                        is_matched = match_VAL_rules(key, _val, _rule, cdate, mdate, level=level+1)
+                        is_matched = (not is_matched) if _reverse_it else is_matched
+                    break
+
         elif is_dict and cmd in val:
             is_matched = match_VAL_rules(key, val[cmd], rule, cdate, mdate, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
@@ -1140,21 +1459,40 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
                 try:
                     _val = val
+                    _rule = rule
+                    _check = True
+                    _reverse_it = reverse_it
                     _size = len(parts)
                     for ii,part in enumerate(parts):
                         part_s = part.lstrip(' ')
-                        if ii+1 == _size and part.startswith(('!$', '$')):
-                            rule = {part_s:rule}
+                        if part.startswith(('!$', '$')):
+                            __reverse_it = part.startswith('!')
+                            _part = part[1:] if __reverse_it else part
+                            if _part in TRANSFORM_OPS:
+                                transformed = _apply_transform(_part, _val)
+                                if transformed is None:
+                                    _check = False
+                                    break
+                                _val = transformed
+                            elif ii+1 >= _size:
+                                _rule = {_part: _rule}
+                            else:
+                                _check = False
+                                break
+                            _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
+
                         elif isinstance(_val, dict):
                             _val = _val[part_s]
                         elif isinstance(_val, (list, tuple)):
                             _val = _val[int(part_s)]
                         else: # pragma: no cover
-                            raise TypeError
+                            _check = False
+                            break
 
-                    _cnt += 1
-                    is_matched = match_VAL_rules(key, _val, rule, cdate, mdate, level=level+1)
-                    is_matched = (not is_matched) if reverse_it else is_matched
+                    if _check:
+                        _cnt += 1
+                        is_matched = match_VAL_rules(key, _val, _rule, cdate, mdate, level=level+1)
+                        is_matched = (not is_matched) if _reverse_it else is_matched
                     break
 
                 except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
@@ -1258,15 +1596,28 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
 
     else:
         try:
-            if not rest_parts and child_key.startswith(('!$', '$')):
-                rules = {child_key_s:rules}
-                child_val = val
+            if child_key.startswith(('!$', '$')):
+                _reverse_it = child_key.startswith('!')
+                _child_key = child_key[1:] if _reverse_it else child_key
+                if _child_key in TRANSFORM_OPS: # pragma: no cover
+                    transformed = _apply_transform(_child_key, val)
+                    if transformed is None:
+                        return False
+
+                    val = transformed
+
+                if not rest_parts:
+                    rules = {child_key:rules}
+                    child_val = val
+                else: # pragma: no cover
+                    return False
+
             elif isinstance(val, dict):
                 child_val = val[child_key_s]
             elif isinstance(val, (list, tuple)):
                 child_val = val[int(child_key_s)]
             else: # pragma: no cover
-                raise TypeError
+                return False
 
             return _match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level)
 
