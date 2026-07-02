@@ -664,7 +664,247 @@ Let's initialize an in-memory JDb instance (``jdb = JDb()``) and populate it wit
      - ``{'!$size': [1,2,3]}``
    * - ``$type``
      - Matches if the value is of the specified Python variable type.
-     - ``{'$type': list}``   
+     - ``{'$type': list}``
+   * - 
+     -
+     -   
+   * - ``$abs``
+     - Takes the absolute value of a number before comparing.
+     - ``{'$abs': 3.14}``
+   * - ``$ceil``
+     - Takes the ceiling (math.ceil) of a number before comparing.
+     - ``{'$ceil': 2}``
+   * - ``$floor``
+     - Takes the floor (math.floor) of a number before comparing.
+     - ``{'$floor': 2}``
+   * - ``$round``
+     - Round a number before comparing.
+     - ``{'$round': 2}``
+   * - 
+     -
+     -
+   * - ``$float``
+     - Casts the value to a float before comparing.
+     - ``{'$float': 1.0}``
+   * - ``$int``
+     - Casts the value to a integer before comparing.
+     - ``{'$int': 1.0}``
+   * - ``$neg``
+     - Negates the value (``-val``) before comparing.
+     - ``{'$neg': -1.2}``
+   * - ``$str``
+     - Casts the value to a string before comparing.
+     - ``{'$str': '1.2'}``
+   * - 
+     -
+     -
+   * - ``$avg``
+     - Calculates the arithmetic mean of an iterable before comparing.
+     - ``{'$avg': 2.0}``
+   * - ``$std``
+     - Calculates the population standard deviation of an iterable before comparing.
+     - ``{'$std': 2.0}``
+   * - ``$max``
+     - Finds the maximum value in an iterable before comparing.
+     - ``{'$max': 4}``
+   * - ``$mid``
+     - Extracts the middle element or character (index ``len//2``) before comparing.
+     - ``{'$mid': 4}``
+   * - ``$min``
+     - Finds the minimum value in an iterable before comparing.
+     - ``{'$min': 1}``
+   * - ``$sum``
+     - Calculates the sum of an iterable before comparing.
+     - ``{'$sum': 8}``
+   * - 
+     -
+     -
+   * - ``$first``
+     - Extracts the first item or character before comparing.
+     - ``{'$first': 1}``
+   * - ``$flat``
+     - Flattens a nested iterable before comparing.
+     - ``{'$flat': [1,2,2,3]}``
+   * - ``$last``
+     - Extracts the last item or character before comparing.
+     - ``{'$last': 3}``
+   * - ``$len``
+     - Calculates the length of an array or string before comparing.
+     - ``{'$len': 3}``
+   * - ``$sort``
+     - Sorts the iterable values before comparing.
+     - ``{'$sort': [1,2,3]}``
+   * - ``$unique``
+     - Performs order-preserving deduplication on an iterable before comparing.
+     - ``{'$unique': [2,3,1]}``
+   * - 
+     -
+     -
+   * - ``$lower``
+     - Converts a string to lowercase before comparing.
+     - ``{'$lower': 'alice'}``
+   * - ``$upper``
+     - Converts a string to uppercase before comparing.
+     - ``{'$upper': 'ALICE'}``
+   * - ``$strip``
+     - Strips leading and trailing whitespaces from a string before comparing.
+     - ``{'$strip': 'hi'}``   
+
+
+.. list-table::
+   :widths: 20 40 30
+   :header-rows: 1
+
+   * - Syntax / Operator
+     - Description
+     - Example Usage     
+   * - ``==``, ``!=``
+     - Equals / Not equals
+     - ``User.name != 'Bob'``
+   * - ``>``, ``>=``, ``<``, ``<=``
+     - Numeric comparison 
+     - ``User.age > 30``, ``User.age < 30``
+   * - ``&``
+     - Logical AND
+     - ``(User.age > 20) & (User.role == 'admin')``
+   * - ``|``
+     - Logical OR
+     - ``(User.name == 'Alice') | (User.age < 30)``
+   * - ``~``
+     - Logical NOT
+     - ``~ User.exists('email')``
+   * - ``.has(val)``
+     -  Contains specific string or array element
+     - ``User.tags.has('database')``
+   * - ``.not_has(val)``
+     -  Does not contain specific string or array element
+     - ``User.name.not_has('ice')``
+   * - ``.ihas(val)``
+     - Case-insensitive contains
+     - ``User.name.ihas('alice')``
+   * - ``.startswith(val)``
+     - String starts with prefix
+     - ``User.city.startswith(('L', 'H'))``
+   * - ``.endswith(val)``
+     - String ends with suffix
+     - ``User.name.endswith('b')``
+   * - ``.matches(pattern)``
+     - Regular expression search (equivalent to ``re.search``)
+     - ``User.name.matches(r'[bB]ob')``
+   * - ``.fullmatch(pattern)``
+     - expression full match (equivalent to ``re.fullmatch``)
+     - ``User.name.fullmatch(r'.lic.')``
+   * - ``.one_of(col)``
+     - Value is within the specified collection
+     - ``User.role.one_of(['admin', 'dev'])``
+   * - ``.not_in(col)``
+     - Value is not within the specified collection
+     - ``User.role.not_in(['admin', 'dev'])``
+   * - ``.any_in(col)``
+     - Any element in the array is within the specified collection
+     - ``User.role.any_in(['admin', 'ceo'])``
+   * - ``.between(low, high)``
+     - Value or string is within the specified range
+     - ``User.age.between(20, 30)``
+   * - ``.size_of(size)``     
+     - Array or string length matches
+     - ``User.tags.size_of(2)``
+   * - ``.exists(fields)``
+     - Checks if specified fields exist
+     - ``User.exists('email')``
+   * - ``.type_of(type)``
+     - Checks the data type
+     - ``User.age.type_of(int)``
+   * - ``.mod(div, rem)``
+     - Modulo condition (remainder is ``rem`` when divided by ``div``)
+     - ``User._date.mode(7, 5)``
+   * - ``.near(target, tol)``
+     -  Numeric value is near the target within tolerance ``tol``
+     - ``User._date.near(toady, 1)``
+   * - ``.test(func)``
+     - Passes a custom Lambda function for condition evaluation
+     - ``User.age.test(lambda v: 40 >= v > 18)``
+   * - ``.abs()``
+     - Takes the absolute value of a number before comparing.
+     - ``Query().price.abs() == 3.14``
+   * - ``.ceil()``
+     - Takes the ceiling (math.ceil) of a number before comparing.
+     - ``Query().price.ceil() > 3``
+   * - ``.floor()``
+     - Takes the floor (math.floor) of a number before comparing.
+     - ``Query().price.floor() <= 2``
+   * - ``.round()``
+     - Round a number before comparing.
+     - ``Query().price.round() == 2``
+   * - ``.float()``
+     - Casts the value to a float before comparing.
+     - ``Query().price.float() == 2.1```
+   * - ``.int()``
+     - Casts the value to a integer before comparing.
+     - ``Query().price.int() != 1```
+   * - ``.neg()``
+     - Negates the value (``-val``) before comparing.
+     - ``Query().price.neg() == -1.2``
+   * - ``.str()``
+     - Casts the value to a string before comparing.
+     - ``Query().price.str() == '1.2'``
+   * - ``.avg()``
+     - Calculates the arithmetic mean of an iterable before comparing.
+     - ``Query().prices.avg() == 2.5```
+   * - ``.std()``
+     - Calculates the population standard deviation of an iterable before comparing.
+     - ``Query().prices.std() >= 2.0``
+   * - ``.max()``
+     - Finds the maximum value in an iterable before comparing.
+     - ``Query().prices.max() == 4``
+   * - ``.mid()``
+     - Extracts the middle element or character (index ``len//2``) before comparing.
+     - ``Query().prices.mid() == 4``
+   * - ``.min()``
+     - Finds the minimum value in an iterable before comparing.
+     - ``Query().prices.min() == 1``
+   * - ``.sum()``
+     - Calculates the sum of an iterable before comparing.
+     - ``Query().prices.sum() == 8``
+   * - ``.first()``
+     - Extracts the first item or character before comparing.
+     - ``Query().prices.first() == 1``
+   * - ``.flat()``
+     - Flattens a nested iterable before comparing.
+     - ``Query().prices.flat().max() == 4``
+   * - ``.last()``
+     - Extracts the last item or character before comparing.
+     - ``Query().prices.last() == 3``
+   * - ``.len()``
+     - Calculates the length of an array or string before comparing.
+     - ``Query().prices.len() == 3``
+   * - ``.sort()``
+     - Sorts the iterable values before comparing.
+     - ``Query().prices.sort().mid() == 2``
+   * - ``.unique()``
+     - Performs order-preserving deduplication on an iterable before comparing.
+     - ``Query().prices.unique().first() == 1``
+   * - ``.lower()``
+     - Converts a string to lowercase before comparing.
+     - ``Query().name.lower() == 'alice'``
+   * - ``.upper()``
+     - Converts a string to uppercase before comparing.
+     - ``Query().name.upper() == 'ALICE'``
+   * - ``.strip()``
+     - Strips leading and trailing whitespaces from a string before comparing.
+     - ``Query().name.strip() == 'Hi'``
+   * - ``field['field']``
+     - Accesses a specific field
+     - ``User['addr'].city``, ``User.addr.city``
+   * - ``.field[0]`` 
+     - specific index of an array (supports negative index like ``User.tags[-1]``)
+     - ``User.tags[1].has('db')``
+   * - ``'*'`` / ``'**'`` / ``'?'``
+     - First-level wildcard / Recursive multi-level wildcard / Single-char wildcard path search
+     - ``User['*']``, ``User['**']``, ``User['ci?y']``, ``User['c*y']``
+   * - ``._id`` / ``._date``
+     - system reserved keys: access Document ID (Primary key) and Timestamp respectively
+     - ``User._id``, ``User._date``
 
 .. code-block:: python
 

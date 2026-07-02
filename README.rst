@@ -158,6 +158,8 @@ Query Engine
 
 Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``,  ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``NIN``, ``ANYIN``.
 
+Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``, ``NEG``, ``STR``, ``AVG``, ``STD``, ``MAX``, ``MID``, ``MIN``, ``SUM``, ``FIRST``, ``LAST``, ``LEN``, ``SORT``, ``UNIQUE``, ``LOWER``, ``UPPER``, ``STRIP``.
+
 Know `More Query Examples`_ or `Pythonic Query Examples`_
 
 Unremove & Unmodify
@@ -1010,8 +1012,92 @@ Operators Reference
      - ``{'!$size': [1,2,3]}``
    * - ``$type``
      - Matches if the value is of the specified Python variable type.
-     - ``{'$type': list}``   
-
+     - ``{'$type': list}``
+   * - 
+     -
+     -   
+   * - ``$abs``
+     - Takes the absolute value of a number before comparing.
+     - ``{'$abs': 3.14}``
+   * - ``$ceil``
+     - Takes the ceiling (math.ceil) of a number before comparing.
+     - ``{'$ceil': 2}``
+   * - ``$floor``
+     - Takes the floor (math.floor) of a number before comparing.
+     - ``{'$floor': 2}``
+   * - ``$round``
+     - Round a number before comparing.
+     - ``{'$round': 2}``
+   * - 
+     -
+     -
+   * - ``$float``
+     - Casts the value to a float before comparing.
+     - ``{'$float': 1.0}``
+   * - ``$int``
+     - Casts the value to a integer before comparing.
+     - ``{'$int': 1.0}``
+   * - ``$neg``
+     - Negates the value (``-val``) before comparing.
+     - ``{'$neg': -1.2}``
+   * - ``$str``
+     - Casts the value to a string before comparing.
+     - ``{'$str': '1.2'}``
+   * - 
+     -
+     -
+   * - ``$avg``
+     - Calculates the arithmetic mean of an iterable before comparing.
+     - ``{'$avg': 2.0}``
+   * - ``$std``
+     - Calculates the population standard deviation of an iterable before comparing.
+     - ``{'$std': 2.0}``
+   * - ``$max``
+     - Finds the maximum value in an iterable before comparing.
+     - ``{'$max': 4}``
+   * - ``$mid``
+     - Extracts the middle element or character (index ``len//2``) before comparing.
+     - ``{'$mid': 4}``
+   * - ``$min``
+     - Finds the minimum value in an iterable before comparing.
+     - ``{'$min': 1}``
+   * - ``$sum``
+     - Calculates the sum of an iterable before comparing.
+     - ``{'$sum': 8}``
+   * - 
+     -
+     -
+   * - ``$first``
+     - Extracts the first item or character before comparing.
+     - ``{'$first': 1}``
+   * - ``$flat``
+     - Flattens a nested iterable before comparing.
+     - ``{'$flat': [1,2,2,3]}``
+   * - ``$last``
+     - Extracts the last item or character before comparing.
+     - ``{'$last': 3}``
+   * - ``$len``
+     - Calculates the length of an array or string before comparing.
+     - ``{'$len': 3}``
+   * - ``$sort``
+     - Sorts the iterable values before comparing.
+     - ``{'$sort': [1,2,3]}``
+   * - ``$unique``
+     - Performs order-preserving deduplication on an iterable before comparing.
+     - ``{'$unique': [2,3,1]}``
+   * - 
+     -
+     -
+   * - ``$lower``
+     - Converts a string to lowercase before comparing.
+     - ``{'$lower': 'alice'}``
+   * - ``$upper``
+     - Converts a string to uppercase before comparing.
+     - ``{'$upper': 'ALICE'}``
+   * - ``$strip``
+     - Strips leading and trailing whitespaces from a string before comparing.
+     - ``{'$strip': 'hi'}``
+   
 Pythonic Query Examples
 -------------------------
 For developers who prefer a Pythonic and object-oriented syntax for filtering data (similar to the **TinyDB** experience), ``omni-json-db`` provides the ``Query`` object. You can elegantly use native Python operators (e.g., ``==``, ``>``, ``&``, ``|``, ``~``) and chained methods to construct complex search conditions.
@@ -1137,6 +1223,75 @@ Methods & Operators Reference
    * - ``.test(func)``
      - Passes a custom Lambda function for condition evaluation
      - ``User.age.test(lambda v: 40 >= v > 18)``
+   * - ``.abs()``
+     - Takes the absolute value of a number before comparing.
+     - ``Query().price.abs() == 3.14``
+   * - ``.ceil()``
+     - Takes the ceiling (math.ceil) of a number before comparing.
+     - ``Query().price.ceil() > 3``
+   * - ``.floor()``
+     - Takes the floor (math.floor) of a number before comparing.
+     - ``Query().price.floor() <= 2``
+   * - ``.round()``
+     - Round a number before comparing.
+     - ``Query().price.round() == 2``
+   * - ``.float()``
+     - Casts the value to a float before comparing.
+     - ``Query().price.float() == 2.1```
+   * - ``.int()``
+     - Casts the value to a integer before comparing.
+     - ``Query().price.int() != 1```
+   * - ``.neg()``
+     - Negates the value (``-val``) before comparing.
+     - ``Query().price.neg() == -1.2``
+   * - ``.str()``
+     - Casts the value to a string before comparing.
+     - ``Query().price.str() == '1.2'``
+   * - ``.avg()``
+     - Calculates the arithmetic mean of an iterable before comparing.
+     - ``Query().prices.avg() == 2.5```
+   * - ``.std()``
+     - Calculates the population standard deviation of an iterable before comparing.
+     - ``Query().prices.std() >= 2.0``
+   * - ``.max()``
+     - Finds the maximum value in an iterable before comparing.
+     - ``Query().prices.max() == 4``
+   * - ``.mid()``
+     - Extracts the middle element or character (index ``len//2``) before comparing.
+     - ``Query().prices.mid() == 4``
+   * - ``.min()``
+     - Finds the minimum value in an iterable before comparing.
+     - ``Query().prices.min() == 1``
+   * - ``.sum()``
+     - Calculates the sum of an iterable before comparing.
+     - ``Query().prices.sum() == 8``
+   * - ``.first()``
+     - Extracts the first item or character before comparing.
+     - ``Query().prices.first() == 1``
+   * - ``.flat()``
+     - Flattens a nested iterable before comparing.
+     - ``Query().prices.flat().max() == 4``
+   * - ``.last()``
+     - Extracts the last item or character before comparing.
+     - ``Query().prices.last() == 3``
+   * - ``.len()``
+     - Calculates the length of an array or string before comparing.
+     - ``Query().prices.len() == 3``
+   * - ``.sort()``
+     - Sorts the iterable values before comparing.
+     - ``Query().prices.sort().mid() == 2``
+   * - ``.unique()``
+     - Performs order-preserving deduplication on an iterable before comparing.
+     - ``Query().prices.unique().first() == 1``
+   * - ``.lower()``
+     - Converts a string to lowercase before comparing.
+     - ``Query().name.lower() == 'alice'``
+   * - ``.upper()``
+     - Converts a string to uppercase before comparing.
+     - ``Query().name.upper() == 'ALICE'``
+   * - ``.strip()``
+     - Strips leading and trailing whitespaces from a string before comparing.
+     - ``Query().name.strip() == 'Hi'``
    * - ``field['field']``
      - Accesses a specific field
      - ``User['addr'].city``, ``User.addr.city``
