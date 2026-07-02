@@ -3517,6 +3517,30 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jmem['k1'], list(range(32)))
             self.assertEqual(jmem['k2'], list(range(16)))
 
+            val = ('abc', 4, 2.1, True, None)
+            jdb['tuple()'] = val
+            if jdb.data_type.endswith(('M', 'P')):
+                self.assertEqual(jdb['tuple()'], val)
+            else:
+                self.assertEqual(tuple(jdb['tuple()']), val)
+
+            jdb['list()'] = _val = list(val)
+            self.assertEqual(jdb['list()'], _val)
+
+            jdb['set()'] = _val = set(val)
+            if jdb.data_type.endswith(('M', 'P', 'S')):
+                self.assertEqual(jdb['set()'], _val)
+            else:
+                self.assertEqual(set(jdb['set()']), _val)
+
+            jdb['frozenset()'] = _val = frozenset(val)
+            if jdb.data_type.endswith(('M', 'P', 'S')):
+                self.assertEqual(jdb['frozenset()'], _val)
+            else:
+                self.assertEqual(frozenset(jdb['frozenset()']), _val)
+
+            jdb -= {'tuple()', 'set()', 'list()', 'frozenset()'}
+
             self.assertNotEqual(jdb.sync_id, jdb1.sync_id)
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
