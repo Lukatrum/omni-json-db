@@ -509,6 +509,9 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(user.name.endswith('e'))
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
+            res2 = jdb.find(user.name.last() == 'e')
+            self.assertEqual(res, res2)
+
             # 'Aa' <= VAL['name'] <= 'Bz'
             res = jdb.find(user.name.between('Aa', 'Bz'))
             self.assertEqual(set(res), {'user_1', 'user_2'})
@@ -522,6 +525,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_1'})
 
             res2 = jdb.find(user.name.lower() == 'alice')
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.name.lower().first() == 'a')
             self.assertEqual(res, res2)
 
             res2 = jdb.find(user.name.strip().upper().has('ALI'))
@@ -610,7 +616,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_2'})
 
             # name in ['Alice', 'Bob'] AND age in [30, 25]
-            res = jdb.find(user.name.matches(re.compile('Alice|Bob')) & user.age.one_of([30, 25]))
+            res = jdb.find(user.name.fullmatch('Alice|Bob') & user.age.one_of([30, 25]))
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
             # 3. Logical Grouping (AND, OR, NOR, NOT)
@@ -682,47 +688,93 @@ class TestJDb(unittest.TestCase):
                 'user_5': {
                     'name': 'Eva','age': 32, 'email': 'eva@company_a.com', 'role': 'officer',
                     'addr_home': {'city': 'NYC', 'zip': 10001}, 'addr_work': {'city': 'LA'},
-                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85, 90, 78]},
+                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85.1, 90.2, 78.3]},
                 'user_6': {
                     'name': 'Fiona', 'age': 44, 'email': 'fiona@company_b.com', 'role': 'CEO',
                     'addr_home': {'city': 'Tokyo', 'zip':4000}, 'addr_work': {'city': 'HK', 'zip': 5001},
-                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92, 95, 99]}
+                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92.4, 95.5, 99.6]}
             }
+
+            # int(scores[0]) == 92
+            res = jdb.find(user.scores.first().int() == 92)
+            self.assertEqual(set(res), {'user_6'})
+
+            # sorted(flat(scores))[0] > 90
+            res = jdb.find(user.scores.flat().sort().first() > 90)
+            self.assertEqual(set(res), {'user_6'})
+
+            # sorted(flat(scores))[-1] < 91
+            res = jdb.find(user.scores.unique().sort().last().floor() < 91)
+            self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(user.scores.last().round() < 91)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.scores.last().str() == '78.3')
+            self.assertEqual(res, res2)
+
+            # int(scores[-1]) < 90
+            res = jdb.find(user.scores.last() <= 90)
+            self.assertEqual(set(res), {'user_5'})
 
             # average(scores) >= 90
             res = jdb.find(user.scores.avg() >= 90)
             self.assertEqual(set(res), {'user_6'})
 
-            # max(scores) > 90
-            res = jdb.find(user.scores.max_() > 90)
+            # max(scores) > 90.2
+            res = jdb.find(user.scores.max() > 90.2)
             self.assertEqual(set(res), {'user_6'})
 
             # max(scores) == 99
-            res = jdb.find(user.scores.max_() == 99)
+            res = jdb.find(user.scores.max().int() == 99)
             self.assertEqual(set(res), {'user_6'})
 
+            res2 = jdb.find(user.scores.max().floor().str() == '99')
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.scores.ceil().max() > 99)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.scores.round().max() == 100)
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.scores.floor().max() == 99)
+            self.assertEqual(res, res2)
+
             # max(scores) in [90, 88]
-            res = jdb.find(user.scores.max_().one_of((90, 99)))
+            res = jdb.find(user.scores.max().int().one_of((90, 99)))
             self.assertEqual(set(res), {'user_5', 'user_6'})
 
+            res2 = jdb.find(user.scores.str().float().int().max().one_of((90, 99)))
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(user.scores.len() == 3)
+            self.assertEqual(res, res2)
+
             # min(scores) <= 80
-            res = jdb.find(user.scores.min_() <= 80)
+            res = jdb.find(user.scores.min() <= 80)
             self.assertEqual(set(res), {'user_5'})
 
-            # 87 >= mid(scores) >= 82
-            res = jdb.find(user.scores.mid().between(82, 87))
+            # 91 >= mid(scores) >= 90
+            res = jdb.find(user.scores.mid().between(90, 91))
             self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(user.scores.sort().mid().int() == 85)
+            self.assertEqual(res, res2)
 
             # sum(scores) < 270
-            res = jdb.find(user.scores.sum_() < 270)
+            res = jdb.find(user.scores.sum() < 270)
             self.assertEqual(set(res), {'user_5'})
 
             # abs(std(scores)) > 0
-            res = jdb.find(user.scores.std().abs_() > 0.)
+            res = jdb.find(user.scores.std().abs() > 0.)
             self.assertEqual(set(res), {'user_5', 'user_6'})
 
+            res2 = jdb.find(user.scores.std().neg().abs() > 0.)
+            self.assertEqual(res, res2)
+
             # len(tags) > 2
-            res = jdb.find(user.tags.len_() == 3)
+            res = jdb.find(user.tags.len() == 3)
             self.assertEqual(set(res), {'user_3'})
 
             res = jdb.show(user.exists('email'))
@@ -1222,12 +1274,18 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'name': {'$ew': 'e'}})
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
+            res2 = jdb.find(vals={'name.$last': 'e'})
+            self.assertEqual(res, res2)
+
             res = jmem.show(r'users:::user_', vals={'name': {'$ew': 'e'}}, with_date=True)
             self.assertEqual(set(res), {'users:::user_1', 'users:::user_3'})
 
             # 'Aa' <= VAL['name'] <= 'Bz'
             res = jdb.find(vals={'name': {'$between': ('Aa', 'Bz')}})
             self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res2 = jdb.find(vals={'name.$lower.$first': ['a', 'b']})
+            self.assertEqual(res, res2)
 
             # not 'Aa' <= VAL['name'] <= 'Bz'
             res = jdb.find(vals={'name': {'!$between': ('Aa', 'Bz')}})
@@ -1617,36 +1675,62 @@ class TestJDb(unittest.TestCase):
                 'user_5': {
                     'name': 'Eva','age': 32, 'email': 'eva@company_a.com', 'role': 'officer',
                     'addr_home': {'city': 'NYC', 'zip': 10001}, 'addr_work': {'city': 'LA'},
-                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85, 90, 78]},
+                    'meta': {'tags': ['db', 'excel'], 'labels': ['backend', 'api']}, 'scores': [85.1, 90.2, 78.3]},
                 'user_6': {
                     'name': 'Fiona', 'age': 44, 'email': 'fiona@company_b.com', 'role': 'CEO',
                     'addr_home': {'city': 'Tokyo', 'zip':4000}, 'addr_work': {'city': 'HK', 'zip': 5001},
-                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92, 95, 99]}
+                    'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92.4, 95.5, 99.6]}
             }
+
+            # int(scores[0]) == 92
+            res = jdb.find(vals={'scores.$first.$int': 92})
+            self.assertEqual(set(res), {'user_6'})
+
+            # int(scores[-1]) <= 90
+            res = jdb.find(vals={'scores.$last.$le': 90})
+            self.assertEqual(set(res), {'user_5'})
 
             # average(scores) >= 90
             res = jdb.find(vals={'scores.$avg.$ge': 90})
             self.assertEqual(set(res), {'user_6'})
 
-            # max(scores) > 90
-            res = jdb.find(vals={'scores.$max.$gt': 90})
+            # max(scores) > 90.2
+            res = jdb.find(vals={'scores.$max.$gt': 90.2})
             self.assertEqual(set(res), {'user_6'})
 
             # max(scores) == 99
-            res = jdb.find(vals={'scores.$max': 99})
+            res = jdb.find(vals={'scores.$max.$int': 99})
             self.assertEqual(set(res), {'user_6'})
 
+            res2 = jdb.find(vals={'scores.$max.$floor.$str': '99'})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'scores.$ceil.$max': 100})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'scores.$round.$max': 100})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'scores.$floor.$max': 99})
+            self.assertEqual(res, res2)
+
             # max(scores) in [90, 88]
-            res = jdb.find(vals={'scores.$max': [90, 99]})
+            res = jdb.find(vals={'scores.$max.$int': [90, 99]})
             self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            res2 = jdb.find(vals={'scores.$str.$float.$int.$max': [90, 99]})
+            self.assertEqual(res, res2)
 
             # min(scores) <= 80
             res = jdb.find(vals={'scores.$min.$lte': 80})
             self.assertEqual(set(res), {'user_5'})
 
-            # 87 >= mid(scores) >= 82
-            res = jdb.find(vals={'scores.$mid.$between': (82,87)})
+            # 91 >= mid(scores) >= 90
+            res = jdb.find(vals={'scores.$mid.$between': (90,91)})
             self.assertEqual(set(res), {'user_5'})
+
+            res2 = jdb.find(vals={'scores.$sort.$mid.$int': 85})
+            self.assertEqual(res, res2)
 
             # sum(scores) < 270
             res = jdb.find(vals={'scores.$sum.$lt': 270})
@@ -1655,6 +1739,9 @@ class TestJDb(unittest.TestCase):
             # abs(std(scores)) > 0
             res = jdb.find(vals={'scores.$std.$abs.$gt': 0.})
             self.assertEqual(set(res), {'user_5', 'user_6'})
+
+            res2 = jdb.find(vals={'scores.$std.$neg.$abs.$gt': 0.})
+            self.assertEqual(res, res2)
 
             # len(tags) > 2
             res = jdb.find(vals={'tags.$len': 3})
@@ -1700,13 +1787,13 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'*.city.!$sw': ('A', 'B')})
             self.assertEqual(res, res2)
 
-            res2 = jdb.find(vals={'addr*|ci*': {'$sw': ('L', 'H')}})
+            res2 = jdb.find(vals={'addr*|ci*|$sw': ('L', 'H')})
             self.assertEqual(res, res2)
 
-            res2 = jdb.find(vals={'addr*/ci*': {'$sw': ('L', 'H')}})
+            res2 = jdb.find(vals={'addr*/ci*/$sw': ('L', 'H')})
             self.assertEqual(res, res2)
 
-            res2 = jdb.find(vals={'addr*\\ci*': {'$sw': ('L', 'H')}})
+            res2 = jdb.find(vals={'addr*\\ci*\\$sw': ('L', 'H')})
             self.assertEqual(res, res2)
 
             # zip code >= 5000
@@ -1960,7 +2047,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
             # --------------------------------------
             jmem1 = jmem.add_group('other')
-            jmem1 += {'key1':[1, 2, 3, 4], 'key2':[0, 9, 8, 7, 6], 'key3':[0, 2, 4, 6]}
+            jmem1 += {'key1':[1, 2, 3, 4], 'key2':[0, 9, 8, 7, 6], 'key3':[0, 6, 2, 2]}
             matches = jmem1.find(ALL={'$ne':0})
             self.assertEqual(set(matches), {'key1'})
 
@@ -2003,6 +2090,23 @@ class TestJDb(unittest.TestCase):
 
             matches = jmem1.find(AND=[{'!$type':list}, {'$ge': 8}])
             self.assertEqual(set(matches), {'8', '9'})
+
+            jmem1[:] = lambda k,v: (v + [v[-1], v[0]]) if isinstance(v, list) else v
+            matches = jmem1.find(vals={'$last': 0})
+            self.assertEqual(set(matches), {'key2', 'key3'})
+
+            matches_2 = jmem1.find(vals={'$first': 0})
+            self.assertEqual(matches, matches_2)
+
+            matches = jmem1.find(AND=[{'$type':list}, {'$size': 6}])
+            self.assertEqual(set(matches), {'key1', 'key3'})
+
+            matches = jmem1.find(vals={'$unique.$size': 4})
+            self.assertEqual(set(matches), {'key1'})
+
+            jmem1['key4'] = [[1,2], [3,4], [5,6], [2,4]]
+            matches = jmem1.find(vals={'$flat.$unique.$len.$ge': 6})
+            self.assertEqual(set(matches), {'key4'})
 
             jmem1 += {f'1st_{v}':{f'2nd_{vv}':{f'3rd_{vvv}':vvv for vvv in range(vv+2)} for vv in range(v+1)} for v in range(8)}
             matches = jmem1.show('1st_', vals={'2nd_4.3rd_3': range(6)})

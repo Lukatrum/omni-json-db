@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines
 from __future__ import annotations
 from functools import lru_cache
+from math import ceil, floor
 from datetime import date as dt_date, datetime, timedelta
 from typing import Any, List, Generator, Union, Callable, Tuple
 from re import compile as re_compile, findall as re_findall, Pattern, S as re_S
@@ -85,31 +86,63 @@ QUERY_OPS = frozenset({
     'EXISTS',       # {'$exists': chk}                      # chk in Value
                     # {'$exists': {...}}                    # all(chk in Value for chk in {...})
     # ---- Transform operator
-    'LOWER',        # {'$lower': chk}                       # Value.lower() == chk
-    'UPPER',        # {'$upper': chk}                       # Value.upper() == chk
-    'STRIP',        # {'$strip': chk}                       # Value.strip() == chk
-    'ABS',          # {'$abs': chk}                         # Value.abs_() == chk
-    'LEN',          # {'$len': chk}                         # Value.len_() == chk
-    'MIN',          # {'$min': chk}                         # Value.min_() == chk
-    'MAX',          # {'$max': chk}                         # Value.max_() == chk
-    'SUM',          # {'$sum': chk}                         # Value.sum_() == chk
+    'ABS',          # {'$abs': chk}                         # Value.abs() == chk
+    'CEIL',         # {'$ceil': chk}                        # Value.ceil() == chk
+    'FLOOR',        # {'$floor': chk}                       # Value.floor() == chk
+    'ROUND',        # {'$round': chk}                       # Value.round() == chk
+
+    'FLOAT',        # {'$float': chk}                       # Value.float() == chk
+    'INT',          # {'$int': chk}                         # Value.int() == chk
+    'NEG',          # {'$neg': chk}                         # Value.neg() == chk
+    'STR',          # {'$str': chk}                         # Value.str() == chk
+
     'AVG',          # {'$avg': chk}                         # Value.avg() == chk
     'STD',          # {'$std': chk}                         # Value.std() == chk
+    'MAX',          # {'$max': chk}                         # Value.max() == chk
     'MID',          # {'$mid': chk}                         # Value.mid() == chk
+    'MIN',          # {'$min': chk}                         # Value.min() == chk
+    'SUM',          # {'$sum': chk}                         # Value.sum() == chk
+
+    'FIRST',        # {'$first': chk}                       # Value.first() == chk
+    'FLAT',         # {'$flat': chk}                        # Value.flat() == chk
+    'LAST',         # {'$last': chk}                        # Value.last() == chk
+    'LEN',          # {'$len': chk}                         # Value.len() == chk
+    'SORT',         # {'$sort': chk}                        # Value.sort() == chk
+    'UNIQUE',       # {'$unique': chk'}                     # Value.unique() == chk
+
+    'LOWER',        # {'$lower': chk}                       # Value.lower() == chk
+    'STRIP',        # {'$strip': chk}                       # Value.strip() == chk
+    'UPPER',        # {'$upper': chk}                       # Value.upper() == chk
 })
 
 TRANSFORM_OPS = frozenset({
+    '$abs',     # abs()                   -3.14         -> 3.14
+    '$ceil',    # math.ceil(va)           1.1           -> 2
+    '$floor',   # math.floor(val)         1.9           -> 1
+    '$round',   # math.round(val)         1.5           -> 2    
+    #----
+    '$float',   # float(str/int)          1             -> 1.
+    '$int',     # int(str/float)          1.1           -> 1    
+    '$neg',     # -val                    1.2           -> -1.2    
+    '$str',     # str()                   1             -> '1'
+    #----
+    '$avg',     # arithmetic mean         [1,2,3]       -> 2.0
+    '$std',     # population std-dev      [2,4,4,4,5,5,7,9] -> 2.0
+    '$max',     # max(iterable)           [3,1,4]       -> 4
+    '$mid',     # middle element/char     [1,0,4,5,3]   -> 4  (index len//2)
+    '$min',     # min(iterable)           [3,1,4]       -> 1
+    '$sum',     # sum(iterable)           [3,1,4]       -> 8
+    #----
+    '$first',   # first item/char         [1,2,3]       -> 1
+    '$flat',    # flat(iterable)          [[1,2],[2,3]] -> [1,2,2,3]
+    '$last',    # last item/char          [1,2,3]       -> 3
+    '$len',     # len()                   [1,2,3]       -> 3
+    '$sort',    # sorted(val)             [2,3,1]       -> [1,2,3]
+    '$unique',  # order-presrving dedup   [2,2,3,1,1]   -> [2,3,1]
+    #----
     '$lower',   # lower()                 'Alice'       -> 'alice'
     '$upper',   # upper()                 'alice'       -> 'ALICE'
     '$strip',   # strip()                 '  hi  '      -> 'hi'
-    '$abs',     # abs()                   -3.14         -> 3.14
-    '$len',     # len()                   [1,2,3]       -> 3
-    '$min',     # min(iterable)           [3,1,4]       -> 1
-    '$max',     # max(iterable)           [3,1,4]       -> 4
-    '$sum',     # sum(iterable)           [3,1,4]       -> 8
-    '$avg',     # arithmetic mean         [1,2,3]       -> 2.0
-    '$std',     # population std-dev      [2,4,4,4,5,5,7,9] -> 2.0
-    '$mid',     # median element/char     [1,0,4,5,3]   -> 3  (index len//2)
 })
 
 @lru_cache(maxsize=256)
@@ -304,6 +337,9 @@ class Query:
         """Build a less-than-or-equal condition (``<=``). Maps to ``$lte``."""
         return self._cond('$lte', val)
 
+    def __repr__(self) -> str:
+        return f"Query('{self._path}')"
+
     def has(self, val:Union[str,tuple]) -> Condition:
         """Check if the target string or collection contains the value. Maps to ``$has``."""
         return self._cond('$has', val)
@@ -374,9 +410,6 @@ class Query:
         """Check if the target value does *not* exist within the provided collection. Maps to ``$nin``."""
         return self._cond('$nin', collection)
 
-    def __repr__(self) -> str:
-        return f"Query('{self._path}')"
-
     def lower(self) -> Query:
         """Apply ``str.lower()`` in the path chain. Maps to ``$lower``.
 
@@ -397,11 +430,39 @@ class Query:
         path = self._path
         return Query(f'{path}.$strip' if path else '$strip')
 
-    def abs_(self) -> Query:
+    def str(self) -> Query:
+        """Convert scalar to string
+
+        Example:
+            >>> Query().price.str() == "99.9"
+            Condition({'price.$str': {'$eq': 99.9}})
+        """
+        path = self._path
+        return Query(f'{path}.$str' if path else '$str')
+
+    def int(self) -> Query:
+        """Convert a number or string to an integer.
+
+        Example:
+            >>> Query().price.int() == 99
+            Condition({'price.$int': {'$eq': 99}})
+        """
+        path = self._path
+        return Query(f'{path}.$int' if path else '$int')
+
+    def float(self) -> Query:
+        """Convert a number or string to an floating point.
+
+        Example:
+            >>> Query().price.float() == 99.9
+            Condition({'price.$float': {'$eq': 99.9}})
+        """
+        path = self._path
+        return Query(f'{path}.$float' if path else '$float')
+
+    def abs(self) -> Query:
         """Apply ``abs()`` in the path chain. Maps to ``$abs``.
-
-        Named ``abs_`` (not ``abs``) to avoid shadowing the Python builtin.
-
+        
         Example:
             >>> Query().delta.abs_() < 0.1
             Condition({'delta.$abs': {'$lt': 0.1}})
@@ -409,10 +470,39 @@ class Query:
         path = self._path
         return Query(f'{path}.$abs' if path else '$abs')
 
-    def len_(self) -> Query:
+    def ceil(self) -> Query:
+        """Return the ceiling of x as an Integral.
+
+        Example:
+            >>> Query().price.ceil() == 10
+            Condition({'price.$ceil': {'$eq': 10}})
+        """
+        path = self._path
+        return Query(f'{path}.$ceil' if path else '$ceil')
+
+    def floor(self) -> Query:
+        """Return the floor of x as an Integral.
+
+        Example:
+            >>> Query().price.floor() == 10
+            Condition({'price.$floor': {'$eq': 10}})
+        """
+        path = self._path
+        return Query(f'{path}.$floor' if path else '$floor')
+
+    def round(self) -> Query:
+        """Round a number to a given precision in decimal digits.
+
+        Example:
+            >>> Query().price.round() == 10
+            Condition({'price.$round': {'$eq': 10}})
+        """
+        path = self._path
+        return Query(f'{path}.$round' if path else '$round')
+
+    def len(self) -> Query:
         """Apply ``len()`` in the path chain. Maps to ``$len``.
 
-        Named ``len_`` (not ``len``) to avoid shadowing the Python builtin.
         Works on ``str``, ``list``, ``tuple``, ``dict``, ``set``, ``bytes``.
 
         Example:
@@ -422,10 +512,9 @@ class Query:
         path = self._path
         return Query(f'{path}.$len' if path else '$len')
 
-    def sum_(self) -> Query:
+    def sum(self) -> Query:
         """Apply ``sum()`` in the path chain. Maps to ``$sum``.
 
-        Named ``sum_`` (not ``sum``) to avoid shadowing the Python builtin.
         Works on ``str``, ``list``, ``tuple``, ``dict``, ``set``, ``bytes``.
 
         Example:
@@ -435,10 +524,9 @@ class Query:
         path = self._path
         return Query(f'{path}.$sum' if path else '$sum')
 
-    def min_(self) -> Query:
+    def min(self) -> Query:
         """Apply ``min()`` in the path chain. Maps to ``$min``.
 
-        Named ``min_`` (not ``min``) to avoid shadowing the Python builtin.
         Applicable to non-string iterables (``list``, ``tuple``, ``set``).
 
         Example:
@@ -448,11 +536,9 @@ class Query:
         path = self._path
         return Query(f'{path}.$min' if path else '$min')
 
-    def max_(self) -> Query:
+    def max(self) -> Query:
         """Apply ``max()`` in the path chain. Maps to ``$max``.
-
-        Named ``max_`` (not ``max``) to avoid shadowing the Python builtin.
-
+        
         Example:
             >>> Query().scores.max_() == 100
             Condition({'scores.$max': {'$eq': 100}})
@@ -498,6 +584,41 @@ class Query:
         path = self._path
         return Query(f'{path}.$mid' if path else '$mid')
 
+    def neg(self) -> Query:
+        """Convert a number or string to an negative integer.
+
+        Example:
+            >>> Query().price.neg() == -99
+            Condition({'price.$neg': {'$eq': -99}})
+        """
+        path = self._path
+        return Query(f'{path}.$neg' if path else '$neg')
+
+    def first(self) -> Query:
+        """Extracts the first item or character** before comparing. Maps to ``$first``."""
+        path = self._path
+        return Query(f'{path}.$first' if path else '$first')
+
+    def last(self) -> Query:
+        """Extracts the last item or character** before comparing. Maps to ``$last``."""
+        path = self._path
+        return Query(f'{path}.$last' if path else '$last')
+
+    def flat(self) -> Query:
+        """Flattens a nested iterable before comparing. Maps to ``$flat``."""
+        path = self._path
+        return Query(f'{path}.$flat' if path else '$flat')
+
+    def sort(self) -> Query:
+        """Sort the iterable values before comparing. Maps to ``$sort``."""
+        path = self._path
+        return Query(f'{path}.$sort' if path else '$sort')
+
+    def unique(self) -> Query:
+        """Performs order-preserving deduplication on an iterable before comparing. Maps to ``$unique``."""
+        path = self._path
+        return Query(f'{path}.$unique' if path else '$unique')
+
 #-----------------------------------------------------------------------------
 def _apply_transform(op: str, val: Any) -> Any:
     """Apply a single in-path value-transform operator.
@@ -534,35 +655,9 @@ def _apply_transform(op: str, val: Any) -> Any:
       with ``__len__`` (string, list, tuple, bytes).
     """
     try:
-        if op == '$lower':
-            return val.lower() if isinstance(val, str) else None
-
-        if op == '$upper':
-            return val.upper() if isinstance(val, str) else None
-
-        if op == '$strip':
-            return val.strip() if isinstance(val, str) else None
-
         if op == '$abs':
-            return abs(val) if isinstance(val, (int, float)) else None
-
-        if op == '$len':
-            return len(val) if hasattr(val, '__len__') else None
-
-        if isinstance(val, (str, bytes)):
-            return None                         # strings excluded from aggregates
-
-        if op == '$min':
-            return min(val) if isinstance(val, (list, tuple, set)) else \
-                    val if val.__hash__ else None
-
-        if op == '$max':
-            return max(val) if isinstance(val, (list, tuple, set)) else \
-                    val if val.__hash__ else None
-
-        if op == '$sum':
-            return sum(val) if isinstance(val, (list, tuple, set)) else \
-                    val if val.__hash__ else None
+            return abs(val) if isinstance(val, (int, float)) else \
+                [abs(vv) for vv in val] if hasattr(val, '__iter__') else None
 
         if op == '$avg':
             items = val if isinstance(val, (list, tuple, set)) else \
@@ -570,6 +665,79 @@ def _apply_transform(op: str, val: Any) -> Any:
 
             n = len(items)
             return sum(items) / n if n else None
+
+        if op == '$ceil':
+            return ceil(val) if isinstance(val, (str,bytes,bool,float)) else \
+                val if isinstance(val, int) else \
+                [ceil(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$flat':
+            if not isinstance(val, (list, tuple)): return None
+            result = []
+            for item in val:
+                if isinstance(item, (list, tuple)):
+                    result.extend(item)
+                else:
+                    result.append(item)
+            return result
+
+        if op == '$float':
+            return float(val) if isinstance(val, (str,bytes,int,bool)) else \
+                val if isinstance(val, float) else \
+                [float(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$floor':
+            return floor(val) if isinstance(val, (str,bytes,bool,float)) else \
+                val if isinstance(val, int) else \
+                [floor(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$first':
+            return val[:1] if isinstance(val, (str,bytes)) else \
+                val[0] if isinstance(val, (list,tuple)) else \
+                next(iter(val), None) if hasattr(val, '__iter__') else None
+
+        if op == '$last':
+            return val[-1:] if isinstance(val, (str,bytes)) else \
+                val[-1] if isinstance(val, (list,tuple)) else \
+                tuple(val)[-1] if hasattr(val, '__iter__') else None
+
+        if op == '$len':
+            return len(val) if hasattr(val, '__len__') else None
+
+        if op == '$lower':
+            return val.lower() if isinstance(val, str) else \
+                [vv.lower() for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$int':
+            return int(val) if isinstance(val, (str,bytes,float,bool)) else \
+                val if isinstance(val, int) else \
+                [int(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$max':
+            return max(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$mid':
+            items = val if isinstance(val, (list, tuple)) else \
+                    list(val) if isinstance(val, set) else \
+                    (val,) if val.__hash__ else ()
+
+            n = len(val) if hasattr(val, '__len__') else None
+            return val[n // 2] if n else None
+
+        if op == '$min':
+            return min(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$neg':
+            return -val if isinstance(val, (int,float)) else \
+                -float(val) if isinstance(val, str) and val.find('.') >= 0 else \
+                -int(val) if isinstance(val, str) else \
+                [-int(vv) if isinstance(vv, int) else \
+                -float(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$sort':
+            return sorted(val) if isinstance(val, (list, tuple, set, frozenset)) else None
 
         if op == '$std':
             items = val if isinstance(val, (list, tuple, set)) else \
@@ -581,19 +749,43 @@ def _apply_transform(op: str, val: Any) -> Any:
             mean = sum(items) / n
             return (sum((x - mean) ** 2 for x in items) / n) ** 0.5
 
-        if op == '$mid':
-            items = val if isinstance(val, (list, tuple)) else \
-                    list(val) if isinstance(val, set) else \
-                    (val,) if val.__hash__ else ()
+        if op == '$str':
+            return val if isinstance(val, str) else \
+                str(val) if isinstance(val, (bytes,int,float,bool)) else \
+                [str(vv) for vv in val] if hasattr(val, '__iter__') else None
 
-            n = len(val) if hasattr(val, '__len__') else None
-            if n:
-                sorted_val = sorted(val)
-                return sorted_val[n // 2]
+        if op == '$strip':
+            return val.strip() if isinstance(val, str) else \
+                [vv.strip() for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$sum':
+            return sum(val) if isinstance(val, (list, tuple, set)) else \
+                    val if val.__hash__ else None
+
+        if op == '$round':
+            return round(val) if isinstance(val, (str,bytes,bool,float)) else \
+                val if isinstance(val, int) else \
+                [round(vv) for vv in val] if hasattr(val, '__iter__') else None
+
+        if op == '$unique':
+            if isinstance(val, (str, bytes, int, float)): return None
+            if isinstance(val, (dict, set, frozenset)): return val
+            if isinstance(val, (list, tuple)):
+                seen = set()
+                result = []
+                for v in val:
+                    if v not in seen:
+                        seen.add(v)
+                        result.append(v)
+                return result
 
             return None
 
-    except (TypeError, ValueError, ZeroDivisionError, AttributeError):
+        if op == '$upper':
+            return val.upper() if isinstance(val, str) else \
+                [vv.upper() for vv in val] if hasattr(val, '__iter__') else None
+
+    except (TypeError, ValueError, IndexError, ZeroDivisionError, AttributeError): # pragma: no cover
         return None
 
     return None

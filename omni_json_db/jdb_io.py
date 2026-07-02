@@ -27,6 +27,12 @@ from .utils import Style, JIoBase
 
 try:
     import yaml
+
+    def frozenset_representer(dumper, data):
+        return dumper.represent_set(set(data))
+
+    yaml.SafeDumper.add_representer(frozenset, frozenset_representer)
+
 except ImportError:
     yaml = None
 
@@ -124,6 +130,9 @@ def _msg_encode(obj) -> bytes:
     if isinstance(obj, set):
         return Ext(123, _msg_dumps(list(obj)))
 
+    if isinstance(obj, frozenset):
+        return Ext(124, _msg_dumps(list(obj)))
+
     raise TypeError
 
 def _msg_decode(code:int, data:bytes):
@@ -146,6 +155,13 @@ def _msg_decode(code:int, data:bytes):
         except ValueError: # pragma: no cover
             # nosemgrep
             return marshal_loads(data) # nosec B302
+
+    if code == 124:
+        try:
+            return frozenset(_msg_loads(data))
+
+        except ValueError: # pragma: no cover
+            pass
 
     raise TypeError(f'code={code} data={data}')
 
@@ -256,7 +272,7 @@ API_V0 = 0 # header=8           key=6
 API_V1 = 1 # header=9(+api_ver) key=7 (+val_size)
 API_LATEST = API_V1
 
-ZIP_lut = [
+ZIP_lut = (
     lambda data: data,
     gzip_compress,
     bz2_compress,
@@ -266,9 +282,9 @@ ZIP_lut = [
     zs1_compress,
     zs2_compress,
     lz4_compress,
-]
+)
 
-UNZIP_lut = [
+UNZIP_lut = (
     lambda pad,data : data.strip(pad),
     lambda pad,data : gzip_decompress(data.rstrip(pad) + b'\0\0\0'),
     lambda pad,data : bz2_decompress(data.rstrip(pad) + b'\0\0\0'),
@@ -278,9 +294,9 @@ UNZIP_lut = [
     lambda pad,data : zstd_decompress(data.rstrip(pad) + b'\0\0\0\0'),
     lambda pad,data : zstd_decompress(data.rstrip(pad) + b'\0\0\0\0'),
     lambda pad,data : lz4_decompress(data.rstrip(pad) + b'\0\0\0\0'),
-]
+)
 
-UNZIP_lut0 = [
+UNZIP_lut0 = (
     lambda data: data,
     gzip_decompress,
     bz2_decompress,
@@ -290,9 +306,9 @@ UNZIP_lut0 = [
     zstd_decompress,
     zstd_decompress,
     lz4_decompress,
-]
+)
 
-PAD_lut = [
+PAD_lut = (
     lambda mode : b'\n' if mode not in {S_S_TYPE, J_S_TYPE} else b'\xc1',
     lambda mode : b'\0',
     lambda mode : b'\0',
@@ -302,7 +318,7 @@ PAD_lut = [
     lambda mode : b'\0',
     lambda mode : b'\0',
     lambda mode : b'\0',
-]
+)
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
