@@ -1704,9 +1704,7 @@ class JDbReader(JDbBase):
                         if not read_only:
                             for _id in list(fp_dict):
                                 fp = fp_dict[_id]
-                                if fp is None:
-                                    fp_dict.pop(_id, None)
-                                elif not fp.writable():
+                                if fp is not None and not fp.writable():
                                     fp.close()
                                     fp_dict.pop(_id, None)
 
@@ -1869,9 +1867,7 @@ class JDbReader(JDbBase):
                         if not read_only:
                             for _id in list(fp_dict):
                                 fp = fp_dict[_id]
-                                if fp is None:
-                                    fp_dict.pop(_id, None)
-                                elif not fp.writable():
+                                if fp is not None and not fp.writable():
                                     fp.close()
                                     fp_dict.pop(_id, None)
 

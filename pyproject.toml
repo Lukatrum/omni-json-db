@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.13.35"
+version = "2.13.36"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]

@@ -359,7 +359,7 @@ class ServerHandler(BaseRequestHandler):
                             elif cmd == 'readall': # pragma: no cover
                                 resp['ret'] = fp.readall(*_args, **_kwargs)
 
-                            elif cmd == 'readinto': # pragma: no cover
+                            elif cmd == 'readinto':
                                 resp['ret'] = fp.readinto(*_args, **_kwargs)
 
                             elif cmd == 'readline': # pragma: no cover
@@ -370,6 +370,9 @@ class ServerHandler(BaseRequestHandler):
 
                             elif cmd == 'writelines': # pragma: no cover
                                 resp['ret'] = fp.writelines(*_args, **_kwargs)
+
+                            elif cmd == 'fileno':
+                                resp['ret'] = fp.fileno()
 
                             else: # pragma: no cover
                                 if verbose >= 1:

@@ -109,7 +109,7 @@ class JNetIO(RawIOBase):
     Translates native I/O stream methods into network commands routed to a 
     remote database server.
     """
-    __slots__ = ('file', 'sock', 'lock', 'mode')
+    __slots__ = ('file', 'sock', 'lock', 'mode', 'not_found')
 
     def __init__(self, sock:IO, file:str, mode:str='rb+', **kwargs):
         """Initialize the network-backed file I/O stream.
@@ -134,11 +134,13 @@ class JNetIO(RawIOBase):
         self.file = file
         self.mode = mode
         self.sock = sock
-        try:
-            self.open(mode=mode, **kwargs)
-        except FileNotFoundError as e: # pragma: no cover
-            if __debug__:
-                print(e)
+        self.not_found = False
+        with self.lock:
+            try:
+                self.open(mode=mode, **kwargs)
+
+            except FileNotFoundError:
+                self.not_found = True
 
     def __del__(self):
         """Safely close the stream context upon garbage collection."""
@@ -147,7 +149,30 @@ class JNetIO(RawIOBase):
 
     def __repr__(self) -> str:
         """Return a string representation of the network stream context."""
-        return f'<{type(self).__name__} sock:{self.sock}  mode:{self.mode} at {hex(id(self))}>'
+        return f'<{type(self).__name__} sock:{self.sock}  mode:{self.mode} found:{not self.not_found} at {hex(id(self))}>'
+
+    def __exec(self, cmd:str, args:tuple=None, kwargs:dict=None, pre_check:bool=True) -> dict:
+        if pre_check:
+            if self.closed: # pragma: no cover
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
+
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
+
+        if args is None: args = ()
+        if kwargs is None: kwargs = {}
+
+        dump_and_send(self.sock, (self.file, cmd, args, kwargs))
+        resp = recv_and_load(self.sock)
+        if not resp.get('ok'): # pragma: no cover
+            cmd = resp.get("cmd", "")
+            err = JErrCode(resp.get('err', 0))
+            if err == JErrCode.NOT_FOUND:
+                self.not_found = True
+                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
+            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
+
+        return resp
 
     def open(self, *args, **kwargs):
         """Transmit an open command to configure the remote file handle.
@@ -160,25 +185,22 @@ class JNetIO(RawIOBase):
             FileNotFoundError: If the remote file does not exist.
             ValueError: If the remote server returns an error code.
         """
-        if self.closed: return # pragma: no cover
         with self.lock:
-            dump_and_send(self.sock, (self.file, 'open', args, kwargs))
-            resp = recv_and_load(self.sock)
-            if not resp.get('ok'): # pragma: no cover
-                cmd = resp.get("cmd", "")
-                err = JErrCode(resp.get('err', 0))
-                if err == JErrCode.NOT_FOUND:
-                    raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-                raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
+            if self.closed: return # pragma: no cover
+            self.__exec('open', args, kwargs, pre_check=False)
+            self.not_found = False
 
     def close(self):
         """Disconnect and release the remote file handle on the server."""
         with self.lock:
-            if self.closed: return # pragma: no cover
-            dump_and_send(self.sock, (self.file, 'close', (), {}))
-            resp = recv_and_load(self.sock)
-            if not resp.get('ok'): # pragma: no cover
-                pass # do nothing
+            if self.closed or self.not_found: return # pragma: no cover
+            try:
+                self.__exec('close', pre_check=False)
+            except FileNotFoundError: # pragma: no cover
+                self.not_found = True
+            except ValueError: # pragma: no cover
+                pass
+
         super().close()
 
     def readline(self, size:Optional[int]= -1) -> bytes:
@@ -194,19 +216,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'readline', (size,), {}))
-            resp = recv_and_load(self.sock)
-            if not resp.get('ok'): # pragma: no cover
-                cmd = resp.get("cmd", "")
-                err = JErrCode(resp.get('err', 0))
-                if err == JErrCode.NOT_FOUND:
-                    raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-                raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', b'')
+            return self.__exec('readline', (size,)).get('ret', b'')
 
     def readlines(self, size:Optional[int]=None) -> list: # pragma: no cover
         """Read and return a list of lines from the remote stream.
@@ -221,19 +231,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed:
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'readlines', (size,), {}))
-            resp = recv_and_load(self.sock)
-            if not resp.get('ok'):
-                cmd = resp.get("cmd", "")
-                err = JErrCode(resp.get('err', 0))
-                if err == JErrCode.NOT_FOUND:
-                    raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-                raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', ())
+            return self.__exec('readlines', (size,)).get('ret', [])
 
     def seek(self, offset:int, whence:int=0) -> int:
         """Change the stream position on the remote server.
@@ -250,19 +248,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'seek', (offset, whence), {}))
-            resp = recv_and_load(self.sock)
-            if not resp.get('ok'): # pragma: no cover
-                cmd = resp.get("cmd", "")
-                err = JErrCode(resp.get('err', 0))
-                if err == JErrCode.NOT_FOUND:
-                    raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-                raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', 0)
+            return self.__exec('seek', (offset, whence)).get('ret', 0)
 
     def seekable(self) -> bool: # pragma: no cover
         """Determine if stream navigation is supported.
@@ -272,7 +258,10 @@ class JNetIO(RawIOBase):
         """
         with self.lock:
             if self.closed:
-                raise ValueError('I/O operation on closed file.')
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
+
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
 
             return True
 
@@ -284,7 +273,10 @@ class JNetIO(RawIOBase):
         """
         with self.lock:
             if self.closed:
-                raise ValueError('I/O operation on closed file.')
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
+
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
 
             return True
 
@@ -292,13 +284,16 @@ class JNetIO(RawIOBase):
         """Determine if the stream supports writing.
 
         Returns:
-            bool: Always returns ``True`` if the stream is open.
+            bool: returns ``True`` if the stream is writable.
         """
         with self.lock:
             if self.closed:
-                raise ValueError('I/O operation on closed file.')
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            return True
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
+
+            return self.mode.startswith(('a', 'w')) or self.mode.endswith('+')
 
     def tell(self) -> int:
         """Return the current stream position from the remote server.
@@ -310,20 +305,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'tell', (), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', 0)
+            return self.__exec('tell').get('ret', 0)
 
     def truncate(self, size:Optional[int]=None):
         """Resize the remote file to the given size.
@@ -338,20 +320,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'truncate', (size,), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', 0)
+            return self.__exec('truncate', (size,)).get('ret', 0)
 
     def writelines(self, lines): # pragma: no cover
         """Write an iterable list of lines to the remote server.
@@ -363,18 +332,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed:
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'writelines', (lines,), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'):
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
+            self.__exec('writelines', (lines,))
 
     def read(self, size:int=-1) -> bytes:
         """Read bytes from the remote stream.
@@ -389,20 +347,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'read', (size,), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', b'')
+            return self.__exec('read', (size,)).get('ret', b'')
 
     def readall(self) -> bytes: # pragma: no cover
         """Read all remaining bytes from the remote stream.
@@ -414,20 +359,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed:
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'readall', (), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'):
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', b'')
+            return self.__exec('readall').get('ret', b'')
 
     def readinto(self, b) -> int:
         """Read bytes directly into a pre-allocated buffer from the network.
@@ -442,24 +374,11 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed:
-                raise ValueError('I/O operation on closed file.')
-
             size = len(b)
-            dump_and_send(self.sock, (self.file, 'read', (size,), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'):
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        rx_buf = resp.get('ret', 0)
-        rx_size = len(rx_buf)
-        b[:rx_size] = rx_buf
-        return rx_size
+            rx_buf =  self.__exec('read', (size,)).get('ret', b'')
+            rx_size = len(rx_buf)
+            b[:rx_size] = rx_buf
+            return rx_size
 
     def write(self, b) -> int:
         """Write raw binary data to the remote server.
@@ -474,20 +393,7 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'write', (b,), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            raise ValueError(f'Fail to call {cmd} -> {repr(err)}')
-
-        return resp.get('ret', 0)
+            return self.__exec('write', (b,)).get('ret', 0)
 
     def flush(self) -> None:
         """Flush the write buffers on the remote server.
@@ -498,18 +404,15 @@ class JNetIO(RawIOBase):
             FileNotFoundError: If the server cannot find the target file to flush.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
+            if self.closed or self.not_found: # pragma: no cover
                 return
 
-            dump_and_send(self.sock, (self.file, 'flush', (), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            return
+            try:
+                self.__exec('flush', pre_check=False)
+            except FileNotFoundError: # pragma: no cover
+                self.not_found = True
+            except ValueError: # pragma: no cover
+                pass
 
     def fileno(self) -> int:
         """Return the underlying file descriptor.
@@ -519,20 +422,7 @@ class JNetIO(RawIOBase):
             by the remote server.
         """
         with self.lock:
-            if self.closed: # pragma: no cover
-                raise ValueError('I/O operation on closed file.')
-
-            dump_and_send(self.sock, (self.file, 'fileno', (), {}))
-            resp = recv_and_load(self.sock)
-
-        if not resp.get('ok'): # pragma: no cover
-            cmd = resp.get("cmd", "")
-            err = JErrCode(resp.get('err', 0))
-            if err == JErrCode.NOT_FOUND:
-                raise FileNotFoundError(f'Fail to call {cmd} -> {repr(err)}')
-            return -1
-
-        return resp.get('ret', -1)
+            return self.__exec('fileno').get('ret', -1)
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------

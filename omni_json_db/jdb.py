@@ -3147,7 +3147,7 @@ class JDb(JDbReader):
                 try:
                     jdb = _val = f_delete(fp, key, row=row, read_value=False)
                     if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
-                        jdb.remove_fast(jdb)
+                        jdb.remove_fast(jdb) # NEVER
 
                     ret.add(key)
 

@@ -996,13 +996,13 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                         _part = part[1:] if __reverse_it else part
                         if _part in TRANSFORM_OPS:
                             transformed = _apply_transform(_part, _key)
-                            if transformed is None:
+                            if transformed is None: # pragma: no cover
                                 _check = False
                                 break
                             _key = transformed
                         elif ii+1 >= _size:
                             _rule = {_part: _rule}
-                        else:
+                        else: # pragma: no cover
                             _check = False
                             break
                         _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
@@ -1615,7 +1615,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                             _val = transformed
                         elif ii+1 >= _size:
                             _rule = {_part: _rule}
-                        else:
+                        else: # pragma: no cover
                             _check = False
                             break
                         _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
@@ -1662,13 +1662,13 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                             _part = part[1:] if __reverse_it else part
                             if _part in TRANSFORM_OPS:
                                 transformed = _apply_transform(_part, _val)
-                                if transformed is None:
+                                if transformed is None: # pragma: no cover
                                     _check = False
                                     break
                                 _val = transformed
                             elif ii+1 >= _size:
                                 _rule = {_part: _rule}
-                            else:
+                            else: # pragma: no cover
                                 _check = False
                                 break
                             _reverse_it = (not _reverse_it) if __reverse_it else _reverse_it
