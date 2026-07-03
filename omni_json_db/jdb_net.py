@@ -94,10 +94,8 @@ def dump_and_send(sock, obj):
     size = len(data)
     pad_size = ((size >> 3) << 3) + (8 if size & 0x7 else 0) - size
     header = Struct_header.pack(0X_FEED_0000_0000_0000 | size)
-    if pad_size == 0:
-        sock.sendmsg((header, data))
-    else:
-        sock.sendmsg((header, data, b'\x00'*pad_size))
+    pad_data = (header+data) if pad_size == 0 else (header+data+(b'\x00'*pad_size))
+    sock.sendall(pad_data)
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
