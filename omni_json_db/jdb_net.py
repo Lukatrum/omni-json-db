@@ -40,16 +40,18 @@ def recv_exactly(sock, size:int) -> bytes:
         EOFError: If the socket connection closes before the expected bytes are received.
     """
     align_size = ((size >> 3) << 3) + (8 if size & 0x7 else 0)
-    data = b''
+    chunks = []
+    got = 0
     recv = sock.recv
-    while len(data) < align_size:
-        packet = recv(align_size - len(data))
+    while got < align_size:
+        packet = recv(align_size - got)
         if not packet:
             raise EOFError
 
-        data += packet
+        chunks.append(packet)
+        got += len(packet)
 
-    return data
+    return b''.join(chunks)
 
 def recv_and_load(sock):
     """Receive a network packet and decode its MsgPack payload.
@@ -64,17 +66,13 @@ def recv_and_load(sock):
         ValueError: If the payload header signature is corrupted or invalid.
     """
     header_size = Struct_header.size
-    _header = recv_exactly(sock, header_size)
-    if not _header:
-        raise ValueError
-
-    header, = Struct_header.unpack(_header)
+    header, = Struct_header.unpack(recv_exactly(sock, header_size))
     if (header & 0X_FFFF_0000_0000_0000) != 0X_FEED_0000_0000_0000:
         raise ValueError
 
     size = header & 0X_0000_FFFF_FFFF_FFFF
     req = recv_exactly(sock, size)
-    if not req:
+    if size > 0 and not req:
         raise ValueError
 
     try:
@@ -96,8 +94,10 @@ def dump_and_send(sock, obj):
     size = len(data)
     pad_size = ((size >> 3) << 3) + (8 if size & 0x7 else 0) - size
     header = Struct_header.pack(0X_FEED_0000_0000_0000 | size)
-    pad_data = (header+data) if pad_size == 0 else (header+data+(b'\x00'*pad_size))
-    sock.sendall(pad_data)
+    if pad_size == 0:
+        sock.sendmsg((header, data))
+    else:
+        sock.sendmsg((header, data, b'\x00'*pad_size))
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -111,13 +111,14 @@ class JNetIO(RawIOBase):
     """
     __slots__ = ('file', 'sock', 'lock', 'mode', 'not_found')
 
-    def __init__(self, sock:IO, file:str, mode:str='rb+', **kwargs):
+    def __init__(self, sock:IO, file:str, mode:str='rb+', lock:RLock=None, **kwargs):
         """Initialize the network-backed file I/O stream.
 
         Args:
             sock (socket.socket): Active network socket connected to the remote host.
             file (str): File identity profile path (e.g., ``'KEY'``, ``'VAL.0'``).
             mode (str, optional): Target access mode. Defaults to ``'rb+'``.
+            lock (RLock, optional): Lock for socket operation
             **kwargs: Extra parameters passed to the remote open command.
 
         Raises:
@@ -130,11 +131,12 @@ class JNetIO(RawIOBase):
             raise TypeError
 
         super().__init__()
-        self.lock = RLock()
+        self.lock = RLock() if lock is None else lock
         self.file = file
         self.mode = mode
         self.sock = sock
         self.not_found = False
+        self.offset = 0
         with self.lock:
             try:
                 self.open(mode=mode, **kwargs)
@@ -189,6 +191,7 @@ class JNetIO(RawIOBase):
             if self.closed: return # pragma: no cover
             self.__exec('open', args, kwargs, pre_check=False)
             self.not_found = False
+            self.offset = self.__exec('tell', pre_check=False).get('ret', 0)
 
     def close(self):
         """Disconnect and release the remote file handle on the server."""
@@ -201,7 +204,7 @@ class JNetIO(RawIOBase):
             except ValueError: # pragma: no cover
                 pass
 
-        super().close()
+            super().close()
 
     def readline(self, size:Optional[int]= -1) -> bytes:
         """Read a single line from the remote stream.
@@ -216,7 +219,9 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('readline', (size,)).get('ret', b'')
+            rx_buf = self.__exec('readline', (size,)).get('ret', b'')
+            self.offset += len(rx_buf)
+            return rx_buf
 
     def readlines(self, size:Optional[int]=None) -> list: # pragma: no cover
         """Read and return a list of lines from the remote stream.
@@ -231,7 +236,10 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('readlines', (size,)).get('ret', [])
+            rx_list = self.__exec('readlines', (size,)).get('ret', [])
+            for rx_buf in rx_list:
+                self.offset += len(rx_buf)
+            return rx_list
 
     def seek(self, offset:int, whence:int=0) -> int:
         """Change the stream position on the remote server.
@@ -248,7 +256,19 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('seek', (offset, whence)).get('ret', 0)
+            if self.closed:
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
+
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
+
+            if whence == 0 and offset != self.offset or \
+                    whence == 1 and offset != 0 or \
+                    whence not in (0, 1):
+
+                self.offset = self.__exec('seek', (offset, whence), pre_check=False).get('ret', 0)
+
+            return self.offset
 
     def seekable(self) -> bool: # pragma: no cover
         """Determine if stream navigation is supported.
@@ -305,7 +325,13 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('tell').get('ret', 0)
+            if self.closed:
+                raise ValueError(f'I/O operation on closed file. ({self.file})')
+
+            if self.not_found:
+                raise FileNotFoundError(f'Cannot find {self.file}')
+
+            return self.offset
 
     def truncate(self, size:Optional[int]=None):
         """Resize the remote file to the given size.
@@ -333,6 +359,8 @@ class JNetIO(RawIOBase):
         """
         with self.lock:
             self.__exec('writelines', (lines,))
+            for line in lines:
+                self.offset += len(line)
 
     def read(self, size:int=-1) -> bytes:
         """Read bytes from the remote stream.
@@ -347,7 +375,9 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('read', (size,)).get('ret', b'')
+            rx_buf = self.__exec('read', (size,)).get('ret', b'')
+            self.offset += len(rx_buf)
+            return rx_buf
 
     def readall(self) -> bytes: # pragma: no cover
         """Read all remaining bytes from the remote stream.
@@ -359,7 +389,9 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('readall').get('ret', b'')
+            rx_buf = self.__exec('readall').get('ret', b'')
+            self.offset += len(rx_buf)
+            return rx_buf
 
     def readinto(self, b) -> int:
         """Read bytes directly into a pre-allocated buffer from the network.
@@ -378,6 +410,7 @@ class JNetIO(RawIOBase):
             rx_buf =  self.__exec('read', (size,)).get('ret', b'')
             rx_size = len(rx_buf)
             b[:rx_size] = rx_buf
+            self.offset += rx_size
             return rx_size
 
     def write(self, b) -> int:
@@ -393,7 +426,10 @@ class JNetIO(RawIOBase):
             ValueError: If the stream is closed, or if the server returns an error.
         """
         with self.lock:
-            return self.__exec('write', (b,)).get('ret', 0)
+            tx_size = self.__exec('write', (b,)).get('ret', 0)
+            if tx_size >= 0:
+                self.offset += tx_size
+            return tx_size
 
     def flush(self) -> None:
         """Flush the write buffers on the remote server.
@@ -668,7 +704,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                return JNetIO(self.sock, 'KEY', mode=mode, buffering=buffering, **kwargs)
+                return JNetIO(self.sock, 'KEY', mode=mode, buffering=buffering, lock=self.lock, **kwargs)
 
             raise IOError
 
@@ -689,7 +725,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                return JNetIO(self.sock, f'VAL.{file_id}', mode=mode, buffering=buffering, **kwargs)
+                return JNetIO(self.sock, f'VAL.{file_id}', mode=mode, buffering=buffering, lock=self.lock, **kwargs)
 
             raise IOError
 

@@ -9,6 +9,7 @@ from threading import RLock, get_ident
 from struct import Struct
 from enum import IntFlag
 from unicodedata import east_asian_width
+from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
@@ -3179,7 +3180,7 @@ class JDbReader(JDbBase):
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, **kwargs) -> Generator[Tuple[str,Any]]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, **kwargs) -> Generator[Tuple[str,Any]]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3228,6 +3229,7 @@ class JDbReader(JDbBase):
             skip (int, optional): skip number of matched records, Defaults to 0.
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
             with_date (bool, optional): Whether to return the actual value + created date + modified date Defaults to False.
+            stats (Dict[str,float], optional): statistic: loops, records, matched, key.filter, date.filter, value.filter, used_s
             **kwargs: Extra filter configurations (e.g., regex flags).
 
         Yields:
@@ -3264,6 +3266,7 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
 
         """
+        st_time = perf_counter()
         vals = {} if not vals else dict(vals)
         for key,val in kwargs.items():
             if key in QUERY_OPS:
@@ -3306,7 +3309,7 @@ class JDbReader(JDbBase):
                         if not (key_rule and not key_rule.search(child_name)):
                             child = f_get_child(fp, child_name)
                             if isinstance(child, JDbReader):
-                                for _match in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, **kwargs):
+                                for _match in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, **kwargs):
                                     if with_date:
                                         _key, _val, _cdate, _mdate = _match
                                         yield f'{child_name}{SEP_SYM}{_key}', _val, _cdate, _mdate
@@ -3343,10 +3346,12 @@ class JDbReader(JDbBase):
         if not date and '_date' in vals:
             date = vals.pop('_date', date)
 
+        n_loops = k_filter = d_filter = v_filter = m_count = 0
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
             io, fp, key_fp = self.f_get_fp(fp)
             count = skipped = 0
+            n_records = io.n_records
             io_read_key = io.read_key
             io_conv_date = io.z_conv_date
             data_type = io.data_type_str
@@ -3362,21 +3367,25 @@ class JDbReader(JDbBase):
 
             cache = self._cache
             for key,row_id in io.sorted_key_table_items():
+                n_loops += 1
                 if count >= limit > 0:
                     break
 
                 is_matched = not keys or match_KEY_rules(key, keys)
                 if not is_matched:
+                    k_filter += 1
                     continue
 
                 if date is not None:
                     cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
                     if not match_DATE_rules(cdate, mdate, date):
+                        d_filter += 1
                         continue
                 else:
                     cdate = mdate = None
 
                 if not with_value:
+                    m_count += 1
                     if skipped < skip:
                         skipped += 1
                         continue
@@ -3443,10 +3452,12 @@ class JDbReader(JDbBase):
                         _value = value
 
                     if not match_VAL_rules(key, _value, rules, cdate, mdate):
+                        v_filter += 1
                         is_matched = False
                         break
 
                 if is_matched:
+                    m_count += 1
                     if skipped < skip:
                         skipped += 1
                         continue
@@ -3460,6 +3471,11 @@ class JDbReader(JDbBase):
                         yield key, value
 
                     count += 1
+
+        ed_time = perf_counter()
+        if isinstance(stats, dict):
+            stats.update({'loops': n_loops, 'records':n_records, 'matched':m_count, \
+                    'key.filter':k_filter, 'date.filter':d_filter, 'value.filter':v_filter, 'used_s':ed_time-st_time})
 
     def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Union[str,datetime,dt_date,int,None]=None, sort:int=0, **kwargs) -> list:
         """
@@ -3489,7 +3505,7 @@ class JDbReader(JDbBase):
 
         return sorted(matches, reverse=sort<0, key=sort_func) if sort else matches
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, sort:int=0, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, sort:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -3499,8 +3515,9 @@ class JDbReader(JDbBase):
             date (Optional[Any], optional): Date filters.
             limit (int, optional): Maximum item cap. Defaults to 0.
             skip (int, optional): skip number of matched records, Defaults to 0.
-            with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.
             sort (int, optional): Sorting direction (1 for ascending, -1 for descending, 0 for unsorted). Defaults to 0.
+            with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.        
+            stats (Dict[str,float], optional): statistic: loops, records, matched, key.filter, date.filter, value.filter, used_s
 
         Returns:
             Dict[str, Any]: The subset of matched data.
@@ -3509,7 +3526,7 @@ class JDbReader(JDbBase):
             with_value = not (not vals and not kwargs and sort == 0)
 
         matches = {}
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=False, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=False, stats=stats, **kwargs):
             matches[key] = val
 
         if len(matches) > 1 and sort != 0:
@@ -3527,7 +3544,6 @@ class JDbReader(JDbBase):
             date (Optional[Any], optional): Date filters.
             limit (int, optional): +ve matched item. 0=all matched items (default=50)
             skip (int, optional): skip number of matched records, Defaults to 0.
-
 
         Example:
             >>> jdb = JDb()
@@ -3553,10 +3569,10 @@ class JDbReader(JDbBase):
                 +--------+--------+-----+-------+
         """
 
+        stats = {}
         data_rows = []
-        for match in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=with_date, **kwargs):
+        for match in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=with_date, stats=stats, **kwargs):
             data_rows.append(match)
-
         fields = ['_id']
         patterns = {'_id'}
         if with_date:
@@ -3656,13 +3672,25 @@ class JDbReader(JDbBase):
         top = "╔" + "╤".join("═" * (col_widths[field] + 2) for field in fields) + "╗"
         mid = "╟" + sep + "╢"
         bot = "╚" + "╧".join("═" * (col_widths[field] + 2) for field in fields) + "╝"
+        print()
         print(top)
         # with bold+cyan color
-        print( "║" + "│".join(" \x1b[96m\x1b[1m" + _pad_string(field, col_widths[field]) + "\x1b[0m " for field in fields) + "║")
+        print("║" + "│".join(" \x1b[96m\x1b[1m" + _pad_string(field, col_widths[field]) + "\x1b[0m " for field in fields) + "║")
         print(mid)
         for row_data in matrix:
             print("║" + "│".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "║")
         print(bot)
+        _used_s = stats.get('used_s', 0.)
+        n_loops = stats.get('loops', 0)
+        n_records = stats.get('records', 0)
+        ops = n_loops / _used_s
+        ops, o_unit = (ops / 1_000_000, 'M') if ops >= 1_000_000 else \
+                        (ops / 1_000, 'K') if ops >= 1_000 else (ops, '')
+        progress = 100. if n_loops >= n_records else (n_loops / n_records)
+        used_s, unit = (_used_s, 's') if _used_s * 10 > 1. else \
+                        (_used_s * 1_000, 'ms') if _used_s * 10_000 > 1. else \
+                        (_used_s * 1_000_000, 'us')
+        print(f"\x1b[2mUsed:{used_s:.3f}{unit} | {ops:.3f}{o_unit}/s | {n_loops:,}/{n_records:,}({progress:.2f}%) -> #{len(data_rows):,}\x1b[0m")
         return {vv[0]:vv[1] for vv in data_rows} if data_rows else {}
 
     def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:

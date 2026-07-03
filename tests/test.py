@@ -988,7 +988,8 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(date={'$gte': prev_date1})
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
-            res2 = jdb.find(date=f'{today} {prev_date1}')
+            # created_date in (today, prev_date1) or modified_date in (today, prev_date1)
+            res2 = jdb.find(date=(today, prev_date1))
             self.assertEqual(res, res2)
 
             res = jdb.find(date={'$lt': prev_date2})
@@ -7158,7 +7159,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb[:dt.date(1900,12,12)]), 0)
             self.assertEqual(len(jdb[:dt.datetime(1900,12,12)]), 1)
             self.assertEqual(set(jdb.find('kk', date='2000-10-10')), {'kk3'})
-            self.assertEqual(set(jdb.find('kk', date='2000-10-1 2000-10-30')), {'kk3'})
+            self.assertEqual(set(jdb.find('kk', date={'$between': ('2000-10-01', '2000-10-30')})), {'kk3'})
             self.assertEqual(set(jdb.find('kk', date='1900-12-1 1900-12-30')), set())
             self.assertEqual(set(jdb.find('kk', date=dt.date(2000, 10, 10))), {'kk3'})
             self.assertEqual(set(jdb.find('kk', date=dt.datetime(1900, 1, 1))), {'kk3'})

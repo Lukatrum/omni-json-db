@@ -4,7 +4,7 @@ from functools import lru_cache
 from math import ceil, floor
 from datetime import date as dt_date, datetime, timedelta
 from typing import Any, List, Generator, Union, Callable, Tuple
-from re import compile as re_compile, findall as re_findall, Pattern, S as re_S
+from re import compile as re_compile, Pattern, S as re_S
 #-----------------------------------------------------------------------------
 from .jdb_io import json_dumps
 #-----------------------------------------------------------------------------
@@ -832,7 +832,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
         is_matched = False
         reverse_it, is_cmd, cmd = _lower_cmd(cmd)
         if is_cmd:
-            is_same_type = isinstance(rule, str)
+            is_same_type = isinstance(key, type(rule))
             if cmd == '$gt':
                 if is_same_type:
                     is_matched = (key <= rule) if reverse_it else (key > rule)
@@ -1051,38 +1051,20 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
         elif callable(rules):
             rules = {'$func': rules}
         elif isinstance(rules, (set, list, tuple)):
-            rules = {'$in': rules}
+            rules = {'$anyin': rules}
         elif isinstance(rules, (frozenset, range)):
-            rules = {'$in': set(rules)}
+            rules = {'$anyin': set(rules)}
         elif isinstance(rules, str):
-            matches = re_findall(r'(?<!\d)(\d{1,4})\W([01]?\d)\W([0123]?\d)(?!\d)', rules)
-            if matches:
-                date_list = []
-                for dd in matches:
-                    try:
-                        date_list.append(dt_date(*[int(v) for v in dd]))
-                    except ValueError: # pragma: no cover
-                        return False
-
-                if len(date_list) > 1:
-                    date_list = sorted(date_list)
-                    rules = {'$ge': date_list[0], '$le': date_list[-1]}
-                elif date_list:
-                    rules = {'$has': date_list[0]}
-                else:
-                    return False
-            else:
-                return False
-
+            rules = {'$has': rules}
         elif isinstance(rules, (int, float)):
             today = dt_date.today() if isinstance(rules, int) else datetime.now()
             days = int(rules)
             if rules == 0:
                 rules = {'$eq': today}
             elif rules > 0:
-                rules = {'$ge': today, '$le': today + timedelta(days=days)}
+                rules = {'$between': (today, today + timedelta(days=days))}
             else:
-                rules = {'$ge': today - timedelta(days=-days), '$le': today}
+                rules = {'$between': (today - timedelta(days=-days), today)}
         else:
             return False
 
