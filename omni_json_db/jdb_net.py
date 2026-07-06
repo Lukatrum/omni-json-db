@@ -94,8 +94,10 @@ def dump_and_send(sock, obj):
     size = len(data)
     pad_size = ((size >> 3) << 3) + (8 if size & 0x7 else 0) - size
     header = Struct_header.pack(0X_FEED_0000_0000_0000 | size)
-    pad_data = (header+data) if pad_size == 0 else (header+data+(b'\x00'*pad_size))
-    sock.sendall(pad_data)
+    buf = bytearray(8 + size + pad_size)
+    buf[0:8] = header
+    buf[8:8+size] = data
+    sock.sendall(buf)
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -423,8 +425,9 @@ class JNetIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed, or if the server returns an error.
         """
+        data = bytes(b) if not isinstance(b, (bytes, bytearray)) else b
         with self.lock:
-            tx_size = self.__exec('write', (b,)).get('ret', 0)
+            tx_size = self.__exec('write', (data,)).get('ret', 0)
             if tx_size >= 0:
                 self.offset += tx_size
             return tx_size

@@ -1108,6 +1108,9 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(date={'$ne': dt_2005, '!$eq': dt_2015}, with_value=True)
             self.assertEqual(res, res2)
 
+            res2 = jdb.find(vals={'_date.$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]})
+            self.assertEqual(res, res2)
+
             res2 = jdb.show(date={'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}, with_date=True)
             self.assertEqual(res, res2)
 
@@ -1169,6 +1172,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res, res2)
 
             res2 = jdb.find(vals={'_id': {'user_1', 'user_2'}})
+            self.assertEqual(res, res2)
+
+            res2 = jdb.find(vals={'_id.$last.$between': ('1', '2')})
             self.assertEqual(res, res2)
 
             res2 = jmem.find(vals={'$key': {'user_1', 'user_2'}})

@@ -1012,9 +1012,15 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
                         is_matched = (not is_matched) if _reverse_it else is_matched
                     break
 
-        elif cmd == '_id': # pragma: no cover
-            is_matched = match_KEY_rules(key, rule, level=level+1)
-            is_matched = (not is_matched) if reverse_it else is_matched
+        elif cmd.startswith('_id'): # pragma: no cover
+            _ix = cmd.find('$')
+            if _ix == 4:
+                rule = {cmd[_ix:]:rule}
+                cmd = '_id'
+
+            if cmd == '_id':
+                is_matched = match_KEY_rules(key, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
         if not is_matched: return False
 
@@ -1234,9 +1240,15 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
 
                     is_matched = (not is_matched) if reverse_it else is_matched
 
-        elif cmd == '_date': # pragma: no cover
-            is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
-            is_matched = (not is_matched) if reverse_it else is_matched
+        elif cmd.startswith('_date'): # pragma: no cover
+            _ix = cmd.find('$')
+            if _ix == 6:
+                rule = {cmd[_ix:]:rule}
+                cmd = '_date'
+
+            if cmd == '_date':
+                is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
         if not is_matched: return False
 
@@ -1611,13 +1623,25 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
             is_matched = match_VAL_rules(key, val[cmd], rule, cdate, mdate, level=level+1)
             is_matched = (not is_matched) if reverse_it else is_matched
 
-        elif cmd == '_id':
-            is_matched = match_KEY_rules(key, rule, level=level+1)
-            is_matched = (not is_matched) if reverse_it else is_matched
+        elif cmd.startswith('_id'):
+            _ix = cmd.find('$')
+            if _ix == 4:
+                rule = {cmd[_ix:]:rule}
+                cmd = '_id'
 
-        elif cmd == '_date':
-            is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
-            is_matched = (not is_matched) if reverse_it else is_matched
+            if cmd == '_id':
+                is_matched = match_KEY_rules(key, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
+
+        elif cmd.startswith('_date'):
+            _ix = cmd.find('$')
+            if _ix == 6:
+                rule = {cmd[_ix:]:rule}
+                cmd = '_date'
+
+            if cmd == '_date':
+                is_matched = match_DATE_rules(cdate, mdate, rule, level=level+1)
+                is_matched = (not is_matched) if reverse_it else is_matched
 
         elif is_dict:
             _cnt = 0
