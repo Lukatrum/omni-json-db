@@ -845,6 +845,18 @@ class TestJDb(unittest.TestCase):
             res = jdb[user.role.endswith('trator')]
             self.assertEqual(set(res), {'user_1'})
 
+            res = jdb.find(user.age >= 45)
+            self.assertEqual(len(res), 0)
+
+            res = jdb.update_if(user.age < 45, lambda key,old_val:{'age':old_val['age']+1, 'license':old_val.get('expired', old_val['age']+1 >= 45)})
+            self.assertEqual(res, 6)
+
+            res = jdb.find(user.age >= 45)
+            self.assertEqual(set(res), {'user_6'})
+
+            res2 = jdb.find(user.license.int() != 0)
+            self.assertEqual(res, res2)
+
             cond = (user.age >= 32) & (user.age <= 50)
             res = jdb[cond]
             self.assertEqual(set(res), {'user_3', 'user_5', 'user_6'})
@@ -1867,6 +1879,18 @@ class TestJDb(unittest.TestCase):
 
             res = jdb.find(vals={'role.$has':'trator'})
             self.assertEqual(set(res), {'user_1'})
+
+            res = jdb.find(vals={'age.$ge':45})
+            self.assertEqual(len(res), 0)
+
+            res = jdb.update_if({'!age.$ge':45}, lambda key,old_val:{'age':old_val['age']+1, 'license':old_val.get('expired', old_val['age']+1 >= 45)})
+            self.assertEqual(res, 6)
+
+            res = jdb.find(vals={'age.$ge':45})
+            self.assertEqual(set(res), {'user_6'})
+
+            res2 = jdb.find(vals={'license':True})
+            self.assertEqual(res, res2)
 
             #----------------------------------------------------------
             del jdb[:]

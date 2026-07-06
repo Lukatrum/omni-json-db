@@ -2400,16 +2400,27 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=default_val, replace=True, insert=True, is_list=False, **kwargs)
 
-    def update_if(self, condition: Union[Condition,dict], patch: dict) -> int:
+    def update_if(self, condition: Union[Condition,dict], patch: Union[Dict[str,Any],Callable[[str,Any],Dict[str,Any]]]) -> int:
         """Merge `patch` into every record (dict value) matching `condition`.
         
         Args:
             conditon (Condition | dict): Condition for key/date/value filtering.
-            patch (Any): if condition is matched, update the corresponding value.
+            patch (dict | Callable[[str,Any],Dict[str,Any]]): if condition is matched, update the corresponding value.
 
         Returns:
             int: the number of records updated.
+
+        Example:
+            >>> jdb.update_if(Query().age <= 32, {'age':18, 'active':True})
+            >>> jdb.update_if(Query().age <= 99, lambda k,v : {'age':v['age']+1, status:v['age']<40})
         """
+        patch_func = None
+        if callable(patch):
+            k_arg_cnt = patch.__code__.co_argcount
+            if k_arg_cnt != 2:
+                raise TypeError('patch function must have 2 arguments (key, val)')
+            patch_func = patch
+
         count = 0
         with self.open(read_only=True) as fp:
             matched_keys = {key:val for key,val in self.find_iter(vals=condition, with_value=True) if isinstance(val, dict)}
@@ -2419,7 +2430,9 @@ class JDb(JDbReader):
                 f_write = self.f_write
                 for key,val in matched_keys.items():
                     if has_SIGINT(): break
-                    new_val = {**val, **patch}
+                    _patch = patch_func(key, val) if callable(patch_func) else patch
+                    if not isinstance(_patch, dict): continue
+                    new_val = {**val, **_patch}
                     if new_val != val:
                         f_write(fp, key, new_val, compare=False)
                         count += 1
