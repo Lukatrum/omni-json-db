@@ -101,19 +101,18 @@ class GraphDb(JDb):
                 hi = prefix[:-1] + chr(ord(prefix[-1]) + 1) if prefix else None
                 scanned = range_keys(prefix, hi) if hi is not None else range_keys()
                 ordered = True
-            except TypeError:
+
+            except TypeError: # pragma: no cover
                 scanned = None
                 ordered = False
-        else:
-            scanned = None
-            ordered = False
 
-        if ordered and scanned is not None:
-            for key in scanned:
-                if not key.startswith(prefix):
-                    break
-                yield key, key_table[key]
-            return
+            if ordered and scanned is not None:
+                for key in scanned:
+                    if key.startswith(prefix):
+                        yield key, key_table[key]
+                    else: # pragma: no cover
+                        break
+                return
 
         # fallback: full scan (unordered backend)
         for key, row_id in key_table.items():
@@ -205,30 +204,29 @@ class GraphDb(JDb):
 
             _generate_edge_key = self._generate_edge_key
             # every adjacency key of this node -> its edge + both index sides
-            for adj_key, adj_row in list(self.f_iter_prefix(fp, f'X:{node_id}:')):
+            for adj_key, adj_row in self.f_iter_prefix(fp, f'X:{node_id}:'):
                 matched = ADJ_RE.match(adj_key)
-                if not matched:
-                    continue
-                _n, direction, neighbor = matched.groups()
-                matched_keys[adj_key] = adj_row
+                if matched:
+                    _n, direction, neighbor = matched.groups()
+                    matched_keys[adj_key] = adj_row
 
-                if direction == '>':
-                    edge_key = _generate_edge_key(node_id, neighbor, True)
-                    mirror = f'X:{neighbor}:<:{node_id}:'
-                elif direction == '<':
-                    edge_key = _generate_edge_key(neighbor, node_id, True)
-                    mirror = f'X:{neighbor}:>:{node_id}:'
-                else:
-                    edge_key = _generate_edge_key(node_id, neighbor, False)
-                    mirror = f'X:{neighbor}:-:{node_id}:'
+                    if direction == '>':
+                        edge_key = _generate_edge_key(node_id, neighbor, True)
+                        mirror = f'X:{neighbor}:<:{node_id}:'
+                    elif direction == '<':
+                        edge_key = _generate_edge_key(neighbor, node_id, True)
+                        mirror = f'X:{neighbor}:>:{node_id}:'
+                    else:
+                        edge_key = _generate_edge_key(node_id, neighbor, False)
+                        mirror = f'X:{neighbor}:-:{node_id}:'
 
-                edge_row = key_table.get(edge_key, -1)
-                if edge_row >= 0:
-                    matched_keys[edge_key] = edge_row
+                    edge_row = key_table.get(edge_key, -1)
+                    if edge_row >= 0:
+                        matched_keys[edge_key] = edge_row
 
-                mirror_row = key_table.get(mirror, -1)
-                if mirror_row >= 0:
-                    matched_keys[mirror] = mirror_row
+                    mirror_row = key_table.get(mirror, -1)
+                    if mirror_row >= 0:
+                        matched_keys[mirror] = mirror_row
 
             if matched_keys:
                 io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
@@ -311,12 +309,8 @@ class GraphDb(JDb):
                 if v_key not in key_table:
                     f_write(fp, v_key, {}, compare=False)
 
-                if directed:
-                    f_write(fp, f'X:{u}:>:{v}:', '', compare=False)
-                    f_write(fp, f'X:{v}:<:{u}:', '', compare=False)
-                else:
-                    f_write(fp, f'X:{u}:-:{v}:', '', compare=False)
-                    f_write(fp, f'X:{v}:-:{u}:', '', compare=False)
+                f_write(fp, f'X:{u}:{">" if directed else "-"}:{v}:', '', compare=False)
+                f_write(fp, f'X:{v}:{"<" if directed else "-"}:{u}:', '', compare=False)
 
             return self.f_add_edge(fp, edge_key, **properties)
 
@@ -352,12 +346,8 @@ class GraphDb(JDb):
                 if v_key not in key_table:
                     f_write(fp, v_key, {}, compare=False)
 
-                if directed:
-                    f_write(fp, f'X:{u}:>:{v}:', '', compare=False)
-                    f_write(fp, f'X:{v}:<:{u}:', '', compare=False)
-                else:
-                    f_write(fp, f'X:{u}:-:{v}:', '', compare=False)
-                    f_write(fp, f'X:{v}:-:{u}:', '', compare=False)
+                f_write(fp, f'X:{u}:{">" if directed else "-"}:{v}:', '', compare=False)
+                f_write(fp, f'X:{v}:{"<" if directed else "-"}:{u}:', '', compare=False)
 
             self.f_add_edge(fp, edge_key, relation="temporary_access")
             return self.f_change_days(fp, edge_key, expire_days)
@@ -398,12 +388,8 @@ class GraphDb(JDb):
                 f_delete = self.f_delete
                 ret[edge_key] = f_delete(fp, edge_key)
 
-                if directed:
-                    f_delete(fp, f'X:{u}:>:{v}:')
-                    f_delete(fp, f'X:{v}:<:{u}:')
-                else:
-                    f_delete(fp, f'X:{u}:-:{v}:')
-                    f_delete(fp, f'X:{v}:-:{u}:')
+                f_delete(fp, f'X:{u}:{">" if directed else "-"}:{v}:')
+                f_delete(fp, f'X:{v}:{"<" if directed else "-"}:{u}:')
 
         return ret
 
@@ -521,15 +507,14 @@ class GraphDb(JDb):
         with self.open() as fp:
             for key, _row_id in self.f_iter_prefix(fp, f'X:{node_id}:'):
                 matched = adj_match(key)
-                if not matched:
-                    continue
-                direction = matched.groups()[1]
-                if direction == '>':
-                    o_deg += 1
-                elif direction == '<':
-                    i_deg += 1
-                else:
-                    u_deg += 1
+                if matched:
+                    direction = matched.groups()[1]
+                    if direction == '>':
+                        o_deg += 1
+                    elif direction == '<':
+                        i_deg += 1
+                    else:
+                        u_deg += 1
 
         return {
             'in': i_deg,
@@ -595,15 +580,14 @@ class GraphDb(JDb):
 
                 for key, _row_id in f_iter_prefix(fp, f'X:{current_node}:'):
                     matched = adj_match(key)
-                    if not matched:
-                        continue
-                    _n, direction, neighbor = matched.groups()
-                    if direction == '<':
-                        continue
-                    if neighbor not in visited:
-                        visited.add(neighbor)
-                        previous_nodes[neighbor] = current_node
-                        queue.append(neighbor)
+                    if matched:
+                        _n, direction, neighbor = matched.groups()
+                        if direction == '<':
+                            continue
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            previous_nodes[neighbor] = current_node
+                            queue.append(neighbor)
 
         return []
 
@@ -655,20 +639,19 @@ class GraphDb(JDb):
 
                 for key, _row_id in f_iter_prefix(fp, f'X:{current_node}:'):
                     matched = adj_match(key)
-                    if not matched:
-                        continue
-                    _n, direction, neighbor = matched.groups()
-                    if direction == '<':
-                        continue
+                    if matched:
+                        _n, direction, neighbor = matched.groups()
+                        if direction == '<':
+                            continue
 
-                    edge_key = _generate_edge_key(current_node, neighbor, direction == '>')
-                    edge_props = f_read(fp, edge_key, copy=False)
-                    weight = edge_props.get(weight_key, 1) if isinstance(edge_props, dict) else 1
-                    distance = current_dist + weight
-                    if distance < distances.get(neighbor, float('inf')):
-                        distances[neighbor] = distance
-                        previous_nodes[neighbor] = current_node
-                        heappush(queue, (distance, neighbor))
+                        edge_key = _generate_edge_key(current_node, neighbor, direction == '>')
+                        edge_props = f_read(fp, edge_key, copy=False)
+                        weight = edge_props.get(weight_key, 1) if isinstance(edge_props, dict) else 1
+                        distance = current_dist + weight
+                        if distance < distances.get(neighbor, float('inf')):
+                            distances[neighbor] = distance
+                            previous_nodes[neighbor] = current_node
+                            heappush(queue, (distance, neighbor))
 
         return float('inf'), []
 
@@ -701,12 +684,11 @@ class GraphDb(JDb):
                 path.append(node_id)
                 for key, _row_id in f_iter_prefix(fp, f'X:{node_id}:'):
                     matched = adj_match(key)
-                    if not matched:
-                        continue
-                    _n, direction, successor = matched.groups()
-                    if direction == '<':
-                        continue
-                    path.extend(dfs(fp, successor, visited, level+1))
+                    if matched:
+                        _n, direction, successor = matched.groups()
+                        if direction == '<':
+                            continue
+                        path.extend(dfs(fp, successor, visited, level+1))
 
             return path
 
@@ -744,24 +726,23 @@ class GraphDb(JDb):
             is_fully_explored = True
             for key, _row_id in f_iter_prefix(fp, f'X:{node_id}:'):
                 matched = adj_match(key)
-                if not matched:
-                    continue
-                _n, direction, successor = matched.groups()
-                if direction == '<':
-                    continue
+                if matched:
+                    _n, direction, successor = matched.groups()
+                    if direction == '<':
+                        continue
 
-                edge_key = _generate_edge_key(node_id, successor, direction == '>')
-                if edge_key == parent_key:
-                    # same edge we arrived through: not a cycle back over itself
-                    is_fully_explored = False
-                    continue
+                    edge_key = _generate_edge_key(node_id, successor, direction == '>')
+                    if edge_key == parent_key:
+                        # same edge we arrived through: not a cycle back over itself
+                        is_fully_explored = False
+                        continue
 
-                if successor in stack:
-                    return True
-
-                if successor not in visited:
-                    if dfs(fp, successor, visited, stack, edge_key, level+1):
+                    if successor in stack:
                         return True
+
+                    if successor not in visited:
+                        if dfs(fp, successor, visited, stack, edge_key, level+1):
+                            return True
 
             stack.remove(node_id)
             if is_fully_explored:
@@ -807,23 +788,19 @@ class GraphDb(JDb):
             rec_stack.add(node_id)
             for key, _row_id in f_iter_prefix(fp, f'X:{node_id}:'):
                 matched = adj_match(key)
-                if not matched:
-                    continue
-                _n, direction, successor = matched.groups()
-                if direction == '<':
-                    continue
+                if matched:
+                    _n, direction, successor = matched.groups()
+                    if direction == '<':
+                        continue
 
-                edge_key = _generate_edge_key(node_id, successor, direction == '>')
-                if direction == '-' and edge_key == parent_key:
-                    # undirected edge we arrived through: do not walk back over it
-                    continue
+                    edge_key = _generate_edge_key(node_id, successor, direction == '>')
+                    if not (direction == '-' and edge_key == parent_key):
+                        if successor not in visited:
+                            if dfs(fp, successor, visited, rec_stack, stack, edge_key, level+1):
+                                return True
 
-                if successor not in visited:
-                    if dfs(fp, successor, visited, rec_stack, stack, edge_key, level+1):
-                        return True
-
-                elif successor in rec_stack:
-                    return True
+                        elif successor in rec_stack:
+                            return True
 
             rec_stack.remove(node_id)
             stack.append(node_id)
@@ -866,12 +843,11 @@ class GraphDb(JDb):
                         component.append(current_node)
                         for key, _r in f_iter_prefix(fp, f'X:{current_node}:'):
                             matched = adj_match(key)
-                            if not matched:
-                                continue
-                            neighbor = matched.groups()[2]
-                            if neighbor not in visited:
-                                visited.add(neighbor)
-                                queue.append(neighbor)
+                            if matched:
+                                neighbor = matched.groups()[2]
+                                if neighbor not in visited:
+                                    visited.add(neighbor)
+                                    queue.append(neighbor)
 
                     components.append(component)
 
@@ -895,10 +871,9 @@ class GraphDb(JDb):
         edge_match = EDGE_RE.match
         for key, row_id in self.f_iter_prefix(fp, 'E:'):
             matched = edge_match(key)
-            if not matched:
-                continue
-            src, edge_type, dst = matched.groups()
-            yield row_id, src, edge_type, dst
+            if matched:
+                src, edge_type, dst = matched.groups()
+                yield row_id, src, edge_type, dst
 
     def f_iter_nodes(self, fp:Dict[int,IO]) -> Generator[Tuple[int,str], None, None]:
         """Iterate over all nodes from the key table.
@@ -914,9 +889,8 @@ class GraphDb(JDb):
         node_match = NODE_RE.match
         for key, row_id in self.f_iter_prefix(fp, 'N:'):
             matched = node_match(key)
-            if not matched:
-                continue
-            yield row_id, matched.groups()[0]
+            if matched:
+                yield row_id, matched.groups()[0]
 
     def f_iter_neighbors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int], None, None]:
         """Iterate over all edges incident to a node, ignoring direction.
@@ -938,17 +912,13 @@ class GraphDb(JDb):
         adj_match = ADJ_RE.match
         for key, _row_id in self.f_iter_prefix(fp, f'X:{node_id}:'):
             matched = adj_match(key)
-            if not matched:
-                continue
-            _n, direction, neighbor = matched.groups()
-            if direction == '>':
-                edge_key = _generate_edge_key(node_id, neighbor, True)
-            elif direction == '<':
-                edge_key = _generate_edge_key(neighbor, node_id, True)
-            else:
-                edge_key = _generate_edge_key(node_id, neighbor, False)
+            if matched:
+                _n, direction, neighbor = matched.groups()
+                edge_key = _generate_edge_key(node_id, neighbor, True) if direction == '>' else \
+                        _generate_edge_key(neighbor, node_id, True) if direction == '<' else \
+                        _generate_edge_key(node_id, neighbor, False)
 
-            yield neighbor, edge_key, key_table.get(edge_key, -1)
+                yield neighbor, edge_key, key_table.get(edge_key, -1)
 
     def f_iter_successors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int], None, None]:
         """Iterate over one-hop successors of a node, respecting direction.
@@ -971,14 +941,13 @@ class GraphDb(JDb):
         adj_match = ADJ_RE.match
         for key, _row_id in self.f_iter_prefix(fp, f'X:{node_id}:'):
             matched = adj_match(key)
-            if not matched:
-                continue
-            _n, direction, successor = matched.groups()
-            if direction == '<':
-                continue
+            if matched:
+                _n, direction, successor = matched.groups()
+                if direction == '<':
+                    continue
 
-            edge_key = _generate_edge_key(node_id, successor, direction == '>')
-            yield successor, edge_key, key_table.get(edge_key, -1)
+                edge_key = _generate_edge_key(node_id, successor, direction == '>')
+                yield successor, edge_key, key_table.get(edge_key, -1)
 
     def f_iter_predecessors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int], None, None]:
         """Iterate over one-hop predecessors of a node, respecting direction.
@@ -1066,12 +1035,8 @@ class GraphDb(JDb):
                 removed += 1
 
             for _row_id, src, edge_type, dst in list(self.f_iter_edges(fp)):
-                if edge_type == '>':
-                    f_write(fp, f'X:{src}:>:{dst}:', '', compare=False)
-                    f_write(fp, f'X:{dst}:<:{src}:', '', compare=False)
-                else:
-                    f_write(fp, f'X:{src}:-:{dst}:', '', compare=False)
-                    f_write(fp, f'X:{dst}:-:{src}:', '', compare=False)
+                f_write(fp, f'X:{src}:{">" if edge_type == ">" else "-"}:{dst}:', '', compare=False)
+                f_write(fp, f'X:{dst}:{"<" if edge_type == ">" else "-"}:{src}:', '', compare=False)
                 added += 2
 
         return {'removed': removed, 'added': added}
@@ -1092,12 +1057,8 @@ class GraphDb(JDb):
         with self.open() as fp:
             expected = set()
             for _row_id, src, edge_type, dst in self.f_iter_edges(fp):
-                if edge_type == '>':
-                    expected.add(f'X:{src}:>:{dst}:')
-                    expected.add(f'X:{dst}:<:{src}:')
-                else:
-                    expected.add(f'X:{src}:-:{dst}:')
-                    expected.add(f'X:{dst}:-:{src}:')
+                expected.add(f'X:{src}:{">" if edge_type == ">" else "-"}:{dst}:')
+                expected.add(f'X:{dst}:{"<" if edge_type == ">" else "-"}:{src}:')
 
             actual = {k for k, _r in self.f_iter_prefix(fp, 'X:')}
 

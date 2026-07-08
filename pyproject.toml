@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.13.45"
+version = "2.13.46"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -31,7 +31,7 @@ keywords = [
 	"dict",
 	"file-based",
 	"filelock",
-	"graph-database",
+	"graphdb",
 	"locking",
 	"ini",
 	"in-memory",

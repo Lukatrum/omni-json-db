@@ -3405,8 +3405,10 @@ class JDbReader(JDbBase):
                     value, value_b = self.f_read_with_bytes(fp, key)
                 else:
                     move_to_end = True
-                    value = cache.get(key, None)
                     value_b = None
+                    value = cache.get(key, _MISSING)
+                    if value is _MISSING: # pragma: no cover
+                        value, value_b = self.f_read_with_bytes(fp, key)
 
                 if vals and isinstance(value, JDbReader):
                     child = value
@@ -3800,8 +3802,8 @@ class JDbReader(JDbBase):
         Returns:
             Any: The resolved data.
         """
-        val = self._cache.get(key, None)
-        if val is not None:
+        val = self._cache.get(key, _MISSING)
+        if val is not _MISSING:
             return deepcopy(val) if copy else val
 
         io = self.io
