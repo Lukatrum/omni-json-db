@@ -20,6 +20,15 @@ omni\_json\_db.jdb\_file
    :show-inheritance:
    :undoc-members:
 
+omni\_json\_db.jdb\_graph
+------------------------------------
+
+.. automodule:: omni_json_db.jdb_graph
+   :members:
+   :show-inheritance:
+   :undoc-members: 
+   :exclude-members: EDGE_RE, NODE_RE, ADJ_RE
+
 omni\_json\_db.jdb\_io
 ------------------------------------
 

@@ -2,7 +2,9 @@
 import unittest, time, random, threading, inspect, re, os, io
 import datetime as dt
 import sqlite3
-from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JNetFiles, JDiskFiles, run_files_server, loads, dumps, Query
+from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, \
+                    JNetFiles, JDiskFiles, run_files_server, \
+                    GraphDb, loads, dumps, Query
 
 _g_basetime = time.perf_counter()
 def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reverse=None, hidden=None, bright=None, fg=None, black=None, red=None, green=None, yellow=None, blue=None, magenta=None, cyan=None, white=None, bg=None, bg_black=None, bg_red=None, bg_green=None, bg_yellow=None, bg_blue=None, bg_magenta=None, bg_cyan=None, bg_white=None):
@@ -286,6 +288,359 @@ class TestJDb(unittest.TestCase):
                 if not server: continue
                 server.shutdown()
                 server.server_close()
+
+    def test_graph(self):
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
+            # --------------------------------------------
+            jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
+            db = GraphDb(jdb, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            jmem['users'] = db
+            jdb['key1'] = 0
+            nodes = {
+                'A': {'name': 'Alice', 'age': 25, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+                'B': {'name': 'Bob', 'age': 30, 'role': 'developer', 'tags': ['javascript', 'web']},
+                'C': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+                'D': {'name': 'Diana', 'age': 40, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+            }
+            for node_id,props in nodes.items():
+                self.assertTrue(db.add_node(node_id, **props))
+                self.assertEqual(db.get_node(node_id), props)
+
+            self.assertTrue(db.add_edge('A', 'B', directed=True, weight=1.0))
+            self.assertTrue(db.add_edge('B', 'C', directed=True, weight=2.0))
+            self.assertTrue(db.add_edge('A', 'C', directed=True, weight=4.0))
+            self.assertTrue(db.add_edge('C', 'D', directed=True, weight=1.0))
+
+            self.assertTrue(db.has_node('A'))
+            self.assertFalse(db.has_node('E'))
+            self.assertEqual(db.get_node('A')['age'], nodes['A']['age'])
+            self.assertEqual(db.get_node('B')['role'], 'developer')
+
+            self.assertEqual(db.get_edge('A', 'B', directed=True)['weight'], 1.)
+            self.assertEqual(db.get_edge('B', 'C', directed=True)['weight'], 2.)
+            self.assertEqual(db.get_edge('B', 'D', directed=True), None)
+            self.assertEqual(db.get_edge('B', 'C', directed=False), None)
+
+            self.assertTrue(db.add_node('B', role='user'))
+            self.assertTrue(db.add_node('C', role='user'))
+
+            self.assertEqual({k[1] for k in db.iter_nodes()}, {'A','B','C','D'})
+            self.assertEqual(sum(1 for k in db.iter_edges()), 4)
+
+            self.assertIn('B', db.get_successors('A'))
+            self.assertIn('C', db.get_successors('A'))
+            self.assertIn('A', db.get_predecessors('B'))
+            self.assertNotIn('B', db.get_predecessors('A'))
+
+            self.assertFalse(db.is_cyclic())
+
+            topo_order = db.topological_sort() #???
+            self.assertEqual(len(topo_order), 4)
+            self.assertTrue(topo_order.index('A') < topo_order.index('B'))
+            self.assertTrue(topo_order.index('B') < topo_order.index('C'))
+
+            dfs_path = db.dfs_traverse('A')
+            self.assertEqual(set(dfs_path), {'A', 'B', 'C', 'D'})
+
+            dist, path = db.dijkstra_shortest_path('A', 'D', weight_key='weight')
+            self.assertEqual(dist, 4.)
+            self.assertEqual(path, ['A', 'B', 'C', 'D'])
+
+            path = db.bfs_shortest_path('A', 'D')
+            self.assertEqual(path, ['A', 'C', 'D'])
+
+            # A->B->C->D->A
+            db.add_edge('D', 'A', directed=True)
+            self.assertTrue(db.is_cyclic())
+
+            db.remove_edge('D', 'A', directed=True)
+            self.assertFalse(db.is_cyclic())
+
+            # A->B->C->D
+            idx_status = db.verify_index()
+            self.assertEqual(idx_status['missing'], [])
+            self.assertEqual(idx_status['orphan'], [])
+
+            with db.open(read_only=False) as fp:
+                db.f_delete(fp, 'X:A:>:B:')
+
+            idx_status = db.verify_index()
+            self.assertIn('X:A:>:B:', idx_status['missing'])
+
+            re_res = db.reindex()
+            self.assertTrue(re_res['added'] > 0)
+            idx_status = db.verify_index()
+            self.assertEqual(idx_status['missing'], [])
+
+            db.add_node('E', type='island')
+            db.add_node('F', type='island')
+            db.add_edge('E', 'F', directed=False, relation='peer', weight=2.)
+            db.add_edge('B', 'C', directed=True, relation='peer')
+
+            self.assertIn('E', db.get_neighbors('F'))
+            self.assertIn('F', db.get_neighbors('E'))
+
+            weight = db.get_edge('E', 'F', directed=False)['weight']
+            db.boost_edge_weights(relation_type='peer', boost_value=4.)
+            self.assertEqual(db.get_edge('E', 'F', directed=False)['weight'], weight+4)
+            self.assertEqual(db.get_edge('B', 'C', directed=True)['weight'], weight+4)
+
+            today = dt.date.today()
+            db.add_temporal_edge('E', 'F', directed=False, expire_days=f'{today} {today+dt.timedelta(days=7)}')
+            res = db[dt.date.today()+dt.timedelta(days=2):]
+            self.assertEqual(set(res), {'E:E:-:F:'})
+
+            components = db.connected_components()
+            self.assertEqual(len(components), 2)
+
+            comp_e = next(comp for comp in components if 'E' in comp)
+            self.assertEqual(set(comp_e), {'E', 'F'})
+
+            node = Query()
+            res = db.find_nodes((node.age >= 30) & (node.role == 'user'))
+            self.assertEqual(set(res), {'B', 'C'})
+
+            edge = Query()
+            res = db.find_edges(edge.weight.between(2.5, 4.))
+            self.assertEqual(set(res), {('A', '>', 'C')})
+
+            res = db.show(node.weight > 0., with_date=1)
+            self.assertEqual(len(res), 5)
+
+            res = db.degree('C')
+            self.assertEqual(res, {'in':2, 'out':1, 'total':3, 'undirected':0})
+
+            db.remove_node('C')
+            self.assertFalse(db.has_node('C'))
+            self.assertNotIn('C', db.get_successors('A'))
+            self.assertNotIn('C', db.get_successors('B'))
+            self.assertNotIn('C', db.get_predecessors('D'))
+            self.assertEqual(len(db.get_successors('B')), 0)
+
+            res = db.show(node._id.startswith('N:') & node._id.endswith(':'))
+            self.assertEqual(len(res), 5)
+
+            res = db.show(node._id.startswith('E:') & node._id.endswith(':'), with_date=1)
+            self.assertGreaterEqual(len(res), 2)
+
+            for node_id in nodes:
+                db.remove_node(node_id)
+
+            for node_id in ('E', 'F'):
+                db.remove_node(node_id)
+
+            self.assertEqual(len(db), 1)
+
+            jdb -= jdb
+            def build(db, edges, nodes=()):
+                db -= db
+                for n in nodes:
+                    db.add_node(n)
+
+                for spec in edges:
+                    u, v, directed = spec[0], spec[1], spec[2]
+                    kw = spec[3] if len(spec) > 3 else {}
+                    db.add_edge(u, v, directed=directed, **kw)
+
+            self.assertTrue(db.add_node('A', x=1))            # created
+            self.assertFalse(db.add_node('A', x=1))           # no-op merge
+            self.assertTrue(db.add_node('A', y=2))            # merge adds key
+            self.assertEqual(db.get_node('A'), {'x': 1, 'y': 2})
+
+            self.assertTrue(db.add_edge('A', 'B', directed=True, w=1))   # created (+ node B)
+            self.assertFalse(db.add_edge('A', 'B', directed=True, w=1))  # no-op
+            self.assertTrue(db.add_edge('A', 'B', directed=True, w=9))   # merge
+            self.assertEqual(db.get_edge('A', 'B', directed=True)['w'], 9)
+
+            # self-loop must be rejected
+            with self.assertRaises(ValueError):
+                db.add_edge('A', 'A', directed=True)
+
+            # =====================================================
+            # get_edge undirected endpoint-order independence
+            # =====================================================
+            build(db, [('F', 'E', False, {'weight': 3})])
+            self.assertEqual(db.get_edge('F', 'E', directed=False)['weight'], 3)
+            self.assertEqual(db.get_edge('E', 'F', directed=False)['weight'], 3)  # order agnostic
+            self.assertIsNone(db.get_edge('E', 'F', directed=True))               # not a directed edge
+
+            # =====================================================
+            # remove_edge / remove_node return values and missing keys
+            # =====================================================
+            build(db, [('A', 'B', True, {'w': 5})])
+            res = db.remove_edge('A', 'B', directed=True)
+            self.assertIn('E:A:>:B:', res)
+            self.assertIsNone(db.get_edge('A', 'B', directed=True))
+            self.assertEqual(db.remove_edge('X', 'Y', directed=True), {})  # missing edge
+
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'B', False)])
+            res = db.remove_node('B')
+            self.assertIn('N:B:', res)
+            self.assertGreaterEqual(len(res), 3)            # node + its incident edges
+            self.assertFalse(db.has_node('B'))
+            self.assertEqual(db.remove_node('NOPE'), {})  # missing node
+
+            # =====================================================
+            # degree: mixed directions and isolated node
+            # =====================================================
+            build(db, [('A', 'B', True), ('C', 'A', True), ('A', 'D', False)], nodes=('ISO',))
+            self.assertEqual(db.degree('A'), {'in': 1, 'out': 1, 'undirected': 1, 'total': 3})
+            self.assertEqual(db.degree('ISO'), {'in': 0, 'out': 0, 'undirected': 0, 'total': 0})
+
+            # =====================================================
+            # undirected edge appears in BOTH successors and predecessors
+            # =====================================================
+            build(db, [('X', 'Y', False, {'r': 'peer'})])
+            self.assertIn('Y', db.get_successors('X'))
+            self.assertIn('X', db.get_successors('Y'))
+            self.assertIn('Y', db.get_predecessors('X'))
+            self.assertIn('X', db.get_predecessors('Y'))
+            self.assertEqual(db.get_neighbors('X'), {'Y'})
+
+            # =====================================================
+            # CYCLE VARIETIES  (the heart of the robustness suite)
+            # =====================================================
+            # directed 2-cycle
+            build(db, [('A', 'B', True), ('B', 'A', True)])
+            self.assertTrue(db.is_cyclic())
+            # directed 3-cycle
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])
+            self.assertTrue(db.is_cyclic())
+            # single undirected edge is NOT a cycle
+            build(db, [('A', 'B', False)])
+            self.assertFalse(db.is_cyclic())
+            # undirected chain is NOT a cycle
+            build(db, [('A', 'B', False), ('B', 'C', False)])
+            self.assertFalse(db.is_cyclic())
+            # undirected triangle IS a cycle
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
+            self.assertTrue(db.is_cyclic())
+            # undirected square IS a cycle
+            build(db, [('A', 'B', False), ('B', 'C', False), ('C', 'D', False), ('D', 'A', False)])
+            self.assertTrue(db.is_cyclic())
+            # undirected tree is NOT a cycle
+            build(db, [('A', 'B', False), ('A', 'C', False), ('B', 'D', False), ('B', 'E', False)])
+            self.assertFalse(db.is_cyclic())
+            # undirected star is NOT a cycle
+            build(db, [('H', 'B', False), ('H', 'C', False), ('H', 'D', False)])
+            self.assertFalse(db.is_cyclic())
+            # directed diamond DAG is NOT a cycle
+            build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
+            self.assertFalse(db.is_cyclic())
+            # cycle buried inside a larger graph  (A->B, B->C->D->B)
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'D', True), ('D', 'B', True)])
+            self.assertTrue(db.is_cyclic())
+            # two components, only one cyclic
+            build(db, [('A', 'B', False), ('X', 'Y', True), ('Y', 'X', True)])
+            self.assertTrue(db.is_cyclic())
+            # mixed directed + undirected between the same pair is a cycle
+            build(db, [('A', 'B', True), ('B', 'A', False)])
+            self.assertTrue(db.is_cyclic())
+
+            # =====================================================
+            # topological_sort: raises on cycle, valid on DAG
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])
+            with self.assertRaises(ValueError):
+                db.topological_sort()
+
+            build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
+            res = db.show()
+            self.assertGreaterEqual(len(res), 4)
+
+            order = db.topological_sort()
+            self.assertEqual(set(order), {'A', 'B', 'C', 'D'})
+            pos = {n: i for i, n in enumerate(order)}
+            self.assertTrue(pos['A'] < pos['B'] < pos['D'])
+            self.assertTrue(pos['A'] < pos['C'] < pos['D'])
+
+            # =====================================================
+            # SHORTEST PATH edge cases
+            # =====================================================
+            build(db, [('A', 'B', True, {'weight': 1.}), ('B', 'C', True, {'weight': 2.}),
+                   ('A', 'C', True, {'weight': 4.}), ('C', 'D', True, {'weight': 1.})])
+
+            res = db.show()
+            self.assertGreaterEqual(len(res), 4)
+            # unreachable (directed backward)
+            self.assertEqual(db.bfs_shortest_path('D', 'A'), [])
+            self.assertEqual(db.dijkstra_shortest_path('D', 'A'), (float('inf'), []))
+            # missing node
+            self.assertEqual(db.bfs_shortest_path('A', 'ZZZ'), [])
+            self.assertEqual(db.dijkstra_shortest_path('ZZZ', 'A'), (float('inf'), []))
+            # start == end
+            self.assertEqual(db.bfs_shortest_path('A', 'A'), ['A'])
+            self.assertEqual(db.dijkstra_shortest_path('A', 'A'), (0, ['A']))
+            # dijkstra prefers cheaper multi-hop over expensive direct edge
+            self.assertEqual(db.dijkstra_shortest_path('A', 'C', weight_key='weight'), (3., ['A', 'B', 'C']))
+            # bfs prefers fewest hops (direct) regardless of weight
+            self.assertEqual(db.bfs_shortest_path('A', 'C'), ['A', 'C'])
+
+            # undirected shortest path works both directions
+            build(db, [('A', 'B', False, {'weight': 2.}), ('B', 'C', False, {'weight': 3.})])
+            self.assertEqual(db.bfs_shortest_path('C', 'A'), ['C', 'B', 'A'])
+            self.assertEqual(db.dijkstra_shortest_path('C', 'A', weight_key='weight'), (5., ['C', 'B', 'A']))
+
+            idx_status = db.verify_index()
+            self.assertEqual(idx_status['missing'], [])
+            self.assertEqual(idx_status['orphan'], [])
+
+            # =====================================================
+            # dfs_traverse: missing start, shared visited, forward-only, cycle-safe
+            # =====================================================
+            build(db, [('A', 'B', True)])
+            self.assertEqual(db.dfs_traverse('NOPE'), [])
+            build(db, [('A', 'B', True), ('A', 'C', True)])
+            shared = {'B'}
+            got = db.dfs_traverse('A', shared)
+            self.assertNotIn('B', got)
+            self.assertEqual(set(got), {'A', 'C'})
+            build(db, [('A', 'B', True), ('X', 'A', True)])       # X->A must not be reached from A
+            self.assertEqual(set(db.dfs_traverse('A')), {'A', 'B'})
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])  # cycle must terminate
+            self.assertEqual(set(db.dfs_traverse('A')), {'A', 'B', 'C'})
+
+            # =====================================================
+            # connected_components: isolated node forms its own component
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', False)], nodes=('ISO',))
+            comps = db.connected_components()
+            norm = sorted(sorted(c) for c in comps)
+            self.assertEqual(norm, [['A', 'B', 'C'], ['ISO']])
+            # directed edges still weakly connect
+            build(db, [('A', 'B', True), ('C', 'B', True)])
+            self.assertEqual(len(db.connected_components()), 1)
+
+            # =====================================================
+            # add_temporal_edge renewal (second call must keep the edge alive)
+            # =====================================================
+            db -= db
+            today = dt.date.today()
+            span1 = f'{today} {today + dt.timedelta(days=7)}'
+            span2 = f'{today} {today + dt.timedelta(days=14)}'
+            self.assertTrue(db.add_temporal_edge('E', 'F', directed=False, expire_days=span1))
+            self.assertTrue(db.add_temporal_edge('E', 'F', directed=False, expire_days=span2))  # renewal
+            self.assertIsNotNone(db.get_edge('E', 'F', directed=False))
+
+            self.assertEqual(jdb, db)
+            self.assertEqual(jdb.keys[:], db.keys[:])
+            self.assertEqual(jdb.keys[0.:], db.keys[0.:])
+            self.assertEqual(jdb.sync_id, db.sync_id)
+
+            jmem.recycle(level=2)
+            error = jmem.check_error(level=2)
+            self.assertTrue(not error)
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_import(self):
         ini_data = """
