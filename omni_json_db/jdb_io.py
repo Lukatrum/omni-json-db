@@ -2435,7 +2435,8 @@ class JIo(JIoBase):
             _DEAD_rows.pop(del_id, None)
 
         if match_list:
-            row_size, file_id, offset, row_id = sorted(match_list)[0] if len(match_list) > 1 else match_list[0]
+            match_list.sort()
+            row_size, file_id, offset, row_id = match_list[0]
             _DEAD_rows.pop(row_id, None)
         else:
             row_id = file_id = offset = row_size = -1

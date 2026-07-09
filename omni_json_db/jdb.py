@@ -722,7 +722,8 @@ class JDb(JDbReader):
                 io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
             else:
                 io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
-                del_keys = sorted([(key_table[_key], _key) for _key in del_keys], reverse=True)
+                del_keys = [(key_table[_key], _key) for _key in del_keys]
+                del_keys.sort(reverse=True)
 
             f_delete = self.f_delete
             files_obj = self.files_obj
@@ -817,7 +818,8 @@ class JDb(JDbReader):
                     has_SIGINT = self.file_lock.has_SIGINT
                     f_delete = self.f_delete
                     files_obj = self.files_obj
-                    del_keys = sorted([(key_table[kk], kk) for kk in keys], reverse=True)
+                    del_keys = [(key_table[kk], kk) for kk in keys]
+                    del_keys.sort(reverse=True)
                     for row_id,_key in del_keys:
                         if has_SIGINT() or row_id < 0:
                             break
@@ -1397,7 +1399,7 @@ class JDb(JDbReader):
                 if del_rows:
                     new_del_rows = []
                     io_write_key = io.write_key
-                    del_rows = sorted(del_rows, reverse=True)
+                    del_rows.sort(reverse=True)
                     for (file_id, offset, row_size, val_size, ver, days, key, _row_id) in del_rows:
                         curr_end = offset + row_size
                         file_end = file_table.get(file_id, curr_end)
@@ -1435,7 +1437,7 @@ class JDb(JDbReader):
                 del_rows = new_del_rows
 
             if del_rows and merge:
-                del_rows = sorted(del_rows)
+                del_rows.sort()
                 prev = del_rows[0]
                 new_rows = {}
                 for curr in del_rows[1:]:
@@ -2430,7 +2432,7 @@ class JDb(JDbReader):
 
         count = 0
         with self.open(read_only=True) as fp:
-            matched_keys = {key:val for key,val in self.find_iter(vals=condition, with_value=True) if isinstance(val, dict)}
+            matched_keys = {key:val for key,val in self.find_iter(vals=condition, with_value=True, with_date=False) if isinstance(val, dict)}
             if matched_keys:
                 _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp) # switch to write mode
                 has_SIGINT = self.file_lock.has_SIGINT
@@ -3091,8 +3093,9 @@ class JDb(JDbReader):
             has_SIGINT = self.file_lock.has_SIGINT
             f_delete = self.f_delete
             files_obj = self.files_obj
-            keys = sorted([(kk,key_table[kk]) for kk in keys], key=lambda vv: -vv[1])
-            for key,row_id in keys:
+            keys = [(key_table[kk], kk) for kk in keys]
+            keys.sort(reverse=True)
+            for row_id,key in keys:
                 if has_SIGINT():
                     break
 
@@ -3172,8 +3175,9 @@ class JDb(JDbReader):
             has_SIGINT = self.file_lock.has_SIGINT
             f_delete = self.f_delete
             files_obj = self.files_obj
-            keys = sorted([(kk,key_table[kk]) for kk in keys], key=lambda vv: -vv[1])
-            for key,row in keys:
+            keys = [(key_table[kk],kk) for kk in keys]
+            keys.sort(reverse=True)
+            for row,key in keys:
                 if has_SIGINT():
                     break
 
@@ -3334,7 +3338,7 @@ class JDb(JDbReader):
 
             print(Style(f'CHK0 err:{len(error)} cache:{len(cache)} {io.n_records}/{io.n_lines}', red=len(error) > 0))
             keys.clear()
-            cache = sorted(cache)
+            cache.sort()
             total = len(cache)
             miss_parts = []
             # fail_parts = []

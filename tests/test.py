@@ -304,6 +304,17 @@ class TestJDb(unittest.TestCase):
             ('C', 'D', True) : {'weight':1.},
         }
 
+        def build(db, edges, nodes=()):
+            db -= db
+            with db.open(read_only=False) as fp:
+                for n in nodes:
+                    db.f_add_node(fp, n)
+
+                for spec in edges:
+                    u, v, directed = spec[0], spec[1], spec[2]
+                    kw = spec[3] if len(spec) > 3 else {}
+                    db.f_add_edge(fp, u, v, directed=directed, **kw)
+
         for config in self.jdb_configs:
             st_time = time.perf_counter()
             filename = config['KEY_file']
@@ -456,16 +467,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(db), 1)
 
             jdb -= jdb
-            def build(db, edges, nodes=()):
-                db -= db
-                for n in nodes:
-                    db.add_node(n)
-
-                for spec in edges:
-                    u, v, directed = spec[0], spec[1], spec[2]
-                    kw = spec[3] if len(spec) > 3 else {}
-                    db.add_edge(u, v, directed=directed, **kw)
-
             self.assertTrue(db.add_node('A', x=1))            # created
             self.assertFalse(db.add_node('A', x=1))           # no-op merge
             self.assertTrue(db.add_node('A', y=2))            # merge adds key
@@ -654,6 +655,64 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(db.add_temporal_edge('E', 'F', directed=False, expire_days=span2))  # renewal
             self.assertIsNotNone(db.get_edge('E', 'F', directed=False))
 
+            # =====================================================
+            # k_hop_neighbors: directed chain + branch
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'D', True), ('A', 'E', True)])
+            self.assertEqual(db.k_hop_neighbors('A', 1), {'B': 1, 'E': 1})
+            self.assertEqual(db.k_hop_neighbors('A', 2), {'B': 1, 'E': 1, 'C': 2})
+            self.assertEqual(db.k_hop_neighbors('A', 3), {'B': 1, 'E': 1, 'C': 2, 'D': 3})
+            self.assertEqual(db.k_hop_neighbors('A', 10), {'B': 1, 'E': 1, 'C': 2, 'D': 3})  # stops early
+            self.assertEqual(db.k_hop_neighbors('D', 1), {})                                  # no out-edges
+            self.assertEqual(db.k_hop_neighbors('D', 2, direction='in'), {'C': 1, 'B': 2})
+            self.assertEqual(db.k_hop_neighbors('ZZZ', 2), {})                                # missing node
+            self.assertEqual(db.k_hop_neighbors('A', 0), {})                                  # k=0
+
+            # =====================================================
+            # k_hop_neighbors: undirected edges count in both directions
+            # =====================================================
+            build(db, [('A', 'B', False), ('B', 'C', True)])
+            self.assertEqual(db.k_hop_neighbors('A', 1), {'B': 1})
+            self.assertEqual(db.k_hop_neighbors('A', 2), {'B': 1, 'C': 2})
+            self.assertEqual(db.k_hop_neighbors('C', 1), {})                       # B->C directed, C has no out
+            self.assertEqual(db.k_hop_neighbors('C', 1, direction='in'), {'B': 1})
+            self.assertEqual(db.k_hop_neighbors('C', 2, direction='in'), {'B': 1, 'A': 2})
+            self.assertEqual(db.k_hop_neighbors('A', 2, direction='both'), {'B': 1, 'C': 2})
+
+            # =====================================================
+            # ego_graph: node/edge set is the correct induced subgraph
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True)], nodes=('ISO',))
+            ego = db.ego_graph('A', 1, direction='out')
+            self.assertEqual(set(ego['nodes']), {'A', 'B', 'C'})
+            # B and C are both in the 1-hop set, so the B->C edge is included too
+            self.assertEqual(set(ego['edges']), {('A', '>', 'B'), ('A', '>', 'C'), ('B', '>', 'C')})
+
+            ego_in = db.ego_graph('C', 1, direction='in')
+            self.assertEqual(set(ego_in['nodes']), {'A', 'B', 'C'})
+
+            self.assertEqual(db.ego_graph('ISO', 1)['nodes'], {'ISO': {}})
+            self.assertEqual(db.ego_graph('ISO', 1)['edges'], {})
+            self.assertEqual(db.ego_graph('ZZZ', 1), {'nodes': {}, 'edges': {}})
+
+            # radius 1 excludes a node two hops away
+            build(db, [('A', 'B', True), ('B', 'D', True), ('X', 'D', True)])
+            ego2 = db.ego_graph('A', 1, direction='out')
+            self.assertEqual(set(ego2['nodes']), {'A', 'B'})
+            self.assertEqual(set(ego2['edges']), {('A', '>', 'B')})
+
+            # k=0 is just the center node, no edges
+            build(db, [('A', 'B', True)])
+            ego0 = db.ego_graph('A', 0)
+            self.assertEqual(set(ego0['nodes']), {'A'})
+            self.assertEqual(ego0['edges'], {})
+
+            # edge properties are preserved in the ego subgraph
+            build(db, [('A', 'B', True, {'w': 7})])
+            ego3 = db.ego_graph('A', 1)
+            self.assertEqual(ego3['edges'][('A', '>', 'B')], {'w': 7})
+
+            # =====================================================
             self.assertEqual(jdb, db)
             self.assertEqual(jdb.keys[:], db.keys[:])
             self.assertEqual(jdb.keys[0.:], db.keys[0.:])
@@ -730,6 +789,14 @@ class TestJDb(unittest.TestCase):
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_query(self):
+        # Sample user records
+        users = {
+           'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+           'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
+           'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+           'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+        }
+
         user = Query()
         for config in self.jdb_configs:
             st_time = time.perf_counter()
@@ -740,14 +807,6 @@ class TestJDb(unittest.TestCase):
             jdb.clear(agree='yes', wait_sec=0, **config)
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
-            # Sample user records
-            users = {
-               'user_1': {'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
-               'user_2': {'name': 'Bob', 'age': 25, 'role': 'developer', 'tags': ['javascript', 'web']},
-               'user_3': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
-               'user_4': {'name': 'Diana', 'age': 28, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
-            }
-
             # Insert data
             jdb += users
             self.assertEqual(jdb, users)
@@ -767,8 +826,10 @@ class TestJDb(unittest.TestCase):
             jdb.keys['user_4'] = prev_date3 = today - dt.timedelta(days=3) # change modified date
             self.assertEqual(jdb, users)
 
+            res = jdb.show(with_date=True, sort=-1, reverse=True)
+            self.assertEqual(res, users)
             # --------------------------------------------
-            res = jdb.show(user._date.startswith('2005'))
+            res = jdb.find(user._date.startswith('2005'))
             self.assertEqual(set(res), {'user_2'})
 
             # modified date == tuesday (0 = monday, ... 5 = saturday, 6 = sunday)
@@ -1521,7 +1582,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_3'})
 
             res2 = jdb.find_iter({'$ew': '_3'}, with_date=True)
-            self.assertEqual({k[0]:k[1] for k in res2 if len(k) == 4}, res)
+            self.assertEqual({k:v[0] for k,v in res2 if len(v) == 3}, res)
 
             # 'user_2' <= KEY <= 'user_4'
             res = jdb.find({'$between': ('user_2', 'user_4')})
@@ -5801,7 +5862,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(list(matches.items())[0], ('kkk0', 0))
             self.assertEqual(list(matches.items())[99], ('kkk99', 99))
 
-            matches = jdb.find('kkk', sort=-1)
+            matches = jdb.find('kkk', sort=1, reverse=True)
             self.assertEqual(matches, expect)
             self.assertEqual(list(matches.items())[-1], ('kkk0', 0))
             self.assertEqual(list(matches.items())[0], ('kkk99', 99))

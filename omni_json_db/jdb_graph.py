@@ -136,7 +136,7 @@ class GraphDb(JDb):
         ret = {}
         node_re = self.NODE_RE
         node_match = node_re.match
-        for key, val in self.find_iter(node_re, vals=condition, date=date, limit=limit, skip=skip, with_value=True, **kwargs):
+        for key, val in self.find_iter(node_re, vals=condition, date=date, limit=limit, skip=skip, with_value=True, with_date=False, **kwargs):
             matched = node_match(key)
             ret[matched.groups()[0]] = val
         return ret
@@ -268,7 +268,7 @@ class GraphDb(JDb):
         ret = {}
         edge_re = self.EDGE_RE
         edge_match = edge_re.match
-        for key,val in self.find_iter(edge_re, vals=condition, date=date, limit=limit, skip=skip, with_value=True, **kwargs):
+        for key,val in self.find_iter(edge_re, vals=condition, date=date, limit=limit, skip=skip, with_value=True, with_date=False, **kwargs):
             matched = edge_match(key)
             ret[matched.groups()] = val
 
@@ -898,17 +898,17 @@ class GraphDb(JDb):
         """
         node_key = f'N:{node_id}:'
         ret = {}
-        matched_keys = set()
+        matched_keys = []
         io, fp, _key_fp = self.f_get_fp(fp)
         key_table = io.key_table
         row_id = key_table.get(node_key, -1)
         if row_id >= 0:
-            matched_keys.add((node_key, row_id))
+            matched_keys.append((row_id, node_key))
 
         adj_key = f'X:{node_id}:'
         row_id = key_table.get(adj_key, -1)
         if row_id >= 0:
-            matched_keys.add((adj_key, row_id))
+            matched_keys.append((row_id, adj_key))
             _generate_edge_key = self._generate_edge_key
             f_read = self.f_read
             f_write = self.f_write
@@ -923,7 +923,7 @@ class GraphDb(JDb):
                             _generate_edge_key(node_id, neighbor, edge_type == '>')
                 edge_row = key_table.get(edge_key, -1)
                 if edge_row >= 0:
-                    matched_keys.add((edge_key, edge_row))
+                    matched_keys.append((edge_row, edge_key))
 
                 # clean the neighbor once (drops every entry
                 # that points back at node_id, directed or undirected)
@@ -931,17 +931,16 @@ class GraphDb(JDb):
                 adj_row = key_table.get(adj_key, -1)
                 if adj_row >= 0 \
                         and adj_key not in cleaned_adjs \
-                        and (adj_key, adj_row) not in matched_keys:
+                        and (adj_row, adj_key) not in matched_keys:
                     cleaned_adjs.add(adj_key)
                     new_adj = []
-                    old_adj = f_read(fp, adj_key, copy=False)
-                    if old_adj:
-                        for _adj_id in old_adj:
-                            if _adj_id[1:] != node_id:
-                                new_adj.append(_adj_id)
+                    old_adj = f_read(fp, adj_key, default_val=[], copy=False)
+                    for _adj_id in old_adj:
+                        if _adj_id[1:] != node_id:
+                            new_adj.append(_adj_id)
 
                     if not new_adj:
-                        matched_keys.add((adj_key, adj_row))
+                        matched_keys.append((adj_row, adj_key))
 
                     elif new_adj != old_adj:
                         f_write(fp, adj_key, new_adj, overwrite=True, max_wsize=0)
@@ -949,8 +948,8 @@ class GraphDb(JDb):
         if matched_keys:
             io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
             f_delete = self.f_delete
-            matched_list = sorted(matched_keys, key=lambda vv: -vv[1])
-            for key,row_id in matched_list:
+            matched_keys.sort(reverse=True)
+            for row_id,key in matched_keys:
                 val = f_delete(fp, key, row=row_id)
                 ret[key] = val
 
@@ -1104,6 +1103,104 @@ class GraphDb(JDb):
         """
         adj_key = f'X:{node_id}:'
         return self.f_read(fp, adj_key, default_val=[], copy=False)
+
+    # =====================================================================
+    # neighbourhood / subgraph queries
+    # =====================================================================
+    def k_hop_neighbors(self, node_id:str, k:int, direction:str='out') -> Dict[str,int]:
+        """Find all nodes within ``k`` hops of a node (BFS with depth limit).
+
+        Args:
+            node_id (str): Center node identifier.
+            k (int): Maximum number of hops (``k >= 1``).
+            direction (str, optional): Edge direction to follow from each
+                node — ``'out'`` (default) follows outgoing directed and
+                undirected edges, ``'in'`` follows incoming directed and
+                undirected edges, ``'both'`` follows every incident edge.
+
+        Returns:
+            Dict[str, int]: Mapping of reachable node id to its hop distance
+                from ``node_id`` (1..k). Excludes ``node_id`` itself. Empty if
+                the node is missing, ``k < 1``, or it has no qualifying
+                neighbours.
+        """
+        result = {}
+        with self.open() as fp:
+            if not self.f_has_node(fp, node_id) or k < 1:
+                return result
+
+            f_get_adj = self.f_get_adj
+            visited = {node_id}
+            frontier = [node_id]
+            for depth in range(1, k + 1):
+                nxt = []
+                for cur in frontier:
+                    for entry in f_get_adj(fp, cur):
+                        d, neighbor = entry[0], entry[1:]
+                        if direction == 'out' and d == '<': continue
+                        if direction == 'in' and d == '>': continue
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            result[neighbor] = depth
+                            nxt.append(neighbor)
+                if not nxt:
+                    break
+                frontier = nxt
+
+        return result
+
+    def ego_graph(self, node_id:str, k:int=1, direction:str='both') -> Dict[str,Any]:
+        """Extract the ``k``-hop ego subgraph centered on a node.
+
+        The subgraph contains ``node_id`` plus every node within ``k`` hops
+        (using ``direction`` for reachability), and every edge of the graph
+        whose endpoints are both inside that node set.
+
+        Args:
+            node_id (str): Center node identifier.
+            k (int, optional): Neighbourhood radius in hops. Defaults to 1.
+            direction (str, optional): Edge direction used to decide
+                reachability of the node set — ``'out'``, ``'in'`` or
+                ``'both'`` (default). See ``k_hop_neighbors``.
+
+        Returns:
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
+                dst): props}}`` for the induced subgraph. Empty node/edge maps
+                if ``node_id`` is missing.
+        """
+        result = {'nodes': {}, 'edges': {}}
+        with self.open() as fp:
+            if not self.f_has_node(fp, node_id):
+                return result
+
+            node_set = {node_id}
+            if k >= 1:
+                node_set.update(self.k_hop_neighbors(node_id, k, direction))
+
+            f_get_node = self.f_get_node
+            for nid in node_set:
+                result['nodes'][nid] = f_get_node(fp, nid)
+
+            # collect induced edges: for every node in the set, walk its
+            # outgoing/undirected adjacency and keep edges whose other
+            # endpoint is also in the set (each edge counted once)
+            f_read = self.f_read
+            f_get_adj = self.f_get_adj
+            _generate_edge_key = self._generate_edge_key
+            edge_re = self.EDGE_RE
+            seen = set()
+            for nid in node_set:
+                for entry in f_get_adj(fp, nid):
+                    d, other = entry[0], entry[1:]
+                    if other in node_set:
+                        edge_key = _generate_edge_key(nid, other, d == '>') if d != '<' else None
+                        if edge_key is not None and edge_key not in seen:
+                            seen.add(edge_key)
+                            matched = edge_re.match(edge_key)
+                            if matched:
+                                result['edges'][matched.groups()] = f_read(fp, edge_key, copy=False)
+
+        return result
 
     def _generate_edge_key(self, u:str, v:str, directed:bool) -> str:
         """Build the canonical storage key for an edge.
