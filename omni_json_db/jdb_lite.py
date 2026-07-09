@@ -234,7 +234,7 @@ class JDbKey:
         """
         return len(self.jdb)
 
-    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, **kwargs) -> Generator[str]:
+    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, **kwargs) -> Generator[str, None, None]:
         """Execute a search query returning matching keys as a generator.
         
         Args:
@@ -263,7 +263,7 @@ class JDbKey:
         else:
             yield from self
 
-    def __iter__(self) -> Generator[str]:
+    def __iter__(self) -> Generator[str, None, None]:
         """Iterate over all keys present in the database.
         
         Yields:
@@ -643,7 +643,7 @@ class JDbKey:
         """
         return self.jdb.has_all(keys)
 
-    def item_iter(self, key:Optional[Any]=None) -> Generator[str,tuple]:
+    def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over keys and their corresponding metadata tuples based on filter criteria.
 
@@ -693,7 +693,7 @@ class JDbKey:
                     >>> all_keys = dict(jdb.keys.item_iter(None))
 
         Yields:
-            Tuple[str, tuple]
+            (str, tuple):
 
                 - [0] key
                 - [1] tuple
@@ -857,12 +857,12 @@ class JDbKey:
                 old_date, new_date = io.z_conv_date(days)
                 yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
 
-    def items(self) -> Generator[str,tuple]:
+    def items(self) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over all keys and their metadata tuples.
 
         Yields:
-            Tuple[str, tuple]
+            (str, tuple):
             
                 - [0] key
                 - [1] tuple
@@ -879,7 +879,7 @@ class JDbKey:
         """
         yield from self.item_iter()
 
-    def values(self) -> Generator[tuple]:
+    def values(self) -> Generator[tuple, None, None]:
         """
         Iterate over all metadata tuples without their keys.
 
@@ -1139,7 +1139,7 @@ class JDbReader(JDbBase):
 
             return io.n_records
 
-    def __iter__(self) -> Generator[str]:
+    def __iter__(self) -> Generator[str, None, None]:
         """
         Iterate over the keys present in the database.
 
@@ -1833,7 +1833,7 @@ class JDbReader(JDbBase):
                 file_lock.release()
 
     @contextmanager
-    def open(self, read_only:bool=True, no_raise:bool=False) -> Generator[Dict[int,IO]]:
+    def open(self, read_only:bool=True, no_raise:bool=False) -> Generator[Dict[int,IO], None, None]:
         """Context manager to acquire thread-safe read/write access to the database files.
 
         Args:
@@ -2023,7 +2023,7 @@ class JDbReader(JDbBase):
             self.lock.release()
 
     @contextmanager
-    def KEY_fopen(self, read_only:bool=True) -> Generator[IO]:
+    def KEY_fopen(self, read_only:bool=True) -> Generator[IO, None, None]:
         """
         Context manager explicitly for opening and accessing the KEY structure file safely.
 
@@ -2977,7 +2977,7 @@ class JDbReader(JDbBase):
                     if _key not in io.key_table: continue
                     jdb.info(prefix + SEP_SYM, key=_key)
 
-    def values(self) -> Generator[Any]:
+    def values(self) -> Generator[Any, None, None]:
         """Generate object values decoded directly from sequential segments records data blocks.
 
         Yields:
@@ -2989,14 +2989,14 @@ class JDbReader(JDbBase):
             for key,row in self.io.key_table.items():
                 yield f_read(fp, key, row=row, copy=False)
 
-    def items(self, read_only:bool=True) -> Generator[str,Any]:
+    def items(self, read_only:bool=True) -> Generator[Tuple[str,Any], None, None]:
         """Generate structured key-value maps pairs extracted from indices tables.
 
         Args:
             read_only (bool, optional): Engage shared serialization pipes logic optimization. Defaults to True.
 
         Yields:
-            Tuple[str, Any]: A structural tuple pair associating key name strings with content values.
+            (str, Any): A structural tuple pair associating key name strings with content values.
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=read_only) as fp:
@@ -3009,7 +3009,7 @@ class JDbReader(JDbBase):
                     # cannot use row argument while using yield
                     yield key, f_read(fp, key, copy=False)
 
-    def item_iter(self, key:Optional[Any]=None) -> Generator[str,Any]:
+    def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,Any]]:
         """Iterate entities across datasets utilizing customizable indexing, criteria lambdas or slices parameters.
 
         Args:
@@ -3025,7 +3025,7 @@ class JDbReader(JDbBase):
                 - list | tuple | set | dict
 
         Yields:
-            Generator[str, Any]: (key, Value)
+            Tuple[str, Any]: (key, Value)
         """
 
         if isinstance(key, Pattern):
@@ -3180,7 +3180,7 @@ class JDbReader(JDbBase):
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, **kwargs) -> Generator[Tuple[str,Any]]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3233,7 +3233,7 @@ class JDbReader(JDbBase):
             **kwargs: Extra filter configurations (e.g., regex flags).
 
         Yields:
-            Tuple[str, Any]: Matching key and its associated value (or None if `with_value` is False).
+            (str, Any): Matching key and its associated value (or None if `with_value` is False).
 
         Example:
 
@@ -4506,7 +4506,7 @@ class JDbReader(JDbBase):
 
         return val_fp, file_id, offset
 
-    def f_key_iter(self, fp:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[str,tuple]:
+    def f_key_iter(self, fp:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over keys and their corresponding information.
 
@@ -4515,7 +4515,7 @@ class JDbReader(JDbBase):
             slice_obj (Union[slice, dt_date, datetime, Condition]]): slice object
 
         Returns:
-            Generator[str, tuple]: key, (row_id, file_id, offset, row_size, val_size, version, days, created_date, modified_date)
+            (str, tuple): key, (row_id, file_id, offset, row_size, val_size, version, days, created_date, modified_date)
         """
         io, fp, key_fp = self.f_get_fp(fp)
         n_records = io.n_records

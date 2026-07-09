@@ -558,11 +558,11 @@ class KeyTable:
 
         return default_row_id
 
-    def items(self) -> Generator[str,int]:
+    def items(self) -> Generator[Tuple[str,int], None, None]:
         """Yield all key and row_id pairs from the table.
 
         Yields:
-            Tuple[str, int]: A tuple containing the key and its corresponding row index.
+            (str, int): A tuple containing the key and its corresponding row index.
         """
         if self.size < 0: #pragma: no cover
             self.clear()
@@ -580,7 +580,7 @@ class KeyTable:
         # not sync
         yield from self._item_iter()
 
-    def values(self) -> Generator[int]:
+    def values(self) -> Generator[int, None, None]:
         """Yield all active row indices in the table.
 
         Yields:
@@ -604,7 +604,7 @@ class KeyTable:
         for _key,row_id in self._item_iter():
             yield row_id
 
-    def keys(self) -> Generator[str]:
+    def keys(self) -> Generator[str, None, None]:
         """Yield all keys registered in the table.
 
         Yields:
@@ -675,7 +675,7 @@ class KeyTable:
         """Check if a key exists in the table using the `in` keyword."""
         return self.get(key, -1) != -1
 
-    def __iter__(self) -> Generator[str]:
+    def __iter__(self) -> Generator[str, None, None]:
         """Iterate over the keys in the table."""
         yield from self.keys()
 
@@ -700,11 +700,11 @@ class KeyTable:
 
         return True
 
-    def _item_iter(self) -> Generator[str,int]:
+    def _item_iter(self) -> Generator[Tuple[str,int], None, None]:
         """Iterate pairs matching target identifiers text tokens straight onto physical rows blocks integers coordinates indices trackers sequences.
 
         Yields:
-            Tuple[str, int]: Associated unique identity string token paired along exact allocation row position line index number value.
+            (str, int): Associated unique identity string token paired along exact allocation row position line index number value.
         """
         jio = self.io
         is_empty = self.size == 0
@@ -2261,7 +2261,7 @@ class JIo(JIoBase):
         else:
             raise ValueError(f'invalid version {self.api_ver}->{version} type:{data_type}')
 
-    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False) -> Generator[str,int]:
+    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False) -> Generator[Tuple[str,int], None, None]:
         """Generate chronologically ordered or reverse ordered key index entries pairs collections sequences.
 
         Args:
@@ -2271,7 +2271,7 @@ class JIo(JIoBase):
             reverse (bool, optional): Flip direction output forcing descending trajectory parsing flows instead. Defaults to False.
 
         Yields:
-            Tuple[str, int]: Entry identity string descriptor paired along active logical index row line identifier number.
+            (str, int): Entry identity string descriptor paired along active logical index row line identifier number.
         """
         stop_row = self.n_records if stop_row < 0 else max(self.n_records, stop_row)
         start_row = min(0, max(start_row, stop_row-1))

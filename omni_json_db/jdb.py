@@ -34,6 +34,7 @@ MAX_BLOCK_SIZE = 2**18 # 256KB
 #-----------------------------------------------------------------------------
 class JDbKey2(JDbKey):
     """Extended read-write key navigation proxy subsystem handling conditional timeline transformations."""
+    __slots__ = ()
 
     def __setitem__(self, key:Union[str,Any], val:Union[str,int,datetime,dt_date]) -> None:
         """Modify the calendar tracking metrics associated with specific database keys dynamically.
@@ -223,6 +224,8 @@ class JDb(JDbReader):
 
     Ensures data consistency under high concurrent load using fine-grained file-level system locking primitives.
     """
+    __slots__ = ()
+
     def __init__(self,\
             KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\
             data_type:Union[str,int,None]='J+S',\

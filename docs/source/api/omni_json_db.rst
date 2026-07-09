@@ -27,7 +27,7 @@ omni\_json\_db.jdb\_graph
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: EDGE_RE, NODE_RE, ADJ_RE
+   :exclude-members:
 
 omni\_json\_db.jdb\_io
 ------------------------------------
@@ -36,7 +36,7 @@ omni\_json\_db.jdb\_io
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: br_compress, json_dumps, lz4_compress, msg_dumps, msg_loads, zs1_compress, zs2_compress, zstd_compress, KeyTable, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, gzip_compress
+   :exclude-members: br_compress, json_dumps, lz4_compress, msg_dumps, msg_loads, zs1_compress, zs2_compress, zstd_compress, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, gzip_compress
 
 omni\_json\_db.jdb\_lite
 ------------------------------------
@@ -45,7 +45,7 @@ omni\_json\_db.jdb\_lite
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: JDbReader, JFlag
+   :exclude-members: JFlag
 
 omni\_json\_db.jdb\_net
 ------------------------------------

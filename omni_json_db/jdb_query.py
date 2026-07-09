@@ -1704,7 +1704,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
     return True
 
-def _iter_all_node(node:Any) -> Generator[Any]:
+def _iter_all_node(node:Any) -> Generator[Any, None, None]:
     """Recursively traverse and yield every node in a nested structure.
 
     Navigates through nested dictionaries, lists, and tuples, yielding the 
@@ -1714,7 +1714,7 @@ def _iter_all_node(node:Any) -> Generator[Any]:
         node (Any): The root structure to traverse (e.g., ``dict``, ``list``, or scalar).
 
     Yields:
-        Generator[Any, None, None]: An iterator that yields each nested element.
+        Any: An iterator that yields each nested element.
     """
 
     yield node

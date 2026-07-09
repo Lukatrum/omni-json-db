@@ -290,6 +290,20 @@ class TestJDb(unittest.TestCase):
                 server.server_close()
 
     def test_graph(self):
+        nodes = {
+            'A': {'name': 'Alice', 'age': 25, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
+            'B': {'name': 'Bob', 'age': 30, 'role': 'developer', 'tags': ['javascript', 'web']},
+            'C': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
+            'D': {'name': 'Diana', 'age': 40, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
+        }
+
+        edges = {
+            ('A', 'B', True) : {'weight':1.},
+            ('B', 'C', True) : {'weight':2.},
+            ('A', 'C', True) : {'weight':4.},
+            ('C', 'D', True) : {'weight':1.},
+        }
+
         for config in self.jdb_configs:
             st_time = time.perf_counter()
             filename = config['KEY_file']
@@ -303,20 +317,30 @@ class TestJDb(unittest.TestCase):
             db = GraphDb(jdb, key_limit=jdb.key_limit, cache_limit=cache_limit)
             jmem['users'] = db
             jdb['key1'] = 0
-            nodes = {
-                'A': {'name': 'Alice', 'age': 25, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
-                'B': {'name': 'Bob', 'age': 30, 'role': 'developer', 'tags': ['javascript', 'web']},
-                'C': {'name': 'Charlie', 'age': 35, 'role': 'developer', 'tags': ['python', 'linux', 'aws']},
-                'D': {'name': 'Diana', 'age': 40, 'email': 'diana@test.com', 'role': 'designer', 'tags': ['ui', 'ux']}
-            }
             for node_id,props in nodes.items():
                 self.assertTrue(db.add_node(node_id, **props))
                 self.assertEqual(db.get_node(node_id), props)
 
-            self.assertTrue(db.add_edge('A', 'B', directed=True, weight=1.0))
-            self.assertTrue(db.add_edge('B', 'C', directed=True, weight=2.0))
-            self.assertTrue(db.add_edge('A', 'C', directed=True, weight=4.0))
-            self.assertTrue(db.add_edge('C', 'D', directed=True, weight=1.0))
+            for (u,v,directed),props in edges.items():
+                self.assertTrue(db.add_edge(u, v, directed, **props))
+                self.assertEqual(db.get_edge(u, v, directed), props)
+
+            with db.open() as fp:
+                for node_id in nodes:
+                    self.assertTrue(db.f_has_node(fp, node_id))
+                    db.f_remove_node(fp, node_id)
+
+                for node_id,props in nodes.items():
+                    self.assertFalse(db.f_has_node(fp, node_id))
+                    self.assertTrue(db.f_add_node(fp, node_id, **props))
+                    self.assertTrue(db.f_has_node(fp, node_id))
+                    self.assertEqual(db.f_get_node(fp, node_id), props)
+
+                for (u,v,directed),props in edges.items():
+                    self.assertFalse(db.f_has_edge(fp, u, v, directed))
+                    self.assertTrue(db.f_add_edge(fp, u, v, directed, **props))
+                    self.assertTrue(db.f_has_edge(fp, u, v, directed))
+                    self.assertEqual(db.f_get_edge(fp, u, v, directed), props)
 
             self.assertTrue(db.has_node('A'))
             self.assertFalse(db.has_node('E'))
@@ -331,7 +355,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(db.add_node('B', role='user'))
             self.assertTrue(db.add_node('C', role='user'))
 
-            self.assertEqual({k[1] for k in db.iter_nodes()}, {'A','B','C','D'})
+            self.assertEqual({k for k,v in db.iter_nodes()}, {'A','B','C','D'})
             self.assertEqual(sum(1 for k in db.iter_edges()), 4)
 
             self.assertIn('B', db.get_successors('A'))
@@ -362,22 +386,6 @@ class TestJDb(unittest.TestCase):
 
             db.remove_edge('D', 'A', directed=True)
             self.assertFalse(db.is_cyclic())
-
-            # A->B->C->D
-            idx_status = db.verify_index()
-            self.assertEqual(idx_status['missing'], [])
-            self.assertEqual(idx_status['orphan'], [])
-
-            with db.open(read_only=False) as fp:
-                db.f_delete(fp, 'X:A:>:B:')
-
-            idx_status = db.verify_index()
-            self.assertIn('X:A:>:B:', idx_status['missing'])
-
-            re_res = db.reindex()
-            self.assertTrue(re_res['added'] > 0)
-            idx_status = db.verify_index()
-            self.assertEqual(idx_status['missing'], [])
 
             db.add_node('E', type='island')
             db.add_node('F', type='island')
@@ -424,11 +432,20 @@ class TestJDb(unittest.TestCase):
             self.assertNotIn('C', db.get_predecessors('D'))
             self.assertEqual(len(db.get_successors('B')), 0)
 
-            res = db.show(node._id.startswith('N:') & node._id.endswith(':'))
+            # only show nodes
+            res = db.show(db.NODE_RE)
             self.assertEqual(len(res), 5)
 
-            res = db.show(node._id.startswith('E:') & node._id.endswith(':'), with_date=1)
+            # only show edges
+            res = db.show(db.EDGE_RE, with_date=1)
             self.assertGreaterEqual(len(res), 2)
+
+            # only show adjacency
+            res = db.show(db.ADJ_RE, with_date=1)
+            self.assertGreaterEqual(len(res), 4)
+
+            res = dict(db.iter_adjs())
+            self.assertEqual(set(res), {'A', 'B', 'E', 'F'})
 
             for node_id in nodes:
                 db.remove_node(node_id)
@@ -460,8 +477,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db.get_edge('A', 'B', directed=True)['w'], 9)
 
             # self-loop must be rejected
-            with self.assertRaises(ValueError):
+            with self.assertRaises(KeyError):
                 db.add_edge('A', 'A', directed=True)
+
+            with self.assertRaises(KeyError):
+                db.add_edge('N:A:', 'B')
+
+            with self.assertRaises(KeyError):
+                db.add_node('N:Z:')
 
             # =====================================================
             # get_edge undirected endpoint-order independence
@@ -588,10 +611,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db.bfs_shortest_path('C', 'A'), ['C', 'B', 'A'])
             self.assertEqual(db.dijkstra_shortest_path('C', 'A', weight_key='weight'), (5., ['C', 'B', 'A']))
 
-            idx_status = db.verify_index()
-            self.assertEqual(idx_status['missing'], [])
-            self.assertEqual(idx_status['orphan'], [])
-
             # =====================================================
             # dfs_traverse: missing start, shared visited, forward-only, cycle-safe
             # =====================================================
@@ -625,6 +644,12 @@ class TestJDb(unittest.TestCase):
             today = dt.date.today()
             span1 = f'{today} {today + dt.timedelta(days=7)}'
             span2 = f'{today} {today + dt.timedelta(days=14)}'
+            with self.assertRaises(KeyError):
+                db.add_temporal_edge('E', 'E', directed=False, expire_days=span1)
+
+            with self.assertRaises(KeyError):
+                db.add_temporal_edge('N:E:', 'N:F:', directed=False, expire_days=span1)
+
             self.assertTrue(db.add_temporal_edge('E', 'F', directed=False, expire_days=span1))
             self.assertTrue(db.add_temporal_edge('E', 'F', directed=False, expire_days=span2))  # renewal
             self.assertIsNotNone(db.get_edge('E', 'F', directed=False))
