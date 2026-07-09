@@ -452,7 +452,7 @@ class JDb(JDbReader):
                     old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
                     new_val = func(key, deepcopy(old_val))
                     if new_val != old_val:
-                        self.f_write(fp, key, new_val, compare=False)
+                        self.f_write(fp, key, new_val, overwrite=True)
                 else:
                     self.f_write(fp, key, val)
 
@@ -482,7 +482,7 @@ class JDb(JDbReader):
                             old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=True)
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, _key, new_val, compare=False)
+                                f_write(fp, _key, new_val, overwrite=True)
 
                     else:
                         for _key in matched_keys:
@@ -544,7 +544,7 @@ class JDb(JDbReader):
                         old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
                         new_val = func(_key, deepcopy(old_val))
                         if new_val != old_val:
-                            f_write(fp, _key, new_val, compare=False)
+                            f_write(fp, _key, new_val, overwrite=True)
                     else:
                         f_write(fp, _key, val)
 
@@ -559,7 +559,7 @@ class JDb(JDbReader):
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
                 new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
-                    self.f_write(fp, key, new_val, compare=False)
+                    self.f_write(fp, key, new_val, overwrite=True)
             else:
                 self.f_write(fp, key, val)
 
@@ -2320,7 +2320,7 @@ class JDb(JDbReader):
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=True)
                 new_val = func(key, deepcopy(old_val))
                 if new_val != old_val:
-                    self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, compare=False)
+                    self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, overwrite=True)
                     return new_val
 
                 return old_val
@@ -2410,6 +2410,10 @@ class JDb(JDbReader):
             conditon (Condition | dict): Condition for key/date/value filtering.
             patch (dict | Callable[[str,Any],Dict[str,Any]]): if condition is matched, update the corresponding value.
 
+                >>> patch = {'age': None} # delete 'age'
+                >>> patch = {'age': 30'}  # update/insert 'age'
+                >>> patch = None          # delete record
+
         Returns:
             int: the number of records updated.
 
@@ -2431,14 +2435,27 @@ class JDb(JDbReader):
                 _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp) # switch to write mode
                 has_SIGINT = self.file_lock.has_SIGINT
                 f_write = self.f_write
+                f_delete = self.f_delete
                 for key,val in matched_keys.items():
                     if has_SIGINT(): break
                     _patch = patch_func(key, val) if callable(patch_func) else patch
-                    if not isinstance(_patch, dict): continue
-                    new_val = {**val, **_patch}
-                    if new_val != val:
-                        f_write(fp, key, new_val, compare=False)
-                        count += 1
+                    if _patch != val:
+                        if _patch is None:
+                            f_delete(fp, key, read_value=False)
+                            count += 1
+                            continue
+
+                        if not _patch or not isinstance(_patch, dict): continue
+                        new_val = val.copy()
+                        for kk,vv in _patch.items():
+                            if vv is None:
+                                new_val.pop(kk, None)
+                            else:
+                                new_val[kk] = vv
+
+                        if new_val != val:
+                            f_write(fp, key, new_val, overwrite=True)
+                            count += 1
         return count
 
     def replace(self, records:Dict[str,Any], default_val:Optional[Any]=None, **kwargs) -> Dict[str,Any]:
@@ -2992,7 +3009,7 @@ class JDb(JDbReader):
                             old_val = f_read(fp, str_key, row=row, copy=False)
                             new_val = func(str_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, compare=False)
+                                f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=True)
                                 chg_table[str_key] = new_val
 
                             continue
@@ -3785,7 +3802,7 @@ class JDb(JDbReader):
             start_line = safe_line = self.safe_line = n_records
 
         extra_rows = n_lines - safe_line
-        if extra_rows > 0 and req_size >= 0 and max_wsize > 0:
+        if extra_rows > 0 and req_size >= 0:
             row, file_id, offset, row_size = io.get_dead_row(safe_line, req_size)
             if n_lines > row >= safe_line:
                 if row_size >= req_size > 0:
@@ -3801,6 +3818,9 @@ class JDb(JDbReader):
                             row_size = split_size
 
                 return start_line, row, file_id, offset, row_size
+
+            if max_wsize <= 0:
+                return start_line, -1, 0, 0, 0
 
             index_size = io.index_size
             window_size = min(max_wsize, io.window_size)
@@ -4052,7 +4072,7 @@ class JDb(JDbReader):
         io.key_table[key] = safe_h
         return True
 
-    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, compare:bool=True) -> bool:
+    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False) -> bool:
         """ Low-level pipeline method: serialize, compress, and record dynamic Python value entries mapping into target filesystem tracks safely.
 
         Args:
@@ -4062,7 +4082,7 @@ class JDb(JDbReader):
             days (int, optional): Calendar modification timing tracking parameter representation number. Defaults to -1.
             flags (Optional[JFlag], optional): strategic behavioral modifiers flags. Defaults to None.
             max_wsize (Optional[int], optional): Maximum search lookahead steps window constraint index number. Defaults to None.
-            compare (bool, optional) : compare old value and new value before writing it. Defaults to True
+            overwrite (bool, optional) : overwrite old value and new value before writing it. Defaults to False
 
         Returns:
             bool: True if serialization persistence completes smoothly, False if transaction logic drops inputs.
@@ -4090,7 +4110,7 @@ class JDb(JDbReader):
         _cache = self._cache
         cache_limit = self._cache_limit
         row = self.io.key_table[key]
-        checked = not compare
+        checked = overwrite
         while True:
             if row >= 0:
                 # (Exist + Value|Header)

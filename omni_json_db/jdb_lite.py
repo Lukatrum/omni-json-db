@@ -3409,6 +3409,8 @@ class JDbReader(JDbBase):
                     value = cache.get(key, _MISSING)
                     if value is _MISSING: # pragma: no cover
                         value, value_b = self.f_read_with_bytes(fp, key)
+                    else:
+                        value = deepcopy(value)
 
                 if vals and isinstance(value, JDbReader):
                     child = value

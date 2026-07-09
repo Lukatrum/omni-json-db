@@ -2263,6 +2263,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(vals={'age.$ge':45})
             self.assertEqual(len(res), 0)
 
+            # update age and insert license
             res = jdb.update_if({'!age.$ge':45}, lambda key,old_val:{'age':old_val['age']+1, 'license':old_val.get('expired', old_val['age']+1 >= 45)})
             self.assertEqual(res, 6)
 
@@ -2272,6 +2273,21 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(vals={'license':True})
             self.assertEqual(res, res2)
 
+            # delete age in [26, 36]
+            n_users = len(jdb)
+            res = jdb.update_if({'age':[26, 36]}, None)
+            self.assertEqual(res, 2)
+            self.assertEqual(len(jdb), n_users - res)
+
+            res = jdb.find(EXISTS='tags')
+            self.assertEqual(set(res), {'user_1', 'user_4'})
+
+            # delete tags and update age
+            res2 = jdb.update_if({'$exists': 'tags'}, lambda key,old_val:{'tags': None, 'age':old_val['age']+1})
+            self.assertEqual(res2, 2)
+
+            res = jdb.find(EXISTS='tags')
+            self.assertEqual(len(res), 0)
             #----------------------------------------------------------
             del jdb[:]
             users = [{'name': 'Alice', 'age': 30, 'email': 'alice@example.com', 'role': 'author', 'tags':['Java']},
