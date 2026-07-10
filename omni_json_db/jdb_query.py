@@ -307,6 +307,19 @@ class Query:
         seg  = str(segment)
         return Query(f'{path}.{seg}' if path else seg)
 
+    @property
+    def path(self) -> str:
+        """The raw dot-notation path string accumulated by this Query.
+
+        Useful for introspection, debugging, or passing a Query as a
+        field-path specification (e.g. to ``find(sort=...)``) without
+        evaluating it into a comparison Condition.
+
+        Returns:
+            str: The path string, e.g. ``'address.city'`` or ``'_id'``.
+        """
+        return self._path
+
     def _cond(self, op:str, val:Any) -> Condition:
         """Internal helper to construct a Condition dictionary for a specific operator."""
         path = self._path
@@ -595,12 +608,12 @@ class Query:
         return Query(f'{path}.$neg' if path else '$neg')
 
     def first(self) -> Query:
-        """Extracts the first item or character** before comparing. Maps to ``$first``."""
+        """Extracts the first item or character before comparing. Maps to ``$first``."""
         path = self._path
         return Query(f'{path}.$first' if path else '$first')
 
     def last(self) -> Query:
-        """Extracts the last item or character** before comparing. Maps to ``$last``."""
+        """Extracts the last item or character before comparing. Maps to ``$last``."""
         path = self._path
         return Query(f'{path}.$last' if path else '$last')
 
@@ -620,6 +633,175 @@ class Query:
         return Query(f'{path}.$unique' if path else '$unique')
 
 #-----------------------------------------------------------------------------
+def sorted_by_rules(rows:List[Tuple[str,tuple]], rules:Any, reverse:bool=None) -> List[Tuple[str,tuple]]:
+    """Sort ``(key, (value, cdate, mdate, mod_id))`` rows according to a sort spec.
+
+    Unifies two sorting modes:
+
+    * **Legacy** — *rules* is an ``int``: ``0`` leaves the rows unsorted,
+      ``1`` sorts ascending by the raw record value, ``-1`` sorts
+      descending. Non-orderable values (``dict``, ``list``, ``set``, and
+      other unhashable types) fall back to being placed after all
+      orderable rows, since ``''`` as the internal spec root resolves to
+      the raw value itself (see :func:`resolve_sort_value`).
+    * **Field-path spec** — *rules* is a ``str``, a :class:`Query`, or a
+      ``list`` of either: sorts by the resolved value of each field in
+      order, breaking ties with subsequent fields (like SQL
+      ``ORDER BY a, b``).
+
+    Rows where any specified field cannot be resolved to a single
+    orderable value are placed after all sortable rows ("nulls last"),
+    regardless of *reverse*. If the resolved values across rows turn out
+    to have mixed, mutually incomparable types (e.g. one row has ``int``
+    where another has ``str`` for the same field), all sort keys are
+    coerced to ``str`` and re-sorted rather than raising ``TypeError``.
+
+    Args:
+        rows (List[Tuple[str, tuple]]): Rows as ``(key, (value, cdate,
+            mdate, mod_id))``, typically produced by :meth:`find_iter` with
+            ``with_date=True``.
+        rules (Any): The sort specification — see the mode descriptions
+            above.
+        reverse (bool, optional): Reverse the sort order. For the legacy
+            ``int`` mode, ``None`` defaults to ``rules < 0``; for the
+            field-path mode, ``None`` is treated as ``False``.
+
+    Returns:
+        List[Tuple[str, tuple]]: The rows in sorted order, in the same
+        ``(key, (value, cdate, mdate, mod_id))`` shape as the input.
+    """
+    if not rows or rules is None or len(rows) == 1:
+        return rows
+
+    reverse = bool(reverse)
+    if isinstance(rules, int):
+        specs,reverse = ([''], reverse) if rules > 0 else \
+                    ([''], not reverse) if rules < 0 else ([], reverse)
+    elif isinstance(rules, (list, tuple)):
+        specs = rules
+    else:
+        specs = [rules]
+
+    if not specs:
+        return rows
+
+    specs_parts = []
+    for spec in specs:
+        path = spec.path.split('.') if isinstance(spec, Query) else \
+                spec.split('.') if isinstance(spec, str) else []
+
+        specs_parts.append(path)
+
+    orderable = []
+    missing = []
+    for key,(val,cdate,mdate,mod_id) in rows:
+        ok = True
+        sort_key = []
+        for parts in specs_parts:
+            ok, vv = resolve_sort_value(parts, key, val, cdate, mdate, mod_id)
+            if not ok:
+                break
+
+            sort_key.append(vv)
+
+        if not ok:
+            missing.append((key, (val,cdate,mdate,mod_id)))
+            continue
+
+        sort_key = tuple(sort_key)
+        orderable.append((sort_key, key, (val,cdate,mdate,mod_id)))
+
+    if len(orderable) > 1:
+        try:
+            orderable.sort(key=lambda v: v[0], reverse=reverse)
+        except TypeError:
+            orderable = [(tuple(str(v) if not isinstance(v, str) else v for v in sort_key), key, val) for sort_key,key,val in orderable]
+            orderable.sort(key=lambda v: v[0], reverse=reverse)
+
+    ret_rows = [(kk,vv) for _sk,kk,vv in orderable]
+    if missing:
+        missing.sort(reverse=reverse)
+        ret_rows += missing
+
+    return ret_rows
+
+def resolve_sort_value(parts:List[str], key:str, val:Any, cdate:dt_date, mdate:dt_date, mod_id:int) -> Tuple[bool,Any]:
+    """Resolve one sort field's value for a single record.
+
+    Navigates *val* (or the special roots ``'_id'``/``'_date'``) following
+    *parts*, applying any ``TRANSFORM_OPS`` segment encountered along the
+    way (e.g. ``'$lower'``, ``'$first'``). Wildcard segments (``*``/``?``)
+    are rejected, since they may resolve to more than one value and sorting
+    requires a single deterministic key.
+
+    Args:
+        parts (List[str]): Pre-split path segments — a dotted path string
+            split on ``'.'`` (e.g. ``'_id.$first'`` → ``['_id', '$first']``),
+            as produced by the spec-to-parts conversion in
+            :func:`sorted_by_rules`.
+        key (str): The record's key.
+        val (Any): The record's value.
+        cdate (datetime.date): The record's created date.
+        mdate (datetime.date): The record's modified date.
+        mod_id (int): The record's internal modification counter. Used only as
+            a final tie-breaker when sorting by the ``'_date'`` root and both
+            ``cdate`` and ``mdate`` are identical between two records.
+
+    Returns:
+        Tuple[bool, Any]: ``(True, value)`` if a single orderable value
+        (``str``, ``int``, ``float``, ``bool``, ``bytes``,
+        ``datetime.date``, ``datetime.datetime``, or a tuple of such
+        values) was resolved. ``(False, None)`` if the path could not be
+        resolved or the resolved value is not orderable (e.g. a ``dict``
+        or ``list``) — the caller should treat this record as unsortable
+        for this field and place it after all sortable records.
+    """
+    if not parts:
+        return False, ''
+
+    root, rest = parts[0], parts[1:]
+
+    if root == '_id':
+        cur = key
+    elif root == '_date':
+        cur = (cdate, mdate, mod_id)
+    elif root == '':
+        cur = val
+    elif isinstance(val, dict) and root in val:
+        cur = val[root]
+    else:
+        return False, None
+
+    for part in rest:
+        if '*' in part or '?' in part:
+            # wildcards unsupported for sorting
+            return False, None
+
+        if part in TRANSFORM_OPS:
+            cur = _apply_transform(part, cur)
+            if cur is None:
+                return False, None
+        elif isinstance(cur, dict):
+            if part not in cur:
+                return False, None
+            cur = cur[part]
+        elif isinstance(cur, (list, tuple)):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return False, None
+        else:
+            return False, None
+
+    if isinstance(cur, tuple):
+        if all(isinstance(v, (str, int, float, bool, bytes, dt_date, datetime)) for v in cur):
+            return True, cur
+
+    elif isinstance(cur, (str, int, float, bool, bytes, dt_date, datetime)):
+        return True, cur
+
+    return False, None
+
 def _apply_transform(op: str, val: Any) -> Any:
     """Apply a single in-path value-transform operator.
 
@@ -641,23 +823,44 @@ def _apply_transform(op: str, val: Any) -> Any:
 
     Semantics of each operator:
 
-    * ``$lower`` / ``$upper`` / ``$strip`` – ``str`` only; returns ``None``
-      for non-strings.
-    * ``$abs`` – ``int`` / ``float`` only.
+    * ``$lower`` / ``$upper`` / ``$strip`` – ``str`` only (or element-wise
+      over an iterable of strings); returns ``None`` for other scalar types.
+    * ``$abs`` – ``int`` / ``float`` only (or element-wise over an iterable).
+    * ``$ceil`` / ``$floor`` / ``$round`` – numeric types, or numeric
+      strings/bytes (converted via ``float()`` first).
+    * ``$float`` / ``$int`` – converts ``str``/``bytes``/numeric types (or
+      element-wise over an iterable).
+    * ``$neg`` – arithmetic negation; accepts numeric types and numeric
+      strings.
+    * ``$str`` – converts scalars to ``str`` (or element-wise over an
+      iterable); returns ``None`` for containers that aren't iterables of
+      scalars.
     * ``$len`` – any object with ``__len__``; includes ``str``, ``list``,
       ``dict``, ``tuple``, ``set``.
-    * ``$min`` / ``$max`` – non-string iterables only (use ``$len`` +
-      comparison for character counts on strings).
-    * ``$avg`` – non-string iterable; returns ``None`` for empty sequences.
+    * ``$min`` / ``$max`` / ``$sum`` – ``list``/``tuple``/``set``; a hashable
+      scalar is treated as a single-element sequence (so e.g.
+      ``$max`` on ``42`` returns ``42``).
+    * ``$avg`` – arithmetic mean; same scalar-as-singleton behaviour as
+      ``$min``/``$max``; returns ``None`` for empty sequences.
     * ``$std`` – population standard deviation (divides by ``n``); returns
       ``0.0`` for a single-element sequence, ``None`` for empty.
-    * ``$mid`` – returns ``val[len(val) // 2]``; works on any subscriptable
-      with ``__len__`` (string, list, tuple, bytes).
+    * ``$mid`` – returns the element at index ``len(items) // 2``
+      (positional middle, not a sorted median); ``set`` inputs are first
+      converted to a ``list`` since sets aren't indexable.
+    * ``$first`` / ``$last`` – first/last character (``str``/``bytes``,
+      slice — keeps the original type) or first/last element (``list``/
+      ``tuple``/other iterable — unwrapped).
+    * ``$flat`` – flattens one level of nested ``list``/``tuple``.
+    * ``$sort`` – ``sorted()`` over a ``list``/``tuple``/``set``/``frozenset``.
+    * ``$unique`` – order-preserving de-duplication of a ``list``/``tuple``;
+      ``set``/``frozenset`` are returned unchanged (already unique);
+      ``None`` for scalar types.
     """
     try:
         if op == '$abs':
             return abs(val) if isinstance(val, (int, float)) else \
-                [abs(vv) for vv in val] if hasattr(val, '__iter__') else None
+                [abs(vv if isinstance(vv, (int,float)) else float(vv)) for vv in val] \
+                        if hasattr(val, '__iter__') else None
 
         if op == '$avg':
             items = val if isinstance(val, (list, tuple, set)) else \
@@ -667,9 +870,10 @@ def _apply_transform(op: str, val: Any) -> Any:
             return sum(items) / n if n else None
 
         if op == '$ceil':
-            return ceil(val) if isinstance(val, (str,bytes,bool,float)) else \
+            return ceil(val) if isinstance(val, float) else \
                 val if isinstance(val, int) else \
-                [ceil(vv) for vv in val] if hasattr(val, '__iter__') else None
+                ceil(float(val)) if isinstance(val, (str, bytes)) else \
+                [ceil(float(vv)) for vv in val] if hasattr(val, '__iter__') else None
 
         if op == '$flat':
             if not isinstance(val, (list, tuple)): return None
@@ -687,9 +891,10 @@ def _apply_transform(op: str, val: Any) -> Any:
                 [float(vv) for vv in val] if hasattr(val, '__iter__') else None
 
         if op == '$floor':
-            return floor(val) if isinstance(val, (str,bytes,bool,float)) else \
+            return floor(val) if isinstance(val, float) else \
                 val if isinstance(val, int) else \
-                [floor(vv) for vv in val] if hasattr(val, '__iter__') else None
+                floor(float(val)) if isinstance(val, (str, bytes)) else \
+                [floor(float(vv)) for vv in val] if hasattr(val, '__iter__') else None
 
         if op == '$first':
             return val[:1] if isinstance(val, (str,bytes)) else \
@@ -722,8 +927,8 @@ def _apply_transform(op: str, val: Any) -> Any:
                     list(val) if isinstance(val, set) else \
                     (val,) if val.__hash__ else ()
 
-            n = len(val) if hasattr(val, '__len__') else None
-            return val[n // 2] if n else None
+            n = len(items) if hasattr(items, '__len__') else None
+            return items[n // 2] if n else None
 
         if op == '$min':
             return min(val) if isinstance(val, (list, tuple, set)) else \
@@ -763,9 +968,10 @@ def _apply_transform(op: str, val: Any) -> Any:
                     val if val.__hash__ else None
 
         if op == '$round':
-            return round(val) if isinstance(val, (str,bytes,bool,float)) else \
+            return round(val) if isinstance(val, float) else \
                 val if isinstance(val, int) else \
-                [round(vv) for vv in val] if hasattr(val, '__iter__') else None
+                round(float(val)) if isinstance(val, (str, bytes)) else \
+                [round(float(vv)) for vv in val] if hasattr(val, '__iter__') else None
 
         if op == '$unique':
             if isinstance(val, (str, bytes, int, float)): return None

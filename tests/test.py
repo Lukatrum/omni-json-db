@@ -816,6 +816,12 @@ class TestJDb(unittest.TestCase):
             self.assertFalse(user.name.endswith('an') in jdb)
             self.assertTrue(user.name.startswith('A') in jdb)
 
+            res = jdb.show(with_date=True, sort=[user._date, user.age])
+            self.assertEqual(res, users)
+
+            res = jdb.find(sort=[user._date.last(), user.age])
+            self.assertEqual(res, users)
+
             jdb.keys[user.name == 'Alice'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
             jdb.keys[user.role.ihas('develop')] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
             jdb.keys[user.age >= 35] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
@@ -826,8 +832,18 @@ class TestJDb(unittest.TestCase):
             jdb.keys['user_4'] = prev_date3 = today - dt.timedelta(days=3) # change modified date
             self.assertEqual(jdb, users)
 
-            res = jdb.show(with_date=True, sort=-1, reverse=True)
+            res = jdb.show(with_date=True, sort=1, reverse=True)
             self.assertEqual(res, users)
+
+            res = jdb.find(sort=user.age)
+            self.assertEqual(res, users)
+
+            res = jdb.find(sort=[user.role, user.name, user.age])
+            self.assertEqual(res, users)
+
+            res = jdb.find(sort=[user._id, user._date])
+            self.assertEqual(res, users)
+
             # --------------------------------------------
             res = jdb.find(user._date.startswith('2005'))
             self.assertEqual(set(res), {'user_2'})
@@ -1582,7 +1598,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(res), {'user_3'})
 
             res2 = jdb.find_iter({'$ew': '_3'}, with_date=True)
-            self.assertEqual({k:v[0] for k,v in res2 if len(v) == 3}, res)
+            self.assertEqual({k:v[0] for k,v in res2 if len(v) >= 3}, res)
 
             # 'user_2' <= KEY <= 'user_4'
             res = jdb.find({'$between': ('user_2', 'user_4')})

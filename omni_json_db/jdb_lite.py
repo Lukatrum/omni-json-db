@@ -4,30 +4,32 @@ from contextlib import contextmanager
 from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
 from re import compile as re_compile, match as re_match, Pattern
-from os.path import exists as path_exists # basename, dirname, join as path_join
+from os.path import exists as path_exists
 from threading import RLock, get_ident
 from struct import Struct
 from enum import IntFlag
 from unicodedata import east_asian_width
 from time import perf_counter
-from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
+from typing import Any, Union, Optional, Tuple, Set, List, Dict, \
+                Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
-from .jdb_query import QUERY_OPS, Condition, \
+from .jdb_query import QUERY_OPS, Condition, sorted_by_rules, \
                 match_KEY_rules, match_DATE_rules, match_VAL_rules
-from .utils import FileLock, Style, JError, JKeyError, JValueError, JTypeError, \
-                JDbBase, deepcopy
+
+from .utils import FileLock, Style, JError, JKeyError, JValueError, \
+                JTypeError, JDbBase, deepcopy
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-_Float64_pack = Struct("<d").pack    # sizeof() == 8 thread-safe  | <d = little-ending
+_Float64_pack = Struct("<d").pack   # sizeof() == 8 thread-safe  | <d = little-ending
 _Float64_unpack = Struct("<d").unpack
-_Int64_pack = Struct("q").pack   # sizeof() == 8 thread-safe
+_Int64_pack = Struct("q").pack      # sizeof() == 8 thread-safe
 _Int64_unpack = Struct("q").unpack
-_UInt64_pack = Struct("Q").pack   # sizeof() == 8 thread-safe
+_UInt64_pack = Struct("Q").pack     # sizeof() == 8 thread-safe
 _UInt64_unpack = Struct("Q").unpack
 _UInt64_x2_pack = Struct("QQ").pack # thread-safe
 _UInt64_x2_unpack = Struct("QQ").unpack
@@ -234,12 +236,7 @@ class JDbKey:
         """
         return len(self.jdb)
 
-    def __call__(self,
-            keys:Optional[Any]=None,
-            vals:Optional[Any]=None,
-            date:Optional[Any]=None,
-            limit:int=0,
-            skip:int=0, **kwargs) -> Generator[str, None, None]:
+    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, **kwargs) -> Generator[str, None, None]:
         """Execute a search query returning matching keys as a generator.
         
         Args:
@@ -3185,16 +3182,7 @@ class JDbReader(JDbBase):
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self,
-            keys:Optional[Any]=None,
-            vals:Optional[Dict[str,Any]]=None,
-            date:Optional[Any]=None,
-            limit:int=0,
-            skip:int=0,
-            with_value:bool=False,
-            with_date:bool=False,
-            stats:Dict[str,float]=None,
-            **kwargs) -> Generator[Tuple[str,Any], None, None]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3385,12 +3373,13 @@ class JDbReader(JDbBase):
                     continue
 
                 if date is not None:
-                    cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
+                    _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
+                    cdate, mdate = io_conv_date(_days)
                     if not match_DATE_rules(cdate, mdate, date):
                         d_filter += 1
                         continue
                 else:
-                    cdate = mdate = None
+                    mod_id = cdate = mdate = None
 
                 if not with_value:
                     m_count += 1
@@ -3400,8 +3389,9 @@ class JDbReader(JDbBase):
 
                     if with_date:
                         if cdate is None:
-                            cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
-                        yield key, (None, cdate, mdate)
+                            _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
+                            cdate, mdate = io_conv_date(_days)
+                        yield key, (None, cdate, mdate, mod_id)
                     else:
                         yield key, None
 
@@ -3444,7 +3434,8 @@ class JDbReader(JDbBase):
                     continue
 
                 if cdate is None:
-                    cdate, mdate = io_conv_date(io_read_key(key_fp, row_id)[-1])
+                    _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
+                    cdate, mdate = io_conv_date(_days)
 
                 for rules,use_bytes in _val_conds:
                     if use_bytes:
@@ -3473,7 +3464,7 @@ class JDbReader(JDbBase):
                         cache.move_to_end(key)
 
                     if with_date:
-                        yield key, (value, cdate, mdate)
+                        yield key, (value, cdate, mdate, mod_id)
                     else:
                         yield key, value
 
@@ -3484,12 +3475,7 @@ class JDbReader(JDbBase):
             stats.update({'loops': n_loops, 'records':n_records, 'matched':m_count, \
                     'key.filter':k_filter, 'date.filter':d_filter, 'value.filter':v_filter, 'used_s':ed_time-st_time})
 
-    def map(self,
-            map_func:Callable[[str,Any],Any],
-            keys:Optional[Any]=None,
-            vals:Optional[Any]=None,
-            date:Optional[Any]=None,
-            **kwargs) -> List[Any]:
+    def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, **kwargs) -> List[Any]:
         """
         Apply a mapping function to the results of a query and return a list.
 
@@ -3512,17 +3498,7 @@ class JDbReader(JDbBase):
 
         return matched_list
 
-    def find(self,
-            keys:Optional[Any]=None,
-            vals:Optional[Any]=None,
-            date:Optional[Any]=None,
-            limit:int=0,
-            skip:int=0,
-            with_value:Optional[bool]=None,
-            stats:Dict[str,float]=None,
-            sort:Optional[Any]=None,
-            reverse:Optional[bool]=None,
-            **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -3532,43 +3508,62 @@ class JDbReader(JDbBase):
             date (Any, optional): Date filters.
             limit (int, optional): Maximum item cap. Defaults to 0.
             skip (int, optional): skip number of matched records, Defaults to 0.
-            with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.        
+            with_value (Optional[bool], optional): Whether to read the key's value. Defaults to False.
             stats (Dict[str,float], optional): statistic: loops, records, matched, key.filter, date.filter, value.filter, used_s
-            sort (Any, optional): Sorting direction 
-                - int: (1 for ascending, -1 for descending, 0 for unsorted). Defaults to 0.                
-            reverse (bool, optional): reverse sort if True. Defaults to False
+            sort (Any, optional): Sorting specification. One of:
+
+                * ``int`` – legacy mode: ``0`` = unsorted, ``1`` = ascending,
+                  ``-1`` = descending. Sorts by value when every matched value
+                  is a simple orderable scalar, otherwise falls back to
+                  sorting by key. Preserved for backward compatibility.
+                * ``str`` – a dot-notation field path, e.g. ``'name'``,
+                  ``'name.$lower'``, ``'_id'``, ``'_date'``.
+                * :class:`Query` – built via attribute/item access, e.g.
+                  ``Query()._id``, ``Query().address.city``.
+                * ``list[str | Query]`` – multiple fields; sorts by the first,
+                  breaking ties with the second, and so on (like SQL
+                  ``ORDER BY a, b``).
+
+                Records where a specified field cannot be resolved (missing
+                key, or a non-orderable type such as ``dict``/``list``) are
+                placed after all sortable records ("nulls last"), regardless
+                of ``reverse``.
+
+                >>> jdb.find(sort=Query()._id)                       # key ascending
+                >>> jdb.find(sort='_id', reverse=True)               # key descending
+                >>> jdb.find(sort=Query()._date)                     # by (created, modified) date
+                >>> jdb.find(sort=['_id', '_date'])                  # key, then date as tie-break
+                >>> jdb.find(sort=['_id.$first', '_date'])           # key's first char, then date
+                >>> jdb.find(sort=['name', '_date'])                 # value['name'], then date
+
+            reverse (bool, optional): Reverse the sort order. Defaults to
+                ``False`` for the new spec-based modes; for the legacy ``int``
+                mode, defaults to ``sort < 0`` when not explicitly given.
 
         Returns:
             Dict[str, Any]: The subset of matched data.
+
         """
         if with_value is None:
             with_value = not (not vals and not kwargs and sort is None)
 
-        sortable = not with_value
-        matched_list = []
+        data_rows = []
         for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=True, stats=stats, **kwargs):
-            matched_list.append((key, val))
-            sortable = sortable and not isinstance(val[0], (list,frozenset,set,dict)) and not val[0].__hash__
+            data_rows.append((key, val))
 
-        if len(matched_list) > 1 and sort is not None:
-            reverse = sort < 0 if reverse is None else reverse
-            if sortable:
-                sort_func = lambda v: (v[1],v[0])
-            else:
-                sort_func = lambda v: v[0]
-            matched_list.sort(key=sort_func, reverse=reverse)
+        data_rows = sorted_by_rules(data_rows, sort, reverse)
 
-        return {k:v[0] for k,v in matched_list}
+        return {k:v[0] for k,v in data_rows}
 
-    def show(self,
-            keys:Optional[Any]=None,
-            vals:Optional[Any]=None,
-            date:Optional[Any]=None,
-            limit:int=50,
-            skip:int=0,
-            with_date:bool=False,
-            sort:Optional[Any]=None,
-            reverse:Optional[bool]=None,
+    def show(self,\
+            keys:Optional[Any]=None,\
+            vals:Optional[Any]=None,\
+            date:Optional[Any]=None,\
+            limit:int=50,\
+            skip:int=0,\
+            with_date:bool=False,\
+            sort:Optional[Any]=None,\
+            reverse:Optional[bool]=None,\
             **kwargs) -> Dict[str,Any]:
         """
         show matched key+value in table.
@@ -3576,11 +3571,21 @@ class JDbReader(JDbBase):
         Args:
             keys (Any, optional): Condition for key filtering.
             vals (Any, optional): Condition for value filtering using operators.
-            date (Any, optional): Date filters.    
-            sort (Any, optional): Sorting rules              
-            limit (int, optional): +ve matched item. 0=all matched items (default=50)
-            skip (int, optional): skip number of matched records, Defaults to 0.
-            reverse (bool, optional): reverse sort if True. Defaults to False
+            date (Any, optional): Date filters.
+            limit (int, optional): Maximum rows to display. ``0`` shows all
+                matched items. Defaults to ``50``.
+            skip (int, optional): Number of matched records to skip before
+                collecting rows for display. Defaults to ``0``.
+            with_date (bool, optional): Whether to include a ``_date`` column
+                showing each record's created/modified dates. Defaults to
+                ``False``. Sorting by ``'_date'`` still works even when this is
+                ``False`` — dates are always fetched internally for ordering
+                purposes, and are only omitted from the printed table.
+            sort (Any, optional): Sorting specification — see :meth:`find` for
+                the full ``int`` / ``str`` / ``Query`` / ``list`` spec format.
+            reverse (bool, optional): Reverse the sort order. Defaults to
+                ``False``.
+
         Returns:
             Dict[str, Any]: The subset of matched data.
 
@@ -3607,32 +3612,19 @@ class JDbReader(JDbBase):
                 | banana | yellow | 100 | Japan |
                 +--------+--------+-----+-------+
         """
-
         stats = {}
         data_rows = []
-        sortable = True
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=with_date, stats=stats, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=True, stats=stats, **kwargs):
             data_rows.append((key,val))
-            if sortable:
-                _val = val[0] if with_date else val
-                sortable = not isinstance(_val, (list,frozenset,set,dict)) and not _val.__hash__
 
-        if len(data_rows) > 1 and sort is not None:
-            reverse = sort < 0 if reverse is None else reverse
-            if sortable:
-                sort_func = lambda v: (v[1],v[0])
-            else:
-                sort_func = lambda v: v[0]
-            data_rows.sort(key=sort_func, reverse=reverse)
-
+        data_rows = sorted_by_rules(data_rows, sort, reverse)
         fields = ['_id']
         patterns = {'_id'}
         if with_date:
             fields.append('_date')
             patterns.add('_date')
 
-        for _key,val in data_rows:
-            val = val[0] if with_date else val
+        for _key,(val,cdate,mdate,_mod_id) in data_rows:
             if isinstance(val, dict):
                 kk = '|'.join(val)
                 if kk not in patterns:
@@ -3688,10 +3680,9 @@ class JDbReader(JDbBase):
 
         col_widths = {field: _get_display_width(field) for field in fields}
         matrix = []
-        for key,val in data_rows:
+        for key,(val,cdate,mdate,_mod_id) in data_rows:
             row_data = {field:'' for field in fields}
             if with_date:
-                val, cdate, mdate = val
                 row_data['_date'] = _date = f'{cdate} {mdate}'
                 col_widths['_date'] = max(col_widths['_date'], _get_display_width(_date))
 
@@ -3741,7 +3732,7 @@ class JDbReader(JDbBase):
                         (_used_s * 1_000, 'ms') if _used_s * 10_000 > 1. else \
                         (_used_s * 1_000_000, 'us')
         print(f"\x1b[2mUsed:{used_s:.3f}{unit} | {ops:.3f}{o_unit}/s | {n_loops:,}/{n_records:,}({progress:.2f}%) -> #{len(data_rows):,}\x1b[0m")
-        return {k:v[0] if with_date else v for k,v in data_rows} # pylint: disable=unnecessary-comprehension
+        return {k:v[0] for k,v in data_rows} # pylint: disable=unnecessary-comprehension
 
     def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:
         """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.

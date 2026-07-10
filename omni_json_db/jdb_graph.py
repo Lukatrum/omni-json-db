@@ -675,6 +675,101 @@ class GraphDb(JDb):
                     components.append(component)
         return components
 
+    def k_hop_neighbors(self, node_id:str, k:int, direction:str='out') -> Dict[str,int]:
+        """Find all nodes within ``k`` hops of a node (BFS with depth limit).
+
+        Args:
+            node_id (str): Center node identifier.
+            k (int): Maximum number of hops (``k >= 1``).
+            direction (str, optional): Edge direction to follow from each
+                node — ``'out'`` (default) follows outgoing directed and
+                undirected edges, ``'in'`` follows incoming directed and
+                undirected edges, ``'both'`` follows every incident edge.
+
+        Returns:
+            Dict[str, int]: Mapping of reachable node id to its hop distance
+                from ``node_id`` (1..k). Excludes ``node_id`` itself. Empty if
+                the node is missing, ``k < 1``, or it has no qualifying
+                neighbours.
+        """
+        result = {}
+        with self.open() as fp:
+            if not self.f_has_node(fp, node_id) or k < 1:
+                return result
+
+            f_get_adj = self.f_get_adj
+            visited = {node_id}
+            frontier = [node_id]
+            for depth in range(1, k + 1):
+                nxt = []
+                for cur in frontier:
+                    for entry in f_get_adj(fp, cur):
+                        d, neighbor = entry[0], entry[1:]
+                        if direction == 'out' and d == '<': continue
+                        if direction == 'in' and d == '>': continue
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            result[neighbor] = depth
+                            nxt.append(neighbor)
+                if not nxt:
+                    break
+                frontier = nxt
+
+        return result
+
+    def ego_graph(self, node_id:str, k:int=1, direction:str='both') -> Dict[str,Any]:
+        """Extract the ``k``-hop ego subgraph centered on a node.
+
+        The subgraph contains ``node_id`` plus every node within ``k`` hops
+        (using ``direction`` for reachability), and every edge of the graph
+        whose endpoints are both inside that node set.
+
+        Args:
+            node_id (str): Center node identifier.
+            k (int, optional): Neighbourhood radius in hops. Defaults to 1.
+            direction (str, optional): Edge direction used to decide
+                reachability of the node set — ``'out'``, ``'in'`` or
+                ``'both'`` (default). See ``k_hop_neighbors``.
+
+        Returns:
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
+                dst): props}}`` for the induced subgraph. Empty node/edge maps
+                if ``node_id`` is missing.
+        """
+        result = {'nodes': {}, 'edges': {}}
+        with self.open() as fp:
+            if not self.f_has_node(fp, node_id):
+                return result
+
+            node_set = {node_id}
+            if k >= 1:
+                node_set.update(self.k_hop_neighbors(node_id, k, direction))
+
+            f_get_node = self.f_get_node
+            for nid in node_set:
+                result['nodes'][nid] = f_get_node(fp, nid)
+
+            # collect induced edges: for every node in the set, walk its
+            # outgoing/undirected adjacency and keep edges whose other
+            # endpoint is also in the set (each edge counted once)
+            f_read = self.f_read
+            f_get_adj = self.f_get_adj
+            _generate_edge_key = self._generate_edge_key
+            edge_re = self.EDGE_RE
+            seen = set()
+            for nid in node_set:
+                for entry in f_get_adj(fp, nid):
+                    d, other = entry[0], entry[1:]
+                    if other in node_set:
+                        edge_key = _generate_edge_key(nid, other, d == '>') if d != '<' else None
+                        if edge_key is not None and edge_key not in seen:
+                            seen.add(edge_key)
+                            matched = edge_re.match(edge_key)
+                            if matched:
+                                result['edges'][matched.groups()] = f_read(fp, edge_key, copy=False)
+
+        return result
+
     def f_iter_edges(self, fp:Dict[int,IO]) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
         """Iterate over all edges from the key table.
  
@@ -1103,104 +1198,6 @@ class GraphDb(JDb):
         """
         adj_key = f'X:{node_id}:'
         return self.f_read(fp, adj_key, default_val=[], copy=False)
-
-    # =====================================================================
-    # neighbourhood / subgraph queries
-    # =====================================================================
-    def k_hop_neighbors(self, node_id:str, k:int, direction:str='out') -> Dict[str,int]:
-        """Find all nodes within ``k`` hops of a node (BFS with depth limit).
-
-        Args:
-            node_id (str): Center node identifier.
-            k (int): Maximum number of hops (``k >= 1``).
-            direction (str, optional): Edge direction to follow from each
-                node — ``'out'`` (default) follows outgoing directed and
-                undirected edges, ``'in'`` follows incoming directed and
-                undirected edges, ``'both'`` follows every incident edge.
-
-        Returns:
-            Dict[str, int]: Mapping of reachable node id to its hop distance
-                from ``node_id`` (1..k). Excludes ``node_id`` itself. Empty if
-                the node is missing, ``k < 1``, or it has no qualifying
-                neighbours.
-        """
-        result = {}
-        with self.open() as fp:
-            if not self.f_has_node(fp, node_id) or k < 1:
-                return result
-
-            f_get_adj = self.f_get_adj
-            visited = {node_id}
-            frontier = [node_id]
-            for depth in range(1, k + 1):
-                nxt = []
-                for cur in frontier:
-                    for entry in f_get_adj(fp, cur):
-                        d, neighbor = entry[0], entry[1:]
-                        if direction == 'out' and d == '<': continue
-                        if direction == 'in' and d == '>': continue
-                        if neighbor not in visited:
-                            visited.add(neighbor)
-                            result[neighbor] = depth
-                            nxt.append(neighbor)
-                if not nxt:
-                    break
-                frontier = nxt
-
-        return result
-
-    def ego_graph(self, node_id:str, k:int=1, direction:str='both') -> Dict[str,Any]:
-        """Extract the ``k``-hop ego subgraph centered on a node.
-
-        The subgraph contains ``node_id`` plus every node within ``k`` hops
-        (using ``direction`` for reachability), and every edge of the graph
-        whose endpoints are both inside that node set.
-
-        Args:
-            node_id (str): Center node identifier.
-            k (int, optional): Neighbourhood radius in hops. Defaults to 1.
-            direction (str, optional): Edge direction used to decide
-                reachability of the node set — ``'out'``, ``'in'`` or
-                ``'both'`` (default). See ``k_hop_neighbors``.
-
-        Returns:
-            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
-                dst): props}}`` for the induced subgraph. Empty node/edge maps
-                if ``node_id`` is missing.
-        """
-        result = {'nodes': {}, 'edges': {}}
-        with self.open() as fp:
-            if not self.f_has_node(fp, node_id):
-                return result
-
-            node_set = {node_id}
-            if k >= 1:
-                node_set.update(self.k_hop_neighbors(node_id, k, direction))
-
-            f_get_node = self.f_get_node
-            for nid in node_set:
-                result['nodes'][nid] = f_get_node(fp, nid)
-
-            # collect induced edges: for every node in the set, walk its
-            # outgoing/undirected adjacency and keep edges whose other
-            # endpoint is also in the set (each edge counted once)
-            f_read = self.f_read
-            f_get_adj = self.f_get_adj
-            _generate_edge_key = self._generate_edge_key
-            edge_re = self.EDGE_RE
-            seen = set()
-            for nid in node_set:
-                for entry in f_get_adj(fp, nid):
-                    d, other = entry[0], entry[1:]
-                    if other in node_set:
-                        edge_key = _generate_edge_key(nid, other, d == '>') if d != '<' else None
-                        if edge_key is not None and edge_key not in seen:
-                            seen.add(edge_key)
-                            matched = edge_re.match(edge_key)
-                            if matched:
-                                result['edges'][matched.groups()] = f_read(fp, edge_key, copy=False)
-
-        return result
 
     def _generate_edge_key(self, u:str, v:str, directed:bool) -> str:
         """Build the canonical storage key for an edge.
