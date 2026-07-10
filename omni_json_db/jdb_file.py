@@ -6,14 +6,14 @@ from typing import Optional, Union, IO
 from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
 from os import remove as os_remove, stat as os_stat, fsync as os_fsync
 from os.path import basename, dirname, join as path_join, exists as path_exists
+from os import open as os_open, close as os_close, O_APPEND, O_CREAT
 from datetime import datetime
 from threading import Lock, Condition
 #-----------------------------------------------------------------------------
+OPEN_FLAGS = O_APPEND | O_CREAT
 try:
-    from os import open as os_open, close as os_close, O_APPEND, O_CREAT
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
 
-    OPEN_FLAGS = O_APPEND | O_CREAT
     def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
         """Acquire a shared (read) OS-level file lock.
 
@@ -103,6 +103,10 @@ except ImportError:
     import ctypes
     from ctypes import wintypes
 
+    # The lock file is never read from or written to -- it is only a target for
+    # byte-range locks -- so a raw OS file descriptor (os.open / os.close) is
+    # used instead of a buffered Python file object, mirroring the POSIX branch.
+
     _LOCKFILE_FAIL_IMMEDIATELY = 0x00000001  # non-blocking attempt
     _LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002  # write lock; omit the flag for a shared lock
 
@@ -153,14 +157,14 @@ except ImportError:
         ov.OffsetHigh = _LOCK_OFFSET_HIGH   # pylint: disable=W0201
         return ov
 
-    def _win_lock(fp:IO, exclusive:bool, block:bool):
-        """Acquire a Win32 byte-range lock on the handle backing ``fp``.
- 
+    def _win_lock(fd:int, exclusive:bool, block:bool):
+        """Acquire a Win32 byte-range lock on the handle backing ``fd``.
+
         Raises:
             BlockingIOError: If the lock cannot be acquired (immediately, when
                 ``block`` is False).
         """
-        handle = msvcrt.get_osfhandle(fp.fileno())
+        handle = msvcrt.get_osfhandle(fd)
         flags = 0
         if exclusive:
             flags |= _LOCKFILE_EXCLUSIVE_LOCK
@@ -173,31 +177,31 @@ except ImportError:
             err = ctypes.get_last_error()
             raise BlockingIOError(err, 'LockFileEx failed')
 
-    def _win_unlock(fp:IO):
-        """Release the Win32 byte-range lock on the handle backing ``fp``."""
-        handle = msvcrt.get_osfhandle(fp.fileno())
+    def _win_unlock(fd:int):
+        """Release the Win32 byte-range lock on the handle backing ``fd``."""
+        handle = msvcrt.get_osfhandle(fd)
         ov = _win_overlapped()
         _UnlockFileEx(handle, 0, _LOCK_BYTES_LOW, _LOCK_BYTES_HIGH, ctypes.byref(ov))
 
-    def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
+    def file_rlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
         """Acquire a shared (read) OS-level file lock.
- 
+
         Args:
-            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
-                a new descriptor/object will be opened.
+            fd (int): An existing file descriptor. If ``None``, a new descriptor
+                will be opened.
             LCK_file (str): The system path pointing to the targeted lock file.
             block (bool, optional): If ``True``, block until the lock can be acquired. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
- 
+
         Returns:
-            int | IO: The active file descriptor or file object holding the shared lock.
- 
+            int: The active file descriptor holding the shared lock.
+
         Raises:
             BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
                 because another process holds an exclusive lock.
         """
         if fd is None:
-            fd = open(LCK_file, 'a+')
+            fd = os_open(LCK_file, OPEN_FLAGS)
 
         try:
             _win_lock(fd, exclusive=False, block=block)
@@ -206,30 +210,30 @@ except ImportError:
         except (IOError, OSError) as e:
             if fd is not None:
                 try:
-                    fd.close()
+                    os_close(fd)
                 except OSError as e1: # pragma: no cover
                     print(e1)
             raise BlockingIOError from e
 
-    def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
+    def file_wlock(fd:int, LCK_file:str, block:bool=False) -> int:  # pragma: no cover
         """Acquire an exclusive (write) OS-level file lock.
- 
+
         Args:
-            fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
-                a new descriptor/object will be opened.
+            fd (int): An existing file descriptor. If ``None``, a new descriptor
+                will be opened.
             LCK_file (str): The system path pointing to the targeted lock file.
             block (bool, optional): If ``True``, block until the lock can be acquired. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
- 
+
         Returns:
-            int | IO: The active file descriptor or file object holding the exclusive lock.
- 
+            int: The active file descriptor holding the exclusive lock.
+
         Raises:
             BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
                 due to existing readers or writers.
         """
         if fd is None:
-            fd = open(LCK_file, 'a+')
+            fd = os_open(LCK_file, OPEN_FLAGS)
 
         try:
             _win_lock(fd, exclusive=True, block=block)
@@ -238,21 +242,21 @@ except ImportError:
         except (IOError, OSError) as e:
             if fd is not None:
                 try:
-                    fd.close()
+                    os_close(fd)
                 except OSError as e1: # pragma: no cover
                     print(e1)
             raise BlockingIOError from e
 
-    def file_unlock(fd:IO):  # pragma: no cover
-        """Release the file lock and safely close the file descriptor/object.
- 
+    def file_unlock(fd:int):  # pragma: no cover
+        """Release the file lock and safely close the file descriptor.
+
         Args:
-            fd (int | IO): The open file descriptor or file object to unlock and close.
+            fd (int): The open file descriptor to unlock and close.
         """
         if fd is not None:
             try:
                 _win_unlock(fd)
-                fd.close()
+                os_close(fd)
             except (IOError, OSError) as e: # pragma: no cover
                 print(e)
 
@@ -1320,5 +1324,4 @@ class JDiskFiles(JFilesBase):
 
         except PermissionError as e: # pragma: no cover
             print(e)
-
 #

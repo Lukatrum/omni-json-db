@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.13.51"
+version = "2.13.53"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -102,10 +102,9 @@ full = [
 	"BTrees>=5.2",
 	"lz4>=4.3.2",
 	"ormsgpack>=1.2.6; platform_python_implementation != 'PyPy'",
-	"portalocker>=2.7.0; os_name == 'nt'",
 	"PyYAML>=6.0.3; python_version != '3.7'",
 	"tomli>=2.0.1",
-	"zstandard>=0.21.0",
+	"zstandard>=0.21.0",	
 ]
 
 [project.urls]
