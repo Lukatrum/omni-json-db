@@ -377,12 +377,7 @@ class GraphDb(JDb):
                 elif dst == node_id or src == node_id:
                     u_deg += 1
 
-        return {
-            'in': i_deg,
-            'out': o_deg,
-            'undirected': u_deg,
-            'total': i_deg + o_deg + u_deg,
-        }
+        return {'in': i_deg, 'out': o_deg, 'undirected': u_deg, 'total': i_deg + o_deg + u_deg}
 
     def boost_edge_weights(self, relation_type:str, boost_value:float):
         """Increase the ``weight`` property of all edges with a given relation.
@@ -398,15 +393,23 @@ class GraphDb(JDb):
         self.update_if(Edge._id.matches(self.EDGE_RE) & (Edge.relation == relation_type), \
                 patch=lambda edge,props: {'weight' : props.get('weight', 1) + boost_value})
 
-    def bfs_shortest_path(self, start:str, end:str) -> List[str]:
+    def bfs_shortest_path(self, start:str, end:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[str]:
         """Find a shortest path (fewest hops) between two nodes using BFS.
- 
-        Directed edges are followed forward only; undirected edges are
-        traversed in both directions.
- 
+
+        By default directed edges are followed forward only and undirected
+        edges are traversed in both directions.
+
         Args:
             start (str): Start node identifier.
             end (str): End node identifier.
+            direction (str, optional): Edge direction to follow from each
+                node — ``'out'`` (default) follows outgoing directed and
+                undirected edges, ``'in'`` follows incoming directed and
+                undirected edges, ``'both'`` follows every incident edge.
+            edge_filter (Optional[Callable[[dict], bool]], optional): If
+                given, only cross an edge when ``edge_filter(props)`` is
+                truthy for that edge's properties. Defaults to None (no
+                filtering).
 
         Returns:
             List[str]: Node ids along a shortest path from ``start`` to
@@ -421,6 +424,8 @@ class GraphDb(JDb):
             queue = deque([start])
             visited = {start}
             f_get_adj = self.f_get_adj
+            f_read = self.f_read
+            _generate_edge_key = self._generate_edge_key
             while queue:
                 current_node = queue.popleft()
                 if current_node == end:
@@ -431,9 +436,17 @@ class GraphDb(JDb):
                     return path[::-1]
 
                 for entry in f_get_adj(fp, current_node):
-                    direction, neighbor = entry[0], entry[1:]
-                    if direction == '<': continue
+                    d, neighbor = entry[0], entry[1:]
+                    if direction == 'out' and d == '<': continue
+                    if direction == 'in' and d == '>': continue
                     if neighbor not in visited:
+                        if edge_filter is not None:
+                            edge_key = _generate_edge_key(neighbor, current_node, True) if d == '<' else \
+                                        _generate_edge_key(current_node, neighbor, d == '>')
+                            props = f_read(fp, edge_key, copy=False)
+                            if not edge_filter(props if isinstance(props, dict) else {}):
+                                continue
+
                         visited.add(neighbor)
                         previous_nodes[neighbor] = current_node
                         queue.append(neighbor)
@@ -497,23 +510,33 @@ class GraphDb(JDb):
 
         return float('inf'), []
 
-    def dfs_traverse(self, start:str, visited:Optional[Set[str]]=None) -> list:
+    def dfs_traverse(self, start:str, visited:Optional[Set[str]]=None, direction:str='out', edge_filter:Optional[Any]=None) -> list:
         """Depth-first traversal from a start node, following edge direction.
- 
-        Directed edges are followed forward only; undirected edges are
-        followed in both directions.
- 
+
+        By default directed edges are followed forward only and undirected
+        edges are followed in both directions.
+
         Args:
             start (str): Start node identifier.
             visited (Optional[Set[str]], optional): Pre-populated visited set,
                 allowing traversal state to be shared across calls. Mutated
                 in place. Defaults to a new empty set.
- 
+            direction (str, optional): Edge direction to follow from each
+                node — ``'out'`` (default) follows outgoing directed and
+                undirected edges, ``'in'`` follows incoming directed and
+                undirected edges, ``'both'`` follows every incident edge.
+            edge_filter (Optional[Callable[[dict], bool]], optional): If
+                given, only follow an edge when ``edge_filter(props)`` is
+                truthy for that edge's properties. Defaults to None (no
+                filtering).
+
         Returns:
             list: Node ids in DFS pre-order starting from ``start``.
         """
         f_get_adj = self.f_get_adj
-        def dfs(fp, key_table, node_id, visited, level=0) -> list:
+        f_read = self.f_read
+        _generate_edge_key = self._generate_edge_key
+        def dfs(fp, node_id, visited, level=0) -> list:
             if level >= MAX_RECURSION: # pragma: no cover
                 raise RecursionError
 
@@ -522,17 +545,24 @@ class GraphDb(JDb):
                 visited.add(node_id)
                 path.append(node_id)
                 for entry in f_get_adj(fp, node_id):
-                    direction, successor = entry[0], entry[1:]
-                    if direction == '<': continue
-                    path.extend(dfs(fp, key_table, successor, visited, level+1))
+                    d, successor = entry[0], entry[1:]
+                    if direction == 'out' and d == '<': continue
+                    if direction == 'in' and d == '>': continue
+                    if edge_filter is not None:
+                        edge_key = _generate_edge_key(successor, node_id, True) if d == '<' else \
+                                    _generate_edge_key(node_id, successor, d == '>')
+                        props = f_read(fp, edge_key, copy=False)
+                        if not edge_filter(props if isinstance(props, dict) else {}):
+                            continue
+
+                    path.extend(dfs(fp, successor, visited, level+1))
 
             return path
 
         if visited is None: visited = set()
         with self.open() as fp:
-            key_table = self.io.key_table
             if self.f_has_node(fp, start):
-                return dfs(fp, key_table, start, visited)
+                return dfs(fp, start, visited)
 
         return []
 
@@ -769,6 +799,294 @@ class GraphDb(JDb):
                                 result['edges'][matched.groups()] = f_read(fp, edge_key, copy=False)
 
         return result
+
+    def degree_centrality(self) -> Dict[str,float]:
+        """Compute degree centrality for every node.
+
+        Degree centrality is a node's total degree (in + out + undirected)
+        normalized by ``N - 1`` (the maximum possible), where ``N`` is the
+        node count.
+
+        Returns:
+            Dict[str, float]: Mapping of node id to degree centrality in
+                ``[0, 1]``. All zeros when there is only one node.
+        """
+        with self.open() as fp:
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            n = len(nodes)
+            norm = (n - 1) if n > 1 else 1
+            f_get_adj = self.f_get_adj
+            return {nid: len(f_get_adj(fp, nid)) / norm for nid in nodes}
+
+    def pagerank(self, damping:float=0.85, max_iter:int=100, tol:float=1e-6) -> Dict[str,float]:
+        """Rank nodes by PageRank over the directed graph.
+
+        Outgoing directed edges and undirected edges (both directions) define
+        the link structure. Dangling nodes (no out-links) redistribute their
+        rank uniformly. Iteration stops when the total change falls below
+        ``tol`` or after ``max_iter`` iterations.
+
+        Args:
+            damping (float, optional): Damping factor. Defaults to 0.85.
+            max_iter (int, optional): Maximum iterations. Defaults to 100.
+            tol (float, optional): L1 convergence threshold. Defaults to 1e-6.
+
+        Returns:
+            Dict[str, float]: Mapping of node id to PageRank score; scores sum
+                to approximately 1. Empty for an empty graph.
+        """
+        with self.open() as fp:
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            n = len(nodes)
+            if n == 0:
+                return {}
+
+            out = {}
+            f_get_adj = self.f_get_adj
+            for nid in nodes:
+                # dedupe: a neighbor linked by both a directed and an
+                # undirected edge must only count as one out-link
+                out[nid] = list(dict.fromkeys(
+                    entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+
+        rank = {nid: 1.0 / n for nid in nodes}
+        base = (1.0 - damping) / n
+        for _ in range(max_iter):
+            dangling = damping * sum(rank[nid] for nid in nodes if not out[nid]) / n
+            new_rank = {nid: base + dangling for nid in nodes}
+            for nid in nodes:
+                targets = out[nid]
+                if targets:
+                    share = damping * rank[nid] / len(targets)
+                    for t in targets:
+                        new_rank[t] += share
+
+            delta = sum(abs(new_rank[nid] - rank[nid]) for nid in nodes)
+            rank = new_rank
+            if delta < tol:
+                break
+
+        return rank
+
+    def betweenness_centrality(self, normalized:bool=True) -> Dict[str,float]:
+        """Compute (shortest-path) betweenness centrality via Brandes.
+
+        Betweenness of a node is the sum over all node pairs of the fraction
+        of shortest paths passing through it. Uses outgoing directed and
+        undirected edges. Runs an unweighted (BFS) Brandes algorithm in
+        O(V*E) time.
+
+        Args:
+            normalized (bool, optional): If True, divide by the number of
+                ordered pairs ``(N-1)(N-2)`` (directed convention). Defaults
+                to True.
+
+        Returns:
+            Dict[str, float]: Mapping of node id to betweenness centrality.
+        """
+        with self.open() as fp:
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            adj = {}
+            f_get_adj = self.f_get_adj
+            for nid in nodes:
+                # dedupe: a neighbor linked by both a directed and an
+                # undirected edge must only be traversed once
+                adj[nid] = list(dict.fromkeys(\
+                        entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+
+        cb = {nid: 0.0 for nid in nodes}
+        for s in nodes:
+            stack = []
+            preds = {w: [] for w in nodes}
+            sigma = {w: 0.0 for w in nodes}
+            sigma[s] = 1.0
+            dist = {w: -1 for w in nodes}
+            dist[s] = 0
+            queue = deque([s])
+            while queue:
+                v = queue.popleft()
+                stack.append(v)
+                for w in adj[v]:
+                    if dist[w] < 0:
+                        dist[w] = dist[v] + 1
+                        queue.append(w)
+                    if dist[w] == dist[v] + 1:
+                        sigma[w] += sigma[v]
+                        preds[w].append(v)
+
+            delta = {w: 0.0 for w in nodes}
+            while stack:
+                w = stack.pop()
+                for v in preds[w]:
+                    if sigma[w]:
+                        delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+                if w != s:
+                    cb[w] += delta[w]
+
+        if normalized and len(nodes) > 2:
+            scale = 1.0 / ((len(nodes) - 1) * (len(nodes) - 2))
+            cb = {nid: val * scale for nid, val in cb.items()}
+
+        return cb
+
+    def all_shortest_paths(self, start:str, end:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[List[str]]:
+        """Find every shortest (fewest-hop) path between two nodes.
+
+        Runs a BFS that records all predecessors at the shortest distance,
+        then enumerates every path through that predecessor DAG.
+
+        Args:
+            start (str): Start node identifier.
+            end (str): End node identifier.
+            direction (str, optional): Edge direction to follow from each
+                node — ``'out'`` (default) follows outgoing directed and
+                undirected edges, ``'in'`` follows incoming directed and
+                undirected edges, ``'both'`` follows every incident edge.
+            edge_filter (Optional[Callable[[dict], bool]], optional): If
+                given, only cross an edge when ``edge_filter(props)`` is
+                truthy for that edge's properties. Defaults to None (no
+                filtering).
+
+        Returns:
+            List[List[str]]: All shortest paths (each a node-id list from
+                ``start`` to ``end`` inclusive), or an empty list if either
+                node is missing or no path exists. For ``start == end``
+                returns ``[[start]]``.
+        """
+        with self.open() as fp:
+            if not self.f_has_node(fp, start) or not self.f_has_node(fp, end):
+                return []
+
+            if start == end:
+                return [[start]]
+
+            f_get_adj = self.f_get_adj
+            f_read = self.f_read
+            _generate_edge_key = self._generate_edge_key
+            dist = {start: 0}
+            preds = {start: []}
+            queue = deque([start])
+            found_depth = None
+            while queue:
+                cur = queue.popleft()
+                if found_depth is None or dist[cur] < found_depth:
+                    for entry in f_get_adj(fp, cur):
+                        d, neighbor = entry[0], entry[1:]
+                        if direction == 'out' and d == '<': continue
+                        if direction == 'in' and d == '>': continue
+                        if edge_filter is not None:
+                            edge_key = _generate_edge_key(neighbor, cur, True) if d == '<' else \
+                                    _generate_edge_key(cur, neighbor, d == '>')
+                            props = f_read(fp, edge_key, copy=False)
+                            if not edge_filter(props if isinstance(props, dict) else {}):
+                                continue
+
+                        nd = dist[cur] + 1
+                        if neighbor not in dist:
+                            dist[neighbor] = nd
+                            preds[neighbor] = [cur]
+                            if neighbor == end:
+                                found_depth = nd
+                            else:
+                                queue.append(neighbor)
+                        elif dist[neighbor] == nd:
+                            preds[neighbor].append(cur)
+
+            if end not in dist:
+                return []
+
+            # backtrack every path from end to start through preds
+            paths = []
+            def build(node, acc):
+                if node == start:
+                    paths.append([start] + acc[::-1])
+                    return
+                for p in preds[node]:
+                    build(p, acc + [node])
+
+            build(end, [])
+            return paths
+
+    def strongly_connected_components(self) -> List[List[str]]:
+        """Find the strongly connected components of the directed graph.
+
+        Two nodes are in the same component iff each is reachable from the
+        other following edge direction (outgoing directed and undirected
+        edges). Uses an iterative Tarjan algorithm, so it is safe on deep
+        graphs.
+
+        Returns:
+            List[List[str]]: Components as lists of node ids. Every node
+                appears in exactly one component (singletons for nodes not in
+                any directed cycle).
+        """
+        with self.open() as fp:
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            adj = {}
+            f_get_adj = self.f_get_adj
+            for nid in nodes:
+                # dedupe: a neighbor linked by both a directed and an
+                # undirected edge must only be traversed once
+                adj[nid] = list(dict.fromkeys(\
+                    entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+
+        index_counter = [0]
+        indices = {}
+        lowlink = {}
+        on_stack = {}
+        stack = []
+        components = []
+
+        for root in nodes:
+            if root in indices:
+                continue
+            # iterative DFS: work items are (node, neighbor_iterator_position)
+            work = [(root, 0)]
+            while work:
+                node, pi = work[-1]
+                if pi == 0:
+                    indices[node] = lowlink[node] = index_counter[0]
+                    index_counter[0] += 1
+                    stack.append(node)
+                    on_stack[node] = True
+
+                recursed = False
+                neighbors = adj[node]
+                while pi < len(neighbors):
+                    w = neighbors[pi]
+                    if w not in indices:
+                        work[-1] = (node, pi + 1)
+                        work.append((w, 0))
+                        recursed = True
+                        break
+                    if on_stack.get(w):
+                        if indices[w] < lowlink[node]:
+                            lowlink[node] = indices[w]
+                    pi += 1
+                else:
+                    work[-1] = (node, pi)
+
+                if recursed:
+                    continue
+
+                # done exploring node's neighbours
+                if lowlink[node] == indices[node]:
+                    comp = []
+                    while True:
+                        w = stack.pop()
+                        on_stack[w] = False
+                        comp.append(w)
+                        if w == node:
+                            break
+                    components.append(comp)
+
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    if lowlink[node] < lowlink[parent]:
+                        lowlink[parent] = lowlink[node]
+
+        return components
 
     def f_iter_edges(self, fp:Dict[int,IO]) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
         """Iterate over all edges from the key table.

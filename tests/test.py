@@ -430,7 +430,7 @@ class TestJDb(unittest.TestCase):
             res = db.find_edges(edge.weight.between(2.5, 4.))
             self.assertEqual(set(res), {('A', '>', 'C')})
 
-            res = db.show(node.weight > 0., with_date=1)
+            res = db.show(node.weight > 0., with_date=1, sort=node._date)
             self.assertEqual(len(res), 5)
 
             res = db.degree('C')
@@ -448,11 +448,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(res), 5)
 
             # only show edges
-            res = db.show(db.EDGE_RE, with_date=1)
+            res = db.show(db.EDGE_RE, with_date=1, sort=node._date.last())
             self.assertGreaterEqual(len(res), 2)
 
             # only show adjacency
-            res = db.show(db.ADJ_RE, with_date=1)
+            res = db.show(db.ADJ_RE, with_date=1, sort=node._id)
             self.assertGreaterEqual(len(res), 4)
 
             res = dict(db.iter_adjs())
@@ -534,36 +534,47 @@ class TestJDb(unittest.TestCase):
             # directed 2-cycle
             build(db, [('A', 'B', True), ('B', 'A', True)])
             self.assertTrue(db.is_cyclic())
+
             # directed 3-cycle
             build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])
             self.assertTrue(db.is_cyclic())
+
             # single undirected edge is NOT a cycle
             build(db, [('A', 'B', False)])
             self.assertFalse(db.is_cyclic())
+
             # undirected chain is NOT a cycle
             build(db, [('A', 'B', False), ('B', 'C', False)])
             self.assertFalse(db.is_cyclic())
+
             # undirected triangle IS a cycle
             build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
             self.assertTrue(db.is_cyclic())
+
             # undirected square IS a cycle
             build(db, [('A', 'B', False), ('B', 'C', False), ('C', 'D', False), ('D', 'A', False)])
             self.assertTrue(db.is_cyclic())
+
             # undirected tree is NOT a cycle
             build(db, [('A', 'B', False), ('A', 'C', False), ('B', 'D', False), ('B', 'E', False)])
             self.assertFalse(db.is_cyclic())
+
             # undirected star is NOT a cycle
             build(db, [('H', 'B', False), ('H', 'C', False), ('H', 'D', False)])
             self.assertFalse(db.is_cyclic())
+
             # directed diamond DAG is NOT a cycle
             build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
             self.assertFalse(db.is_cyclic())
+
             # cycle buried inside a larger graph  (A->B, B->C->D->B)
             build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'D', True), ('D', 'B', True)])
             self.assertTrue(db.is_cyclic())
+
             # two components, only one cyclic
             build(db, [('A', 'B', False), ('X', 'Y', True), ('Y', 'X', True)])
             self.assertTrue(db.is_cyclic())
+
             # mixed directed + undirected between the same pair is a cycle
             build(db, [('A', 'B', True), ('B', 'A', False)])
             self.assertTrue(db.is_cyclic())
@@ -617,13 +628,16 @@ class TestJDb(unittest.TestCase):
             # =====================================================
             build(db, [('A', 'B', True)])
             self.assertEqual(db.dfs_traverse('NOPE'), [])
+
             build(db, [('A', 'B', True), ('A', 'C', True)])
             shared = {'B'}
             got = db.dfs_traverse('A', shared)
             self.assertNotIn('B', got)
             self.assertEqual(set(got), {'A', 'C'})
+
             build(db, [('A', 'B', True), ('X', 'A', True)])       # X->A must not be reached from A
             self.assertEqual(set(db.dfs_traverse('A')), {'A', 'B'})
+
             build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])  # cycle must terminate
             self.assertEqual(set(db.dfs_traverse('A')), {'A', 'B', 'C'})
 
@@ -711,6 +725,121 @@ class TestJDb(unittest.TestCase):
             build(db, [('A', 'B', True, {'w': 7})])
             ego3 = db.ego_graph('A', 1)
             self.assertEqual(ego3['edges'][('A', '>', 'B')], {'w': 7})
+
+            # =====================================================
+            # direction-filtered traversal (bfs_shortest_path / dfs_traverse)
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True)])
+            self.assertEqual(db.bfs_shortest_path('C', 'A'), [])                           # default 'out'
+            self.assertEqual(db.bfs_shortest_path('C', 'A', direction='both'), ['C', 'B', 'A'])
+            self.assertEqual(db.bfs_shortest_path('C', 'A', direction='in'), ['C', 'B', 'A'])
+            self.assertEqual(db.bfs_shortest_path('A', 'C'), ['A', 'B', 'C'])              # unaffected
+
+            build(db, [('A', 'B', True), ('X', 'A', True)])
+            self.assertEqual(set(db.dfs_traverse('A')), {'A', 'B'})                        # default 'out'
+            self.assertEqual(set(db.dfs_traverse('A', direction='both')), {'A', 'B', 'X'})
+            self.assertEqual(set(db.dfs_traverse('A', direction='in')), {'A', 'X'})
+
+            # =====================================================
+            # property-filtered traversal (edge_filter)
+            # =====================================================
+            build(db, [('A', 'B', True, {'w': 1}), ('A', 'C', True, {'w': 9})])
+            light = lambda p: p.get('w', 0) < 5
+            self.assertEqual(set(db.dfs_traverse('A', edge_filter=light)), {'A', 'B'})
+            self.assertEqual(db.bfs_shortest_path('A', 'C', edge_filter=light), [])
+            self.assertEqual(db.bfs_shortest_path('A', 'B', edge_filter=light), ['A', 'B'])
+
+            # direction + edge_filter combined
+            build(db, [('A', 'B', True, {'w': 1}), ('C', 'B', True, {'w': 9})])
+            self.assertEqual(db.bfs_shortest_path('B', 'A', direction='in', edge_filter=light),
+                             ['B', 'A'])
+            self.assertEqual(db.bfs_shortest_path('B', 'C', direction='in', edge_filter=light), [])
+
+            # =====================================================
+            # centrality: degree_centrality
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True)])
+            dc = db.degree_centrality()
+            self.assertAlmostEqual(dc['A'], 1.0)   # out 2 / (3-1)
+            self.assertAlmostEqual(dc['B'], 1.0)   # in1 + out1
+            self.assertAlmostEqual(dc['C'], 1.0)   # in 2
+
+            build(db, [('A', 'B', True)], nodes=('ISO',))
+            self.assertEqual(db.degree_centrality()['ISO'], 0.0)
+
+            # =====================================================
+            # Centrality: pagerank
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True)])
+            pr = db.pagerank()
+            self.assertAlmostEqual(sum(pr.values()), 1.0, places=5)
+            self.assertGreater(pr['C'], pr['A'])   # sink accumulates rank
+
+            # parallel directed + undirected edge between the same pair must
+            # not be double-counted (out-neighbor dedupe)
+            build(db, [('A', 'B', True), ('B', 'A', False)])
+            pr2 = db.pagerank()
+            self.assertAlmostEqual(sum(pr2.values()), 1.0, places=5)
+
+            # =====================================================
+            # centrality: betweenness_centrality
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True)])
+            bc = db.betweenness_centrality(normalized=False)
+            self.assertEqual(bc['B'], 1.0)   # middle node on the only path
+            self.assertEqual(bc['A'], 0.0)
+            self.assertEqual(bc['C'], 0.0)
+
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True)])
+            bc2 = db.betweenness_centrality(normalized=True)
+            self.assertTrue(all(0.0 <= v <= 1.0 for v in bc2.values()))
+
+            # =====================================================
+            # all_shortest_paths: multiple equal-length paths
+            # =====================================================
+            build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
+            self.assertEqual(sorted(db.all_shortest_paths('A', 'D')),
+                             [['A', 'B', 'D'], ['A', 'C', 'D']])
+            self.assertEqual(db.all_shortest_paths('A', 'A'), [['A']])
+            self.assertEqual(db.all_shortest_paths('A', 'ZZZ'), [])
+
+            build(db, [('A', 'B', True), ('B', 'C', True)])
+            self.assertEqual(db.all_shortest_paths('A', 'C'), [['A', 'B', 'C']])
+            self.assertEqual(db.all_shortest_paths('C', 'A'), [])                       # unreachable, default 'out'
+            self.assertEqual(db.all_shortest_paths('C', 'A', direction='in'), [['C', 'B', 'A']])
+
+            # edge_filter restricts which paths qualify
+            build(db, [('A', 'B', True, {'w': 1}), ('A', 'C', True, {'w': 9})])
+            light = lambda p: p.get('w', 0) < 5
+            self.assertEqual(db.all_shortest_paths('A', 'B', edge_filter=light), [['A', 'B']])
+            self.assertEqual(db.all_shortest_paths('A', 'C', edge_filter=light), [])
+
+            # a direct edge (1 hop) is preferred over any 2-hop alternative
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
+            self.assertEqual(db.all_shortest_paths('A', 'C'), [['A', 'C']])
+
+            # =====================================================
+            # #7 strongly_connected_components
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True), ('C', 'D', True)])
+            self.assertEqual(sorted(sorted(c) for c in db.strongly_connected_components()), [['A', 'B', 'C'], ['D']])
+
+            build(db, [('A', 'B', True), ('B', 'C', True)])           # DAG -> all singletons
+            self.assertEqual(sorted(sorted(c) for c in db.strongly_connected_components()), [['A'], ['B'], ['C']])
+
+            build(db, [('A', 'B', False), ('B', 'C', False)])         # undirected chain -> one SCC
+            self.assertEqual(sorted(sorted(c) for c in db.strongly_connected_components()), [['A', 'B', 'C']])
+
+            # every node appears in exactly one component (partition invariant)
+            build(db, [('A', 'B', True), ('B', 'A', True), ('C', 'D', True), ('D', 'C', True), ('B', 'C', True)])
+            comps = db.strongly_connected_components()
+            allnodes = [n for c in comps for n in c]
+            self.assertEqual(sorted(allnodes), ['A', 'B', 'C', 'D'])
+            self.assertEqual(len(allnodes), len(set(allnodes)))
+
+            # nodes with no edges are singleton components
+            build(db, [], nodes=('X', 'Y', 'Z'))
+            self.assertEqual(sorted(sorted(c) for c in db.strongly_connected_components()), [['X'], ['Y'], ['Z']])
 
             # =====================================================
             self.assertEqual(jdb, db)
