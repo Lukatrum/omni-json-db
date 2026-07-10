@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from abc import ABCMeta
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
-from typing import Callable, Any
+from typing import Callable, Any, Union
 #-----------------------------------------------------------------------------
 try:
     import ipdb
@@ -27,6 +27,92 @@ class JTypeError(JError, TypeError):
     pass
 
 #-----------------------------------------------------------------------------
+# try:
+#     from bitarray import bitarray # pylint: disable=unused-import
+# except ImportError: # pragma: no cover
+try:
+    (0).bit_count #pylint: disable=pointless-statement
+    def _popcount(buf: bytearray) -> int:
+        return int.from_bytes(buf, 'little').bit_count()
+
+except AttributeError: # pragma: no cover
+    def _popcount(buf: bytearray) -> int:
+        return bin(int.from_bytes(buf, 'little')).count('1')
+
+class bitarray:
+    """Bit-packed boolean flag array (1 bit per flag, zero-initialized)."""
+    __slots__ = ('_buf', '_nbits')
+
+    def __init__(self, nbits: int = 0):
+        self._nbits = nbits
+        self._buf = bytearray((nbits + 7) >> 3)
+
+    def __len__(self) -> int:
+        return self._nbits
+
+    def __repr__(self) -> str:
+        return f'<bitarray n={self._nbits} nbytes={len(self._buf)}>'
+
+    @property
+    def nbytes(self) -> int:
+        return len(self._buf)
+
+    def __getitem__(self, idx: int) -> int:
+        if idx < 0:
+            idx += self._nbits
+        if not 0 <= idx < self._nbits:
+            raise IndexError(idx)
+        return (self._buf[idx >> 3] >> (idx & 7)) & 1
+
+    def __setitem__(self, idx: int, val: Union[bool, int]):
+        if idx < 0:
+            idx += self._nbits
+        if not 0 <= idx < self._nbits:
+            raise IndexError(idx)
+        if val:
+            self._buf[idx >> 3] |= 1 << (idx & 7)
+        else:
+            self._buf[idx >> 3] &= 0xff ^ (1 << (idx & 7))
+
+    def extend(self, bits: Union[str, int]):
+        """Append bits. Accepts a '01' string (bitarray-compatible, e.g.
+        '0'*n) or an int meaning "append this many zero bits"."""
+        if isinstance(bits, int):
+            n_new, ones = bits, ()
+        else:
+            n_new = len(bits)
+            ones = tuple(i for i, b in enumerate(bits) if b in ('1', 1, True))
+
+        old_nbits = self._nbits
+        self._nbits = old_nbits + n_new
+        need = (self._nbits + 7) >> 3
+        if need > len(self._buf):
+            self._buf.extend(bytes(need - len(self._buf)))
+        for i in ones:
+            self[old_nbits + i] = True
+
+    def setall(self, val: Union[bool, int]):
+        """Set every bit to 0 or 1 in one bulk C-speed operation."""
+        n_bytes = len(self._buf)
+        if val:
+            self._buf[:] = b'\xff' * n_bytes
+            tail = self._nbits & 7
+            if tail:  # mask unused bits in the last byte so count() is exact
+                self._buf[-1] &= (1 << tail) - 1
+        else:
+            self._buf[:] = bytes(n_bytes)
+
+    def clear(self):
+        """Drop all bits (length becomes 0), like bitarray.clear()."""
+        self._nbits = 0
+        self._buf.clear()
+
+    def count(self, val: Union[bool, int] = 1) -> int:
+        ones = _popcount(self._buf)
+        return ones if val else self._nbits - ones
+
+#-----------------------------------------------------------------------------
+
 # pylint: disable=too-few-public-methods
 class JDbBase(metaclass=ABCMeta): # pragma: no cover
     pass

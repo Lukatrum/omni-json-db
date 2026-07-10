@@ -89,20 +89,20 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-	"bitarray>=3.8.0",
 	"msgpack>=1.0.5",
-	"orjson>=3.9.7; platform_python_implementation != 'PyPy'",
-	"portalocker>=2.7.0; os_name == 'nt'",
+	"orjson>=3.9.7; platform_python_implementation != 'PyPy'",	
 ]
 license="MIT"
 license-files = ["LICEN[CS]E*"]
 
 [project.optional-dependencies]
 full = [
+	"bitarray>=3.8.0",	
 	"brotli>=1.2.0",
 	"BTrees>=5.2",
 	"lz4>=4.3.2",
 	"ormsgpack>=1.2.6; platform_python_implementation != 'PyPy'",
+	"portalocker>=2.7.0; os_name == 'nt'",
 	"PyYAML>=6.0.3; python_version != '3.7'",
 	"tomli>=2.0.1",
 	"zstandard>=0.21.0",

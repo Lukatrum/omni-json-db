@@ -92,21 +92,106 @@ try:
                 print(e)
 
 except ImportError:
-    from portalocker import LOCK_SH, LOCK_NB, LOCK_EX, lock as pl_lock, unlock as pl_unlock, LockException
+    # Windows fallback: call the Win32 API (LockFileEx / UnlockFileEx) directly
+    # through ctypes. This natively provides BOTH shared (read) and exclusive
+    # (write) advisory locks, so portalocker is no longer required.
+    #
+    # NOTE: the stdlib ``msvcrt.locking()`` only exposes exclusive byte-range
+    # locks and cannot express a true shared/read lock (multiple concurrent
+    # readers), which is why LockFileEx is used here instead.
+    import msvcrt
+    import ctypes
+    from ctypes import wintypes
+
+    _LOCKFILE_FAIL_IMMEDIATELY = 0x00000001  # non-blocking attempt
+    _LOCKFILE_EXCLUSIVE_LOCK   = 0x00000002  # write lock; omit the flag for a shared lock
+
+    # Lock exactly one byte at offset 0. Every rlock/wlock/unlock call operates
+    # on this same region, so shared vs. exclusive requests conflict correctly.
+    # Windows allows locking byte ranges beyond EOF, so an empty lock file is fine.
+    _LOCK_OFFSET_LOW  = 0x00000000
+    _LOCK_OFFSET_HIGH = 0x00000000
+    _LOCK_BYTES_LOW   = 0x00000001
+    _LOCK_BYTES_HIGH  = 0x00000000
+
+    class _OVERLAPPED(ctypes.Structure): # pylint: disable=too-few-public-methods
+        _fields_ = [
+            ('Internal',     ctypes.c_void_p),
+            ('InternalHigh', ctypes.c_void_p),
+            ('Offset',       wintypes.DWORD),
+            ('OffsetHigh',   wintypes.DWORD),
+            ('hEvent',       wintypes.HANDLE),
+        ]
+
+    _kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+    _LockFileEx = _kernel32.LockFileEx
+    _LockFileEx.restype = wintypes.BOOL
+    _LockFileEx.argtypes = [
+        wintypes.HANDLE,             # hFile
+        wintypes.DWORD,              # dwFlags
+        wintypes.DWORD,              # dwReserved (must be 0)
+        wintypes.DWORD,              # nNumberOfBytesToLockLow
+        wintypes.DWORD,              # nNumberOfBytesToLockHigh
+        ctypes.POINTER(_OVERLAPPED), # lpOverlapped
+    ]
+
+    _UnlockFileEx = _kernel32.UnlockFileEx
+    _UnlockFileEx.restype = wintypes.BOOL
+    _UnlockFileEx.argtypes = [
+        wintypes.HANDLE,             # hFile
+        wintypes.DWORD,              # dwReserved (must be 0)
+        wintypes.DWORD,              # nNumberOfBytesToUnlockLow
+        wintypes.DWORD,              # nNumberOfBytesToUnlockHigh
+        ctypes.POINTER(_OVERLAPPED), # lpOverlapped
+    ]
+
+    def _win_overlapped() -> _OVERLAPPED:
+        """Build an OVERLAPPED struct pointing at the fixed lock region (offset 0)."""
+        ov = _OVERLAPPED()
+        ov.Offset = _LOCK_OFFSET_LOW        # pylint: disable=W0201
+        ov.OffsetHigh = _LOCK_OFFSET_HIGH   # pylint: disable=W0201
+        return ov
+
+    def _win_lock(fp:IO, exclusive:bool, block:bool):
+        """Acquire a Win32 byte-range lock on the handle backing ``fp``.
+ 
+        Raises:
+            BlockingIOError: If the lock cannot be acquired (immediately, when
+                ``block`` is False).
+        """
+        handle = msvcrt.get_osfhandle(fp.fileno())
+        flags = 0
+        if exclusive:
+            flags |= _LOCKFILE_EXCLUSIVE_LOCK
+        if not block:
+            flags |= _LOCKFILE_FAIL_IMMEDIATELY
+
+        ov = _win_overlapped()
+        ok = _LockFileEx(handle, flags, 0, _LOCK_BYTES_LOW, _LOCK_BYTES_HIGH, ctypes.byref(ov))
+        if not ok:
+            err = ctypes.get_last_error()
+            raise BlockingIOError(err, 'LockFileEx failed')
+
+    def _win_unlock(fp:IO):
+        """Release the Win32 byte-range lock on the handle backing ``fp``."""
+        handle = msvcrt.get_osfhandle(fp.fileno())
+        ov = _win_overlapped()
+        _UnlockFileEx(handle, 0, _LOCK_BYTES_LOW, _LOCK_BYTES_HIGH, ctypes.byref(ov))
 
     def file_rlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
         """Acquire a shared (read) OS-level file lock.
-
+ 
         Args:
             fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
                 a new descriptor/object will be opened.
             LCK_file (str): The system path pointing to the targeted lock file.
             block (bool, optional): If ``True``, block until the lock can be acquired. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
-
+ 
         Returns:
             int | IO: The active file descriptor or file object holding the shared lock.
-
+ 
         Raises:
             BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
                 because another process holds an exclusive lock.
@@ -115,10 +200,10 @@ except ImportError:
             fd = open(LCK_file, 'a+')
 
         try:
-            pl_lock(fd, (LOCK_SH | LOCK_NB) if not block else LOCK_SH)
+            _win_lock(fd, exclusive=False, block=block)
             return fd
 
-        except (IOError, OSError, LockException) as e:
+        except (IOError, OSError) as e:
             if fd is not None:
                 try:
                     fd.close()
@@ -128,17 +213,17 @@ except ImportError:
 
     def file_wlock(fd:IO, LCK_file:str, block:bool=False) -> IO:  # pragma: no cover
         """Acquire an exclusive (write) OS-level file lock.
-
+ 
         Args:
             fd (int | IO): An existing file descriptor or file object. If ``None`` or ``0``, 
                 a new descriptor/object will be opened.
             LCK_file (str): The system path pointing to the targeted lock file.
             block (bool, optional): If ``True``, block until the lock can be acquired. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
-
+ 
         Returns:
             int | IO: The active file descriptor or file object holding the exclusive lock.
-
+ 
         Raises:
             BlockingIOError: If ``block=False`` and the lock cannot be acquired immediately 
                 due to existing readers or writers.
@@ -147,10 +232,10 @@ except ImportError:
             fd = open(LCK_file, 'a+')
 
         try:
-            pl_lock(fd, (LOCK_EX | LOCK_NB) if not block else LOCK_EX)
+            _win_lock(fd, exclusive=True, block=block)
             return fd
 
-        except (IOError, OSError, LockException) as e:
+        except (IOError, OSError) as e:
             if fd is not None:
                 try:
                     fd.close()
@@ -160,15 +245,15 @@ except ImportError:
 
     def file_unlock(fd:IO):  # pragma: no cover
         """Release the file lock and safely close the file descriptor/object.
-
+ 
         Args:
             fd (int | IO): The open file descriptor or file object to unlock and close.
         """
         if fd is not None:
             try:
-                pl_unlock(fd)
+                _win_unlock(fd)
                 fd.close()
-            except (IOError, OSError, LockException) as e: # pragma: no cover
+            except (IOError, OSError) as e: # pragma: no cover
                 print(e)
 
 #---------------------------------------------------------------------

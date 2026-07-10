@@ -844,6 +844,8 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(sort=[user._id, user._date])
             self.assertEqual(res, users)
 
+            res = jdb.find(sort=[user.tags[0], user.email])
+
             # --------------------------------------------
             res = jdb.find(user._date.startswith('2005'))
             self.assertEqual(set(res), {'user_2'})
@@ -1151,6 +1153,9 @@ class TestJDb(unittest.TestCase):
                     'addr_home': {'city': 'Tokyo', 'zip':4000}, 'addr_work': {'city': 'HK', 'zip': 5001},
                     'meta': {'tags': ['python', 'excel'], 'labels': ['api', 'frontend']}, 'scores': [92.4, 95.5, 99.6]}
             }
+
+            res = jdb.show(sort=[user.addr_home.city, user.addr_work.city, user._date, user._id])
+            self.assertEqual(set(res), {f'user_{v+1}' for v in range(6)})
 
             # int(scores[0]) == 92
             res = jdb.find(user.scores.first().int() == 92)

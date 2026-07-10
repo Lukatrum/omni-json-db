@@ -20,10 +20,7 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from bitarray import bitarray
-
-from .utils import Style, JIoBase
-# from .utils import debug_break
+from .utils import Style, JIoBase, bitarray
 
 try:
     import yaml
@@ -180,7 +177,7 @@ except ModuleNotFoundError:
     zstd_compress = zs1_compress = zs2_compress = zstd_decompress = None
 
 except ImportError:
-    # Python 3.7 unsupport compress() and decompress()
+    # Python 3.7 does not support compress() and decompress()
     from zstandard import ZstdCompressor, ZstdDecompressor, ZstdError as ZS_Error
     zstd_compress = ZstdCompressor(level=22).compress
     zs1_compress = ZstdCompressor(level=6).compress
@@ -238,17 +235,17 @@ CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)
 # -1 = DEFAULT_BUFFER_SIZE (8192)
 # 0 = no buffering
 # 65536 > 8192[default] improve loading key table 7.69%
-KEY_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE * 8 # 16_777_216
+KEY_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE * 8
 VAL_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE
 
 DEF_TYPE = 0 # default data type
 L_J_TYPE = 1 # split+Json                   | readable
 M_M_TYPE = 2 # Marshal+Marshal              | unreadable, full type
 J_J_TYPE = 3 # Json+Json                    | readable
-J_M_TYPE = 4 # Json+Marshal                 | half-readale, full type
-J_P_TYPE = 5 # Json+Pickle                  | half-readale, full type
+J_M_TYPE = 4 # Json+Marshal                 | half-readable, full type
+J_P_TYPE = 5 # Json+Pickle                  | half-readable, full type
 S_S_TYPE = 6 # Msgpack+Msgpack              | smallest size
-J_S_TYPE = 7 # Json+Msgpack                 | readale, small size
+J_S_TYPE = 7 # Json+Msgpack                 | readable, small size
 S_M_TYPE = 8 # Msgpack+Marshal              | unreadable, full type
 S_J_TYPE = 9 # Msgpack+Json                 | half-readable
 S_P_TYPE = 10# Msgpack+Pickle               | unreadable, full type
@@ -331,7 +328,7 @@ class JDbGroupDict(dict):
         """Handle missing keys safely by returning None.
 
         Args:
-            key (Str): Missing key token descriptor.
+            key (str): Missing key token descriptor.
 
         Returns:
             None: Fallback placeholder indicator value.
@@ -830,6 +827,7 @@ class PartialKeyTable(KeyTable):
 
     Postpones loading full keys sets from physical devices disks by maintaining localized bloom filter configurations trackers.
     """
+    __slots__ = ()
 
     def __init__(self, jio:JIo):
         """Initialize partial tracking layers parsing data indices boundaries criteria metrics models.
@@ -997,7 +995,7 @@ class JIoHEAD:
                 - 8  = KEY=msgpack  | VAL=Marshal
                 - 9  = KEY=msgpack  | VAL=Json
                 - 10 = KEY=msgpack  | VAL=Pickle
-                - 11 = KEY=msgpack  | VAL=YAML
+                - 11 = KEY=Json     | VAL=YAML
                 - 12 = KEY=msgpack  | VAL=YAML
 
             swap_id (int): Reference tracking structural rearrangements.
@@ -1670,7 +1668,7 @@ class JIo(JIoBase):
             key_limit (str | int, optional): Sizing constraint boundary for index memory.
 
                 - "no" | 0 = use DictKeyTable (dict). (default). 
-                - "bt" | 0x100 = use BTreeKeyTable.
+                - "bt" | -0x100 = use BTreeKeyTable.
                 - "l0"-"l5" | -ve = use LiteKeyTable (fast load_keys()). 
                 - "<{n}" | +ve = use PartialKeyTable (fast load_keys()).
 
@@ -2273,8 +2271,8 @@ class JIo(JIoBase):
         Yields:
             (str, int): Entry identity string descriptor paired along active logical index row line identifier number.
         """
-        stop_row = self.n_records if stop_row < 0 else max(self.n_records, stop_row)
-        start_row = min(0, max(start_row, stop_row-1))
+        stop_row = self.n_records if stop_row < 0 else min(self.n_records, stop_row)
+        start_row = max(0, min(start_row, stop_row-1))
         if copy:
             fp = None
             try:
@@ -2377,7 +2375,7 @@ class JIo(JIoBase):
                 zip_type_i = -zip_type_i-1
                 return data if zip_type_i == NO_ZIP else self.VAL_unzip0(data)
 
-            return self.VAL_unzip(self.pad0_byte, data)
+            return self.VAL_unzip(self.pad_byte, data)
 
         except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error, \
                 ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError) as e: # pragma: no cover
@@ -2477,10 +2475,10 @@ class JIo(JIoBase):
             if data_size+1 > MAX_INDEX_SIZE: # pragma: no cover
                 # strip the key length to match max index size
                 while True:
-                    key = key[:-pad_size]
+                    key = key[:pad_size]
                     data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days)
                     data_size = len(data)
-                    if data_size+1 <= MAX_INDEX_SIZE and key not in self.key_table:
+                    if data_size+1 <= MAX_INDEX_SIZE and key not in self.key_table or not key:
                         break
 
                     pad_size = 1
@@ -3149,48 +3147,6 @@ class JIo(JIoBase):
             fp.write(line)
 
         return line if not decode else self.KEY_loads(line)
-
-    def shift_keys(self, fp:IO, start:int, offset:int=1, size:int=1, block_size:Optional[int]=None): # pragma: no cover
-        """Displace continuous series of index row metadata entries horizontally to allocate open layout rows block zones.
-
-        Args:
-            fp (IO): Destination open streaming stream file handler context.
-            start (int): Absolute baseline rows row index coordinate position where shifting procedures activate.
-            offset (int, optional): Relocation displacement coefficient multiplier integer adjusting target rows coordinates. Defaults to 1.
-            size (int, optional): Combined length measure tracking total logical rows objects to shift. Defaults to 1.
-            block_size (Optional[int], optional): Internal parsing lookahead width constraining buffered file operations rows loops. Defaults to None.
-        """
-        n_lines = self.n_lines
-        index_size = self.index_size
-        if block_size is None:
-            block_size = self.window_size
-
-        n_blocks = size // block_size
-        if (size % block_size) > 0:
-            n_blocks += 1
-
-        _KEY_rows = self._KEY_rows
-        _DEAD_rows = self._DEAD_rows
-        src_row = min(start+size, n_lines)
-
-        for row_id in range(n_blocks):
-            _KEY_rows.pop(row_id, None)
-            _DEAD_rows.pop(row_id, None)
-
-            if src_row >= block_size:
-                rd_size = block_size * index_size
-                src_row -= block_size
-            else:
-                rd_size = (src_row - start) * index_size
-                src_row = start
-
-            if rd_size <= 0:
-                break
-
-            fp.seek(HEADER_SIZE + src_row * index_size)
-            rd_data = fp.read(rd_size)
-            fp.seek(HEADER_SIZE + (src_row + offset) * index_size)
-            fp.write(rd_data)
 
     def resize_keys(self, fp:IO, index_size:int, min_ver:bool=False):
         """Re-structure physical index layout files modifying rows padding block sizing constraints permanently.

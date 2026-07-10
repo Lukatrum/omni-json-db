@@ -714,7 +714,7 @@ def sorted_by_rules(rows:List[Tuple[str,tuple]], rules:Any, reverse:bool=None) -
     if len(orderable) > 1:
         try:
             orderable.sort(key=lambda v: v[0], reverse=reverse)
-        except TypeError:
+        except TypeError: # pragma: no cover
             orderable = [(tuple(str(v) if not isinstance(v, str) else v for v in sort_key), key, val) for sort_key,key,val in orderable]
             orderable.sort(key=lambda v: v[0], reverse=reverse)
 
