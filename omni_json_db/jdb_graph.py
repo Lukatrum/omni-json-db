@@ -81,6 +81,9 @@ class GraphDb(JDb):
  
         Returns:
             bool: True if a write occurred, False if nothing changed.
+
+        Raises:
+            KeyError: If ``node_id`` is empty or contains ``':'``.
         """
         if not node_id or node_id.find(':') >= 0:
             raise KeyError('invalid node_id')
@@ -174,7 +177,8 @@ class GraphDb(JDb):
             bool: True if a write occurred, False if nothing changed.
  
         Raises:
-            ValueError: If ``u`` equals ``v`` (self-loops are not allowed).
+            KeyError: If ``u`` equals ``v`` (self-loops are not allowed), or if
+                either id is empty or contains ``':'``.
         """
         if u == v:
             raise KeyError('u cannot be v')
@@ -186,7 +190,7 @@ class GraphDb(JDb):
             return self.f_add_edge(fp, u, v, directed, **properties)
 
     def add_temporal_edge(self, u:str, v:str, directed:bool, expire_days:Union[int,float,str,dt_date,datetime]):
-        """Add temporal Edge with expire days.
+        """Add a temporal edge that expires after the given number of days.
 
         Args:
             u (str): Source node identifier.
@@ -212,7 +216,11 @@ class GraphDb(JDb):
                 - float : timestamp
 
         Returns:
-            bool: True if add edge successfully, Otherwise return False.
+            bool: True if the edge was added or its expiry updated, False otherwise.
+
+        Raises:
+            KeyError: If ``u`` equals ``v`` (self-loops are not allowed), or if
+                either id is empty or contains ``':'``.
         """
         if u == v:
             raise KeyError('u cannot be v')
@@ -375,14 +383,15 @@ class GraphDb(JDb):
         """
         i_deg = o_deg = u_deg = 0
         with self.open() as fp:
-            for (src,edge_type,dst),_row_id in self.f_iter_edges(fp):
-                if edge_type == '>':
-                    if dst == node_id:
+            if self.f_has_node(fp, node_id):
+                for entry in self.f_get_adj(fp, node_id):
+                    d = entry[0]
+                    if d == '<':
                         i_deg += 1
-                    elif src == node_id:
+                    elif d == '>':
                         o_deg += 1
-                elif dst == node_id or src == node_id:
-                    u_deg += 1
+                    elif d == '-':
+                        u_deg += 1
 
         return {'in': i_deg, 'out': o_deg, 'undirected': u_deg, 'total': i_deg + o_deg + u_deg}
 
@@ -1594,7 +1603,7 @@ class GraphDb(JDb):
         Returns:
             bool: True if a write occurred, False if nothing changed.
         """
-        if not node_id or node_id.find(':') >= 0: # pragma: no cover
+        if not node_id or node_id.find(':') >= 0:
             raise JKeyError('invalid node_id')
 
         node_key = f'N:{node_id}:'
@@ -1744,10 +1753,10 @@ class GraphDb(JDb):
         Returns:
             bool: True if a write occurred, False if nothing changed.
         """
-        if u == v: # pragma: no cover
+        if u == v:
             raise JKeyError('u cannot be v')
 
-        if not u or not v or u.find(':') >= 0 or v.find(':') >= 0: # pragma: no cover
+        if not u or not v or u.find(':') >= 0 or v.find(':') >= 0:
             raise JKeyError('invalid u or v')
 
         edge_key = self._generate_edge_key(u, v, directed)
