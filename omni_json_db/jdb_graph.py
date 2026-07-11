@@ -10,21 +10,30 @@ from .jdb_lite import JDbReader
 from .jdb_file import JFilesBase
 from .jdb import JDb
 from .jdb_query import Condition, Query
+from .utils import JKeyError
 
 MAX_RECURSION = 500
 
 class GraphDb(JDb):
     """Graph database layer built on top of the JDb key-value store.
- 
+
     Nodes are stored under keys of the form ``N:{node_id}:`` with a dict of
     properties as the value. Edges are stored under ``E:{u}:>:{v}:`` for
     directed edges and ``E:{u}:-:{v}:`` for undirected edges (endpoints
     sorted lexicographically), also with a dict of properties as the value.
- 
-    Provides node/edge CRUD, neighborhood queries, and classic graph
-    algorithms (BFS/Dijkstra shortest path, DFS traversal, cycle detection,
-    topological sort, connected components) executed directly over the
-    underlying key table.
+    Edge records are the single source of truth; each node additionally has
+    a derived adjacency blob under ``X:{node_id}:`` (a list of
+    direction-prefixed neighbor ids) that traversals read on demand instead
+    of scanning every edge. ``verify_index()``/``reindex()`` detect and
+    repair drift between the two if an edge key is ever created or deleted
+    outside ``add_edge``/``remove_edge``.
+
+    Provides node/edge CRUD, neighborhood queries (including k-hop and ego
+    subgraphs), direction- and property-filtered traversal, classic graph
+    algorithms (BFS/Dijkstra shortest path, all shortest paths, DFS
+    traversal, cycle detection, topological sort, weakly/strongly connected
+    components), and centrality measures (degree, PageRank, betweenness)
+    executed directly over the underlying key table.
     """
     __slots__ = ()
 
@@ -39,20 +48,18 @@ class GraphDb(JDb):
             key_limit:Union[str,int,None]='no',\
             cache_limit:int=0,\
             **kwargs):
-        """
-        Initialize the transactional JDb controller object mapping configurations sheets models.
- 
+        """Initialize the GraphDb controller over a JDb key-value store.
+
         Args:
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None], optional): File path, memory buffer, or network host.
-            data_type (Union[str, int, None], optional): Serialization format
+            data_type (Union[str, int, None], optional): Serialization format.
             zip_type (Union[str, int, None], optional): Compression algorithm to use.
             key_limit (Union[str, int, None], optional): Key table limitation constraint.
             cache_limit (int, optional): In-memory object cache limit.
             **kwargs: Extra arguments passed to internal components.
-        
+
         Raises:
             TypeError: Raised if provided arguments are of the incorrect type.
- 
         """
         super().__init__(KEY_file=KEY_file,
             cache_limit=cache_limit,
@@ -800,6 +807,231 @@ class GraphDb(JDb):
 
         return result
 
+    def subgraph(self, nodes:Any) -> Dict[str,Any]:
+        """Extract the induced subgraph over an explicit set of nodes.
+
+        Unlike ``ego_graph`` (which derives its node set from a BFS radius),
+        the node set here is supplied directly by the caller. Node ids that
+        do not exist in the graph are silently skipped.
+
+        Args:
+            nodes (Any): Iterable of node identifiers to include.
+
+        Returns:
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
+                dst): props}}`` for the induced subgraph — every edge of the
+                graph whose endpoints are both in ``nodes``. Empty node/edge
+                maps if none of the given ids exist.
+        """
+        result = {'nodes': {}, 'edges': {}}
+        with self.open() as fp:
+            f_has_node = self.f_has_node
+            node_set = {nid for nid in nodes if f_has_node(fp, nid)}
+            if not node_set:
+                return result
+
+            f_get_node = self.f_get_node
+            for nid in node_set:
+                result['nodes'][nid] = f_get_node(fp, nid)
+
+            # collect induced edges: for every node in the set, walk its
+            # outgoing/undirected adjacency and keep edges whose other
+            # endpoint is also in the set (each edge counted once)
+            f_read = self.f_read
+            f_get_adj = self.f_get_adj
+            _generate_edge_key = self._generate_edge_key
+            edge_re = self.EDGE_RE
+            seen = set()
+            for nid in node_set:
+                for entry in f_get_adj(fp, nid):
+                    d, other = entry[0], entry[1:]
+                    if other in node_set:
+                        edge_key = _generate_edge_key(nid, other, d == '>') if d != '<' else None
+                        if edge_key is not None and edge_key not in seen:
+                            seen.add(edge_key)
+                            matched = edge_re.match(edge_key)
+                            if matched:
+                                result['edges'][matched.groups()] = f_read(fp, edge_key, copy=False)
+
+        return result
+
+    def export_graph(self, nodes:Optional[Any]=None) -> Dict[str,Any]:
+        """Export the graph (or an induced subgraph) to a portable format.
+
+        The result is plain dicts/lists of JSON-serializable values, suitable
+        for ``json.dump``, backup, migration to another store, or conversion
+        to a third-party graph library (e.g. build a ``networkx`` graph by
+        adding each entry in ``'nodes'`` via ``G.add_node(id, **props)`` and
+        each entry in ``'edges'`` via ``G.add_edge(u, v, **properties)``,
+        adding both directions for ``directed=False`` entries if the target
+        is a directed graph type).
+
+        Args:
+            nodes (Optional[Any], optional): If given, export only the
+                induced subgraph over these node ids (see ``subgraph``).
+                Defaults to None (export the whole graph).
+
+        Returns:
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': [{'u': src,
+                'v': dst, 'directed': bool, 'properties': props}, ...]}``.
+        """
+        if nodes is not None:
+            sub = self.subgraph(nodes)
+            edges = [
+                {'u': src, 'v': dst, 'directed': edge_type == '>', 'properties': props}
+                for (src, edge_type, dst), props in sub['edges'].items()
+            ]
+            return {'nodes': sub['nodes'], 'edges': edges}
+
+        with self.open() as fp:
+            out_nodes = {nid: self.f_get_node(fp, nid) for nid, _row in self.f_iter_nodes(fp)}
+            out_edges = [
+                {'u': src, 'v': dst, 'directed': edge_type == '>', 'properties': props}
+                for (src, edge_type, dst), _row in self.f_iter_edges(fp)
+                for props in [self.f_get_edge(fp, src, dst, edge_type == '>')]
+            ]
+
+        return {'nodes': out_nodes, 'edges': out_edges}
+
+    def import_graph(self, data:Dict[str,Any]) -> Dict[str,int]:
+        """Load a graph previously produced by ``export_graph`` into this graph.
+
+        Adds every node and edge from ``data`` via ``add_node``/``add_edge``,
+        so nodes/edges that already exist have their properties merged rather
+        than duplicated or overwritten wholesale. Does not clear any existing
+        data first — call ``clear()`` beforehand for a full replace.
+
+        Args:
+            data (Dict[str, Any]): Export data in the format produced by
+                ``export_graph`` — ``{'nodes': {id: props}, 'edges': [{'u':
+                src, 'v': dst, 'directed': bool, 'properties': props}, ...]}``.
+
+        Returns:
+            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges':
+                n_edges_written}`` — counts of add calls that actually wrote
+                (new or changed), per the return value of ``add_node``/
+                ``add_edge``.
+        """
+        add_node = self.add_node
+        add_edge = self.add_edge
+        n_nodes = sum(1 for nid, props in data.get('nodes', {}).items() if add_node(nid, **(props or {})))
+        n_edges = sum(1 for e in data.get('edges', [])
+                      if add_edge(e['u'], e['v'], directed=e.get('directed', True), **(e.get('properties') or {})))
+
+        return {'nodes': n_nodes, 'edges': n_edges}
+
+    def to_networkx(self, nodes:Optional[Any]=None) -> Any:
+        """Convert this graph, or an induced subgraph, to a networkx graph.
+
+        Requires the optional ``networkx`` package (imported lazily). Reads
+        directly via ``f_iter_nodes``/``f_get_node``/``f_iter_edges``/
+        ``f_get_edge`` inside a single transaction, rather than building an
+        intermediate ``export_graph()`` dict.
+
+        A networkx graph is homogeneous — fully directed or fully undirected
+        — while GraphDb allows directed and undirected edges to coexist. If
+        every included edge has the same direction, the matching networkx
+        type is returned (``nx.Graph`` if all undirected, ``nx.DiGraph`` if
+        all directed). Otherwise a ``nx.DiGraph`` is returned with each
+        undirected edge added as a reciprocal pair of directed edges (the
+        standard way to represent an undirected edge in a directed graph),
+        so no edge is lost.
+
+        Args:
+            nodes (Optional[Any], optional): If given, include only these
+                node ids and the edges between them (an induced subgraph,
+                found by filtering the full node/edge scan — not an
+                adjacency walk). Defaults to None (the whole graph).
+
+        Returns:
+            networkx.Graph or networkx.DiGraph: The converted graph, with
+                node/edge properties carried over as networkx attributes.
+
+        Raises:
+            ImportError: If the ``networkx`` package is not installed.
+        """
+        try:
+            import networkx as nx # pylint: disable=import-outside-toplevel
+        except ImportError as e:
+            raise ImportError("to_networkx() requires the 'networkx' package (pip install networkx)") from e
+
+        node_filter = set(nodes) if nodes is not None else None
+        with self.open() as fp:
+            f_get_node = self.f_get_node
+            node_items = [
+                (nid, dict(f_get_node(fp, nid) or {}))
+                for nid, _row in self.f_iter_nodes(fp)
+                if node_filter is None or nid in node_filter
+            ]
+
+            f_get_edge = self.f_get_edge
+            edges = []
+            for (src, edge_type, dst), _row in self.f_iter_edges(fp):
+                if node_filter is not None and (src not in node_filter or dst not in node_filter):
+                    continue
+                props = dict(f_get_edge(fp, src, dst, edge_type == '>') or {})
+                edges.append((src, dst, edge_type == '>', props))
+
+        if edges and all(not directed for _u, _v, directed, _p in edges):
+            G = nx.Graph()
+            G.add_nodes_from(node_items)
+            for u, v, _directed, props in edges:
+                G.add_edge(u, v, **props)
+            return G
+
+        G = nx.DiGraph()
+        G.add_nodes_from(node_items)
+        for u, v, directed, props in edges:
+            G.add_edge(u, v, **props)
+            if not directed:
+                G.add_edge(v, u, **props)
+
+        return G
+
+    def from_networkx(self, G:Any) -> Dict[str,int]:
+        """Import nodes and edges from a networkx graph object.
+
+        A ``Graph``/``MultiGraph`` is treated as fully undirected; a
+        ``DiGraph``/``MultiDiGraph`` as fully directed. For a multigraph,
+        only the last parallel edge between a given pair is kept, since
+        GraphDb stores a single record per ``(u, v, direction)``. Writes
+        directly via ``f_add_node``/``f_add_edge`` inside a single write
+        transaction (rather than one ``open()`` per node/edge through
+        ``add_node``/``add_edge``), while still applying the same id and
+        self-loop validation those public methods perform, so nodes/edges
+        that already exist have their properties merged rather than
+        duplicated.
+
+        Args:
+            G (Any): A networkx graph object (duck-typed: only ``is_directed()``,
+                ``nodes(data=True)``, and ``edges(data=True)`` are used, so no
+                import of ``networkx`` is required by this method itself).
+
+        Returns:
+            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges':
+                n_edges_written}``.
+
+        Raises:
+            KeyError: If a node id is empty or contains ``':'``, or if an
+                edge is a self-loop (``u == v``) — the same validation
+                ``add_node``/``add_edge`` perform.
+        """
+        directed = G.is_directed()
+        n_nodes = n_edges = 0
+        with self.open(read_only=False) as fp:
+            f_add_node = self.f_add_node
+            f_add_edge = self.f_add_edge
+
+            for nid, attrs in G.nodes(data=True):
+                if f_add_node(fp, nid, **dict(attrs)):
+                    n_nodes += 1
+
+            for u, v, attrs in G.edges(data=True):
+                if f_add_edge(fp, u, v, directed, **dict(attrs)):
+                    n_edges += 1
+
+        return {'nodes': n_nodes, 'edges': n_edges}
+
     def degree_centrality(self) -> Dict[str,float]:
         """Compute degree centrality for every node.
 
@@ -1088,6 +1320,91 @@ class GraphDb(JDb):
 
         return components
 
+    def verify_index(self) -> Dict[str,list]:
+        """Check the persisted adjacency blobs against the edge records.
+ 
+        Compares the adjacency entries implied by the ``E:`` edge records
+        (the source of truth) against what is actually stored in each node's
+        ``X:`` blob, without modifying anything. This detects drift caused by
+        an edge key being deleted (or otherwise written) directly, bypassing
+        ``remove_edge``/``f_remove_edge``, which would leave a stale entry in
+        the surviving endpoint's adjacency and never touch the deleted edge's
+        own endpoint.
+ 
+        Returns:
+            Dict[str, list]: ``{'missing': [(node_id, entry), ...], 'orphan':
+                [(node_id, entry), ...]}`` sorted for stable output.
+                ``missing`` entries should exist (a backing edge is present)
+                but do not. ``orphan`` entries exist in a node's adjacency but
+                have no backing edge — the symptom of an edge deleted outside
+                ``remove_edge``. Both empty means the index is consistent.
+        """
+        with self.open() as fp:
+            expected = {}
+            for (src, edge_type, dst), _row_id in self.f_iter_edges(fp):
+                if edge_type == '>':
+                    expected.setdefault(src, set()).add(f'>{dst}')
+                    expected.setdefault(dst, set()).add(f'<{src}')
+                else:
+                    expected.setdefault(src, set()).add(f'-{dst}')
+                    expected.setdefault(dst, set()).add(f'-{src}')
+
+            actual = {}
+            for adj_id, (_row_id, adj) in self.f_iter_adjs(fp):
+                actual[adj_id] = set(adj)
+
+        missing = []
+        orphan = []
+        for node_id in sorted(set(expected) | set(actual)):
+            exp = expected.get(node_id, set())
+            act = actual.get(node_id, set())
+            for entry in sorted(exp - act):
+                missing.append((node_id, entry))
+            for entry in sorted(act - exp):
+                orphan.append((node_id, entry))
+
+        return {'missing': missing, 'orphan': orphan}
+
+    def reindex(self) -> Dict[str,int]:
+        """Rebuild every adjacency blob from the edge records (source of truth).
+ 
+        Drops every ``X:`` adjacency key and regenerates it from the ``E:``
+        edge records. Use to repair adjacency drift — most commonly after an
+        edge key was deleted directly (e.g. via a raw key delete or an
+        external process) instead of through ``remove_edge``/
+        ``f_remove_edge``, which leaves the other endpoint's adjacency
+        pointing at a now-nonexistent edge.
+ 
+        Returns:
+            Dict[str, int]: ``{'removed': n_old_adjacency_keys, 'rebuilt':
+                n_new_adjacency_keys}``.
+        """
+        with self.open() as fp:
+            io, fp, _key_fp = self.f_get_fp(fp)
+            key_table = io.key_table
+            adj_match = self.ADJ_RE.match
+            old_keys = [(row_id, key) for key, row_id in key_table.items() if adj_match(key)]
+
+            new_adj = {}
+            for (src, edge_type, dst), _row_id in self.f_iter_edges(fp):
+                if edge_type == '>':
+                    new_adj.setdefault(src, []).append(f'>{dst}')
+                    new_adj.setdefault(dst, []).append(f'<{src}')
+                else:
+                    new_adj.setdefault(src, []).append(f'-{dst}')
+                    new_adj.setdefault(dst, []).append(f'-{src}')
+
+            io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
+            f_delete = self.f_delete
+            for row_id, key in sorted(old_keys, reverse=True):
+                f_delete(fp, key, row=row_id)
+
+            f_write = self.f_write
+            for node_id, entries in new_adj.items():
+                f_write(fp, f'X:{node_id}:', entries, overwrite=True, max_wsize=0)
+
+        return {'removed': len(old_keys), 'rebuilt': len(new_adj)}
+
     def f_iter_edges(self, fp:Dict[int,IO]) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
         """Iterate over all edges from the key table.
  
@@ -1130,7 +1447,7 @@ class GraphDb(JDb):
     def f_iter_adjs(self, fp:Dict[int,IO]) -> Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
         """Iterate over all adjacencies (persisted per-node adjacency lists).
  
-        Each node with at least one edge has a adjacency stored under
+        Each node with at least one edge has an adjacency stored under
         ``X:{node_id}:`` whose value is a list of direction-prefixed neighbor
         ids: ``'>v'`` (outgoing directed edge to ``v``), ``'<u'`` (incoming
         directed edge from ``u``), or ``'-x'`` (undirected edge with ``x``).
@@ -1267,7 +1584,7 @@ class GraphDb(JDb):
         If the node already exists, ``properties`` are merged over the stored
         properties (shallow update); nothing is written when the merge does
         not change anything. Low-level helper; must be called inside an
-        ``open()`` context. Callers are responsible for validating ``node_id``.
+        ``open()`` context. 
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -1277,6 +1594,9 @@ class GraphDb(JDb):
         Returns:
             bool: True if a write occurred, False if nothing changed.
         """
+        if not node_id or node_id.find(':') >= 0: # pragma: no cover
+            raise JKeyError('invalid node_id')
+
         node_key = f'N:{node_id}:'
         if node_key not in self.io.key_table:
             return self.f_write(fp, node_key, properties)
@@ -1411,8 +1731,7 @@ class GraphDb(JDb):
         endpoint) when the edge is new. If the edge already exists,
         ``properties`` are merged over the stored properties and nothing is
         written when the merge does not change anything. Low-level helper;
-        must be called inside an ``open()`` context. Callers are responsible
-        for validating ``u``/``v`` and rejecting self-loops.
+        must be called inside an ``open()`` context.
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -1425,6 +1744,12 @@ class GraphDb(JDb):
         Returns:
             bool: True if a write occurred, False if nothing changed.
         """
+        if u == v: # pragma: no cover
+            raise JKeyError('u cannot be v')
+
+        if not u or not v or u.find(':') >= 0 or v.find(':') >= 0: # pragma: no cover
+            raise JKeyError('invalid u or v')
+
         edge_key = self._generate_edge_key(u, v, directed)
         key_table = self.io.key_table
         if edge_key not in key_table:

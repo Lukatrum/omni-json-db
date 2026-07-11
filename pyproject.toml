@@ -7,7 +7,7 @@ exclude = ["artwork", "tests"]
 
 [project]
 name = "omni_json_db"
-version = "2.13.54"
+version = "2.13.55"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -46,6 +46,7 @@ keywords = [
 	"multiprocessing",
 	"multithreading",
 	"network",
+	"networkx",
 	"nosql",
 	"persistence",
 	"pickle",

@@ -2,6 +2,7 @@
 import unittest, time, random, threading, inspect, re, os, io
 import datetime as dt
 import sqlite3
+import networkx as nx
 from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, \
                     JNetFiles, JDiskFiles, run_files_server, \
                     GraphDb, loads, dumps, Query
@@ -727,6 +728,150 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(ego3['edges'][('A', '>', 'B')], {'w': 7})
 
             # =====================================================
+            # subgraph(nodes): induced subgraph over an explicit node set
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True), ('C', 'D', True)], nodes=('ISO',))
+            sg = db.subgraph({'A', 'B', 'C'})
+            self.assertEqual(set(sg['nodes']), {'A', 'B', 'C'})
+            self.assertEqual(set(sg['edges']), {('A', '>', 'B'), ('A', '>', 'C'), ('B', '>', 'C')})
+            self.assertNotIn(('C', '>', 'D'), sg['edges'])          # D excluded from the set
+
+            sg2 = db.subgraph({'A', 'ZZZ', 'ISO'})                  # missing id silently skipped
+            self.assertEqual(set(sg2['nodes']), {'A', 'ISO'})
+            self.assertEqual(sg2['edges'], {})                       # A and ISO are disconnected
+
+            self.assertEqual(db.subgraph([]), {'nodes': {}, 'edges': {}})
+            self.assertEqual(db.subgraph(['ZZZ']), {'nodes': {}, 'edges': {}})
+
+            # =====================================================
+            # #4 export_graph() / import_graph(): backup, migration, interop
+            # =====================================================
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', False, {'w': 2})], nodes=('ISO',))
+            db.add_node('A', name='alice')
+
+            exp = db.export_graph()
+            self.assertEqual(set(exp['nodes']), {'A', 'B', 'C', 'ISO'})
+            self.assertEqual(len(exp['edges']), 2)
+            self.assertTrue(any(e['u'] == 'A' and e['v'] == 'B' and e['directed'] is True
+                                and e['properties'] == {'w': 1} for e in exp['edges']))
+            self.assertTrue(any(e['directed'] is False and e['properties'] == {'w': 2}
+                                for e in exp['edges']))
+
+            # round-trip into a fresh, independent graph
+            db_fresh = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
+            r = db_fresh.import_graph(exp)
+            self.assertEqual(r, {'nodes': 4, 'edges': 2})
+            self.assertEqual(db_fresh.get_node('A'), db.get_node('A'))
+            self.assertEqual(db_fresh.get_edge('A', 'B', directed=True), {'w': 1})
+            self.assertEqual(db_fresh.get_edge('B', 'C', directed=False), {'w': 2})
+            self.assertTrue(db_fresh.has_node('ISO'))
+            self.assertEqual(db_fresh.verify_index(), {'missing': [], 'orphan': []})
+
+            # export a subset via the nodes= filter
+            exp_sub = db.export_graph(nodes={'A', 'B'})
+            self.assertEqual(set(exp_sub['nodes']), {'A', 'B'})
+            self.assertEqual(len(exp_sub['edges']), 1)
+            self.assertEqual(exp_sub['edges'][0]['u'], 'A')
+            self.assertEqual(exp_sub['edges'][0]['v'], 'B')
+
+            # import into a non-empty graph merges properties on existing nodes
+            db_existing = GraphDb(data_type=jdb.data_type)
+            db_existing.add_node('A', extra='keep')
+            db_existing.import_graph(exp)
+            self.assertEqual(db_existing.get_node('A'), {'extra': 'keep', 'name': 'alice'})
+
+
+            # =====================================================
+            # #4 to_networkx() / from_networkx(): interop with networkx
+            # (skipped entirely if networkx is not installed)
+            # =====================================================
+            # all-directed -> exactly nx.DiGraph
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', True, {'w': 2})])
+            db.add_node('A', name='alice')
+            G = db.to_networkx()
+            self.assertIs(type(G), nx.DiGraph)
+            self.assertEqual(set(G.nodes), {'A', 'B', 'C'})
+            self.assertEqual(G.nodes['A']['name'], 'alice')
+            self.assertEqual(G['A']['B']['w'], 1)
+            self.assertFalse(G.has_edge('B', 'A'))              # directed, no reciprocal
+
+            # all-undirected -> exactly nx.Graph
+            build(db, [('X', 'Y', False, {'w': 5}), ('Y', 'Z', False)])
+            G2 = db.to_networkx()
+            self.assertIs(type(G2), nx.Graph)
+            self.assertEqual(G2['X']['Y']['w'], 5)
+
+            # mixed -> nx.DiGraph, undirected edges become a reciprocal pair
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', False, {'w': 2})])
+            G3 = db.to_networkx()
+            self.assertIs(type(G3), nx.DiGraph)
+            self.assertTrue(G3.has_edge('A', 'B'))
+            self.assertFalse(G3.has_edge('B', 'A'))              # directed stays one-way
+            self.assertTrue(G3.has_edge('B', 'C') and G3.has_edge('C', 'B'))  # undirected mirrored
+
+            # subset conversion via nodes=
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'D', True)])
+            Gs = db.to_networkx(nodes={'A', 'B'})
+            self.assertEqual(set(Gs.nodes), {'A', 'B'})
+            self.assertEqual(set(Gs.edges), {('A', 'B')})
+
+            # from_networkx: DiGraph -> directed edges
+            Gd = nx.DiGraph()
+            Gd.add_node('A', name='alice')
+            Gd.add_edge('A', 'B', w=1)
+            db_nx1 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            r_nx1 = db_nx1.from_networkx(Gd)
+            self.assertEqual(r_nx1, {'nodes': 2, 'edges': 1})
+            self.assertEqual(db_nx1.get_node('A'), {'name': 'alice'})
+            self.assertEqual(db_nx1.get_edge('A', 'B', directed=True), {'w': 1})
+            self.assertIsNone(db_nx1.get_edge('A', 'B', directed=False))
+
+            # from_networkx: Graph -> undirected edges
+            Gu = nx.Graph()
+            Gu.add_edge('X', 'Y', w=5)
+            db_nx2 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            db_nx2.from_networkx(Gu)
+            self.assertEqual(db_nx2.get_edge('X', 'Y', directed=False), {'w': 5})
+            self.assertEqual(db_nx2.get_edge('Y', 'X', directed=False), {'w': 5})  # order agnostic
+
+            # full round trip is faithful for a purely directed graph
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', True, {'w': 2})])
+            Grt = db.to_networkx()
+            db_nx3 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            db_nx3.from_networkx(Grt)
+            self.assertEqual(db_nx3.get_neighbors('A'), db.get_neighbors('A'))
+            self.assertEqual(db_nx3.get_edge('A', 'B', directed=True), db.get_edge('A', 'B', directed=True))
+
+            # full round trip is faithful for a purely undirected graph
+            build(db, [('X', 'Y', False, {'w': 9})])
+            Gru = db.to_networkx()
+            db_nx4 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            db_nx4.from_networkx(Gru)
+            self.assertEqual(db_nx4.get_edge('X', 'Y', directed=False), db.get_edge('X', 'Y', directed=False))
+            self.assertIsNone(db_nx4.get_edge('X', 'Y', directed=True))
+
+            # from_networkx uses f_add_node/f_add_edge directly (single write
+            # transaction), but must still reject the same things add_node/
+            # add_edge would: self-loops and ':' in an id
+            G_selfloop = nx.DiGraph()
+            G_selfloop.add_edge('A', 'A', w=1)
+            db_nx5 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            with self.assertRaises(KeyError):
+                db_nx5.from_networkx(G_selfloop)
+
+            G_bad_node = nx.DiGraph()
+            G_bad_node.add_node('bad:id')
+            db_nx6 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            with self.assertRaises(KeyError):
+                db_nx6.from_networkx(G_bad_node)
+
+            G_bad_edge = nx.DiGraph()
+            G_bad_edge.add_edge('A', 'bad:v')
+            db_nx7 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
+            with self.assertRaises(KeyError):
+                db_nx7.from_networkx(G_bad_edge)
+
+            # =====================================================
             # direction-filtered traversal (bfs_shortest_path / dfs_traverse)
             # =====================================================
             build(db, [('A', 'B', True), ('B', 'C', True)])
@@ -840,6 +985,53 @@ class TestJDb(unittest.TestCase):
             # nodes with no edges are singleton components
             build(db, [], nodes=('X', 'Y', 'Z'))
             self.assertEqual(sorted(sorted(c) for c in db.strongly_connected_components()), [['X'], ['Y'], ['Z']])
+
+            # =====================================================
+            # verify_index() / reindex(): adjacency-index consistency tools
+            # =====================================================
+            # a clean graph must report no drift
+            build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', False)])
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+
+            # directed edge deleted directly (bypassing remove_edge) leaves
+            # a stale adjacency entry on BOTH endpoints
+            del db[db._generate_edge_key('A', 'B', True)]
+            v = db.verify_index()
+            self.assertIn(('A', '>B'), v['orphan'])
+            self.assertIn(('B', '<A'), v['orphan'])
+            self.assertEqual(v['missing'], [])
+            self.assertIn('B', db.get_neighbors('A'))          # phantom neighbor before repair
+
+            res = db.reindex()
+            self.assertGreaterEqual(res['removed'], 1)
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertNotIn('B', db.get_neighbors('A'))       # phantom neighbor gone
+            self.assertNotIn('A', db.get_neighbors('B'))
+            self.assertIn('C', db.get_neighbors('A'))          # surviving edges untouched
+            self.assertIn('C', db.get_neighbors('B'))
+
+            # undirected edge deleted directly: stale entry on both endpoints
+            build(db, [('X', 'Y', False), ('Y', 'Z', True)])
+            del db[db._generate_edge_key('X', 'Y', False)]
+            v2 = db.verify_index()
+            self.assertIn(('X', '-Y'), v2['orphan'])
+            self.assertIn(('Y', '-X'), v2['orphan'])
+            db.reindex()
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertNotIn('Y', db.get_neighbors('X'))
+            self.assertIn('Z', db.get_neighbors('Y'))           # surviving edge untouched
+
+            # an edge key written directly (bypassing add_edge) is detected
+            # as 'missing' adjacency rather than 'orphan'
+            build(db, [('A', 'B', True)], nodes=('C',))
+            db[db._generate_edge_key('A', 'C', True)] = {}
+            v3 = db.verify_index()
+            self.assertIn(('A', '>C'), v3['missing'])
+            self.assertIn(('C', '<A'), v3['missing'])
+            self.assertEqual(v3['orphan'], [])
+            db.reindex()
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertIn('C', db.get_neighbors('A'))
 
             # =====================================================
             self.assertEqual(jdb, db)

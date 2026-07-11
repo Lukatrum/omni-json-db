@@ -9,3 +9,4 @@ portalocker
 pyyaml
 zstandard
 tomli
+networkx
