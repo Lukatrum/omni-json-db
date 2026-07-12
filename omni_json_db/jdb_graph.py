@@ -10,7 +10,7 @@ from .jdb_lite import JDbReader
 from .jdb_file import JFilesBase
 from .jdb import JDb
 from .jdb_query import Condition, Query
-from .utils import JKeyError
+from .utils import JKeyError, JValueError
 
 MAX_RECURSION = 500
 
@@ -128,6 +128,71 @@ class GraphDb(JDb):
         """
         with self.open() as fp:
             return self.f_has_node(fp, node_id)
+
+    def has_edge(self, u:str, v:str, directed:bool=True) -> bool:
+        """Check whether an edge exists.
+
+        Mirrors networkx's ``G.has_edge(u, v)``; ``directed`` is a GraphDb-
+        specific addition (networkx doesn't need it since directedness is a
+        whole-graph property there, whereas GraphDb allows a directed and an
+        undirected edge to coexist between the same pair).
+
+        Args:
+            u (str): Source node identifier.
+            v (str): Target node identifier.
+            directed (bool, optional): Edge direction flag matching how the
+                edge was created. Defaults to True.
+
+        Returns:
+            bool: True if the edge exists, otherwise False.
+        """
+        with self.open() as fp:
+            return self.f_has_edge(fp, u, v, directed)
+
+    def is_directed(self) -> bool:
+        """Check whether the graph contains any directed edge.
+
+        Mirrors networkx's ``G.is_directed()``. Unlike networkx — where
+        directedness is a fixed property of the graph *type* (``Graph`` vs
+        ``DiGraph``) — a GraphDb graph can mix directed and undirected edges,
+        so this reports whether *any* directed edge is present rather than a
+        fixed type. A graph with no edges, or only undirected edges, returns
+        False.
+
+        Returns:
+            bool: True if at least one directed edge exists.
+        """
+        with self.open() as fp:
+            for (_src, edge_type, _dst), _row in self.f_iter_edges(fp):
+                if edge_type == '>':
+                    return True
+
+        return False
+
+    def number_of_nodes(self) -> int:
+        """Count the nodes in the graph.
+
+        Mirrors networkx's ``G.number_of_nodes()`` / ``len(G)``.
+
+        Returns:
+            int: Total node count.
+        """
+        with self.open() as fp:
+            return sum(1 for _nid, _row in self.f_iter_nodes(fp))
+
+    def number_of_edges(self) -> int:
+        """Count the edges in the graph.
+
+        Mirrors networkx's ``G.number_of_edges()``. Counts each edge once
+        regardless of direction (a directed and an undirected edge between
+        the same pair count as two separate edges, since they are distinct
+        records).
+
+        Returns:
+            int: Total edge count.
+        """
+        with self.open() as fp:
+            return sum(1 for _e, _row in self.f_iter_edges(fp))
 
     def find_nodes(self, condition:Union[Dict[str,Any],Condition], date:Optional[Any]=None, limit:int=0, skip:int=0, **kwargs) -> Dict[str,Any]:
         """Find nodes whose properties match a query condition.
@@ -443,7 +508,7 @@ class GraphDb(JDb):
         with self.open() as fp:
             f_get_adj = self.f_get_adj
             neighbors_u = {entry[1:] for entry in f_get_adj(fp, u)}
-            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)} if u != v  else neighbors_u
+            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)} if u != v else neighbors_u
 
         union = neighbors_u | neighbors_v
         if not union:
@@ -800,6 +865,94 @@ class GraphDb(JDb):
 
         return False
 
+    def find_cycle(self, source:Optional[str]=None) -> List[Tuple[str,str,str]]:
+        """Find one cycle in the graph and return its edges.
+
+        Mirrors networkx's ``nx.find_cycle(G, source=None)``: same traversal
+        rule as ``is_cyclic`` (directed edges followed forward only,
+        undirected edges either way), but returns the actual cycle instead
+        of a boolean. If ``source`` is given, only that node is used as a
+        DFS start point (matching networkx); otherwise every node is tried
+        in turn until a cycle is found.
+
+        Args:
+            source (Optional[str], optional): Node id to start the search
+                from. Defaults to None (try every node).
+
+        Returns:
+            List[Tuple[str, str, str]]: The cycle's edges as ``(src,
+                edge_type, dst)`` tuples, in traversal order around the cycle
+                (each edge's ``dst`` equals the next edge's ``src``) — for an
+                undirected edge this may list its endpoints in the opposite
+                order from its canonical storage key (as used by
+                ``subgraph``/``export_graph``), since here they reflect the
+                direction actually walked.
+
+        Raises:
+            JValueError: If ``source`` is given but does not exist, or if no
+                cycle is found (mirrors networkx's ``NetworkXNoCycle``,
+                without requiring the optional ``networkx`` package).
+        """
+        f_get_adj = self.f_get_adj
+        _generate_edge_key = self._generate_edge_key
+
+        def dfs(fp, node_id, visited, stack, path, parent_key=None, level=0):
+            if level >= MAX_RECURSION: # pragma: no cover
+                raise RecursionError
+
+            stack.add(node_id)
+            is_fully_explored = True
+            for entry in f_get_adj(fp, node_id):
+                direction, successor = entry[0], entry[1:]
+                if direction == '<': continue
+                edge_key = _generate_edge_key(node_id, successor, direction == '>')
+                # traversal-order tuple: (from, type, to) as actually walked,
+                # independent of how undirected edges sort their storage key
+                edge_type = '>' if direction == '>' else '-'
+                traversal_tuple = (node_id, edge_type, successor)
+                if edge_key == parent_key:
+                    is_fully_explored = False
+                    continue
+
+                if successor in stack:
+                    cycle = []
+                    for i, (pn, _pk, _pt) in enumerate(path):
+                        if pn == successor:
+                            for _pn2, _pk2, pt2 in path[i:]:
+                                cycle.append(pt2)
+                            break
+                    cycle.append(traversal_tuple)
+                    return cycle
+
+                if successor not in visited:
+                    path.append((node_id, edge_key, traversal_tuple))
+                    found = dfs(fp, successor, visited, stack, path, edge_key, level+1)
+                    path.pop()
+                    if found is not None:
+                        return found
+
+            stack.remove(node_id)
+            if is_fully_explored:
+                visited.add(node_id)
+            return None
+
+        visited = set()
+        with self.open() as fp:
+            if source is not None:
+                if not self.f_has_node(fp, source):
+                    raise JValueError('source node not found')
+                start_nodes = [source]
+            else:
+                start_nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+
+            for node_id in start_nodes:
+                if node_id not in visited:
+                    found = dfs(fp, node_id, visited, set(), [])
+                    if found is not None:
+                        return found
+
+        raise ValueError('No cycle found')
+
     def topological_sort(self) -> List[str]:
         """Topologically sort the graph in a single DFS pass.
  
@@ -815,7 +968,7 @@ class GraphDb(JDb):
             List[str]: Node ids in a valid topological order.
  
         Raises:
-            ValueError: If the graph contains a cycle (not a DAG).
+            JValueError: If the graph contains a cycle (not a DAG).
         """
         f_get_adj = self.f_get_adj
         _generate_edge_key = self._generate_edge_key
@@ -850,7 +1003,7 @@ class GraphDb(JDb):
             for node_id, _row_id in self.f_iter_nodes(fp):
                 if node_id not in visited:
                     if dfs(fp, key_table, node_id, visited, rec_stack, stack):
-                        raise ValueError("Must be a Directed Acyclic Graph.")
+                        raise JValueError("Must be a Directed Acyclic Graph.")
 
         return stack[::-1]
 
@@ -923,6 +1076,83 @@ class GraphDb(JDb):
                             nxt.append(neighbor)
                 if not nxt:
                     break
+                frontier = nxt
+
+        return result
+
+    def descendants(self, source:str) -> Set[str]:
+        """Find every node reachable from a node, at any distance.
+
+        Mirrors networkx's ``nx.descendants(G, source)``: all nodes reachable
+        by following edges forward (unlimited hops), like ``k_hop_neighbors``
+        with no depth cap. Follows outgoing directed edges and undirected
+        edges (``direction='out'``); undirected edges are traversable either
+        way regardless.
+
+        Args:
+            source (str): Start node identifier.
+
+        Returns:
+            Set[str]: Node ids reachable from ``source``, excluding
+                ``source`` itself. Empty if the node is missing or has no
+                outgoing path to any other node.
+        """
+        result = set()
+        with self.open() as fp:
+            if not self.f_has_node(fp, source):
+                return result
+
+            f_get_adj = self.f_get_adj
+            visited = {source}
+            frontier = [source]
+            while frontier:
+                nxt = []
+                for cur in frontier:
+                    for entry in f_get_adj(fp, cur):
+                        d, neighbor = entry[0], entry[1:]
+                        if d == '<': continue
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            result.add(neighbor)
+                            nxt.append(neighbor)
+                frontier = nxt
+
+        return result
+
+    def ancestors(self, source:str) -> Set[str]:
+        """Find every node that can reach a node, at any distance.
+
+        Mirrors networkx's ``nx.ancestors(G, source)``: all nodes that can
+        reach ``source`` by following edges forward (unlimited hops) —
+        equivalent to ``descendants`` on the reversed graph, or
+        ``k_hop_neighbors`` with ``direction='in'`` and no depth cap.
+
+        Args:
+            source (str): Node identifier.
+
+        Returns:
+            Set[str]: Node ids that can reach ``source``, excluding
+                ``source`` itself. Empty if the node is missing or nothing
+                can reach it.
+        """
+        result = set()
+        with self.open() as fp:
+            if not self.f_has_node(fp, source):
+                return result
+
+            f_get_adj = self.f_get_adj
+            visited = {source}
+            frontier = [source]
+            while frontier:
+                nxt = []
+                for cur in frontier:
+                    for entry in f_get_adj(fp, cur):
+                        d, neighbor = entry[0], entry[1:]
+                        if d == '>': continue
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            result.add(neighbor)
+                            nxt.append(neighbor)
                 frontier = nxt
 
         return result
@@ -1381,7 +1611,7 @@ class GraphDb(JDb):
                         if other <= nid: continue  # each undirected edge has 2 entries; visit once
                         props = f_read(fp, _generate_edge_key(nid, other, False), copy=False)
                         w = props.get(weight, 1) if isinstance(props, dict) else 1
-                        if w > seen_max: seen_max = w
+                        seen_max = w if w > seen_max else seen_max
                 if seen_max > 0: max_w = seen_max
 
             def edge_w(u, v):
@@ -1401,8 +1631,9 @@ class GraphDb(JDb):
                 else:
                     nbs = list(neighbors)
                     total = 0.0
-                    for a in range(len(nbs)):
-                        for b in range(len(nbs)):
+                    n = len(nbs)
+                    for a in range(n):
+                        for b in range(n):
                             if a == b: continue
                             v, w2 = nbs[a], nbs[b]
                             if w2 not in out_set.get(v, set()): continue
@@ -1419,15 +1650,17 @@ class GraphDb(JDb):
                 deg_tot = len(node_out) + len(node_in)
                 deg_recip = len(node_out & node_in)
                 denom = 2.0 * (deg_tot * (deg_tot - 1) - 2 * deg_recip)
-                if denom <= 0:
+                if denom <= 0: # pragma: no cover
                     result[nid] = 0.0
                     continue
+
                 neigh_list = list(any_dir)
                 total = 0.0
-                for a in range(len(neigh_list)):
+                n = len(neigh_list)
+                for a in range(n):
                     j = neigh_list[a]
                     w_uj = (1 if j in node_out else 0) + (1 if j in node_in else 0)
-                    for b in range(len(neigh_list)):
+                    for b in range(n):
                         if a == b: continue
                         k_ = neigh_list[b]
                         w_uk = (1 if k_ in node_out else 0) + (1 if k_ in node_in else 0)
@@ -1518,6 +1751,45 @@ class GraphDb(JDb):
             return 0.0
 
         return sum(values) / len(values)
+
+    def transitivity(self) -> float:
+        """Compute the graph's transitivity (global clustering coefficient).
+
+        Mirrors networkx's ``nx.transitivity(G)``: the fraction of all
+        possible triangles that are actually present, using the
+        direction-agnostic notion of "neighbor" (matching ``neighbors``) for
+        every node — networkx's ``transitivity`` does not support directed
+        graphs at all, so unlike ``clustering``/``average_clustering`` there
+        is no directed formula to switch to here; edges are always treated
+        as undirected for this computation regardless of how they were
+        created.
+
+        Returns:
+            float: Transitivity in ``[0, 1]``. 0.0 if the graph has no node
+                with 2 or more neighbors (no possible triangle).
+        """
+        with self.open() as fp:
+            f_get_adj = self.f_get_adj
+            nodes = []
+            adj = {}
+            for nid, _row in self.f_iter_nodes(fp):
+                nodes.append(nid)
+                adj[nid] = {entry[1:] for entry in f_get_adj(fp, nid)}
+
+        total_links = 0
+        total_pairs = 0
+        for nid in nodes:
+            neighbors = adj[nid]
+            k = len(neighbors)
+            if k < 2:
+                continue
+            total_links += sum(len(adj.get(nb, set()) & neighbors) for nb in neighbors)
+            total_pairs += k * (k - 1)
+
+        if total_pairs == 0:
+            return 0.0
+
+        return total_links / total_pairs
 
     def density(self) -> float:
         """Compute the density of the graph.
@@ -1614,7 +1886,7 @@ class GraphDb(JDb):
                         share = alpha * rank[nid] / total_w
                         for t, w in targets:
                             new_rank[t] += share * w
-                    else:
+                    else: # pragma: no cover
                         share = alpha * rank[nid] / len(targets)
                         for t, _w in targets:
                             new_rank[t] += share
@@ -1881,8 +2153,7 @@ class GraphDb(JDb):
                 # build the shortest-path DAG: an edge (u, v) belongs to it
                 # iff it achieves the exact minimum known distance to v
                 preds = {n: [] for n in dist}
-                for u in dist:
-                    du = dist[u]
+                for u,du in dist.items():
                     for neighbor, w in get_adj(u):
                         if neighbor in dist and du + w == dist[neighbor]:
                             preds[neighbor].append(u)

@@ -1317,6 +1317,92 @@ class TestJDb(unittest.TestCase):
             n = db.add_nodes_from(['X', 'Y'])
             self.assertEqual(n, 2)
             self.assertEqual(db.edge_betweenness_centrality(), {})
+
+            # =====================================================
+            # has_edge() / is_directed() / number_of_nodes() / number_of_edges()
+            # =====================================================
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', False)], nodes=('D',))
+            self.assertEqual(db.number_of_nodes(), 4)
+            self.assertEqual(db.number_of_edges(), 2)
+            self.assertTrue(db.has_edge('A', 'B', directed=True))
+            self.assertFalse(db.has_edge('B', 'A', directed=True))     # wrong direction
+            self.assertFalse(db.has_edge('A', 'B', directed=False))    # stored as directed, not undirected
+            self.assertTrue(db.has_edge('B', 'C', directed=False))
+            self.assertTrue(db.has_edge('C', 'B', directed=False))     # order-agnostic
+            self.assertFalse(db.has_edge('X', 'Y'))                    # missing nodes
+            self.assertTrue(db.is_directed())                          # has a directed edge
+
+            build(db, [('A', 'B', False)])
+            self.assertFalse(db.is_directed())                         # purely undirected
+
+            build(db, [])
+            self.assertEqual(db.number_of_nodes(), 0)
+            self.assertEqual(db.number_of_edges(), 0)
+            self.assertFalse(db.is_directed())
+
+            # =====================================================
+            # ancestors() / descendants()
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True)], nodes=('ISO',))
+            self.assertEqual(db.descendants('A'), {'B', 'C'})
+            self.assertEqual(db.ancestors('C'), {'A', 'B'})
+            self.assertEqual(db.descendants('C'), set())               # leaf, nothing further
+            self.assertEqual(db.ancestors('A'), set())                 # root, nothing precedes it
+            self.assertEqual(db.descendants('ISO'), set())
+            self.assertEqual(db.descendants('ZZZ'), set())              # missing node, no error
+            self.assertEqual(db.ancestors('ZZZ'), set())
+
+            # =====================================================
+            # transitivity(): global clustering coefficient
+            # =====================================================
+            # triangle: every possible triad is also a triangle -> 1.0
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
+            self.assertAlmostEqual(db.transitivity(), 1.0)
+
+            # star: every triad (leaf-center-leaf) is open, no triangles -> 0.0
+            build(db, [('H', 'B', False), ('H', 'C', False), ('H', 'D', False)])
+            self.assertAlmostEqual(db.transitivity(), 0.0)
+
+            build(db, [])
+            self.assertEqual(db.transitivity(), 0.0)                    # empty graph
+
+            # =====================================================
+            # find_cycle()
+            # =====================================================
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])
+            cyc = db.find_cycle()
+            self.assertEqual(len(cyc), 3)
+            n = len(cyc)
+            for i in range(n):
+                self.assertEqual(cyc[i][2], cyc[(i + 1) % len(cyc)][0])  # contiguous chain
+
+            # DAG has no cycle -> raises
+            build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
+            with self.assertRaises(ValueError):
+                db.find_cycle()
+
+            # source=: only search from that node; a cycle in a different
+            # component is not found
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True), ('X', 'Y', True)])
+            self.assertEqual(len(db.find_cycle(source='A')), 3)
+            with self.assertRaises(ValueError):
+                db.find_cycle(source='X')
+            with self.assertRaises(ValueError):
+                db.find_cycle(source='ZZZ')                              # missing node
+
+            # a directed AND undirected edge between the same pair form a
+            # 2-edge cycle
+            build(db, [('A', 'B', True)])
+            db.add_edge('A', 'B', directed=False)
+            cyc2 = db.find_cycle()
+            self.assertEqual(len(cyc2), 2)
+            self.assertEqual(cyc2[0][2], cyc2[1][0])
+
+            # a single undirected edge alone is NOT a cycle
+            build(db, [('A', 'B', False)])
+            with self.assertRaises(ValueError):
+                db.find_cycle()
+
             # =====================================================
             self.assertEqual(jdb, db)
             self.assertEqual(jdb.keys[:], db.keys[:])
