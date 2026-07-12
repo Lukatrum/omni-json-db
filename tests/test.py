@@ -913,6 +913,70 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db.degree_centrality()['ISO'], 0.0)
 
             # =====================================================
+            # centrality: closeness_centrality
+            # =====================================================
+            # nx's own reference example: undirected graph with a documented
+            # exact expected result
+            build(db, [('n0', 'n1', False), ('n0', 'n2', False), ('n0', 'n3', False),
+                   ('n1', 'n2', False), ('n1', 'n3', False)])
+            cc = db.closeness_centrality()
+            self.assertAlmostEqual(cc['n0'], 1.0)
+            self.assertAlmostEqual(cc['n1'], 1.0)
+            self.assertAlmostEqual(cc['n2'], 0.75)
+            self.assertAlmostEqual(cc['n3'], 0.75)
+
+            # empty graph / single node
+            build(db, [])
+            self.assertEqual(db.closeness_centrality(), {})
+            db.clear(agree='yes', wait_sec=0, **config)
+            db.add_node('A')
+            self.assertEqual(db.closeness_centrality(), {'A': 0.0})
+
+            # directed graph, default direction='in': a source node (no
+            # predecessors) has closeness 0 — nobody can reach it
+            build(db, [('A', 'B', True), ('A', 'C', True)])
+            cc2 = db.closeness_centrality()
+            self.assertEqual(cc2['A'], 0.0)
+            self.assertGreater(cc2['B'], 0.0)
+            self.assertGreater(cc2['C'], 0.0)
+
+            # isolated node among otherwise-connected nodes scores 0
+            build(db, [('A', 'B', True), ('B', 'C', True)], nodes=('ISO',))
+            self.assertEqual(db.closeness_centrality()['ISO'], 0.0)
+
+            # star graph: center has strictly higher closeness than a leaf
+            build(db, [('H', 'B', False), ('H', 'C', False), ('H', 'D', False)])
+            cc3 = db.closeness_centrality()
+            self.assertGreater(cc3['H'], cc3['B'])
+
+            # u=: single-node query returns a float, matching cc[u]
+            build(db, [('n0', 'n1', False), ('n0', 'n2', False), ('n0', 'n3', False),
+                   ('n1', 'n2', False), ('n1', 'n3', False)])
+            single = db.closeness_centrality(u='n2')
+            self.assertIsInstance(single, float)
+            self.assertAlmostEqual(single, 0.75)
+
+            # wf_improved=False: raw reciprocal of average distance, no
+            # component-size scaling (differs from the default when the
+            # graph has more than one component)
+            build(db, [('A', 'B', False)], nodes=('X', 'Y'))
+            db.add_edge('X', 'Y', directed=False)
+            cc_wf = db.closeness_centrality(wf_improved=True)
+            cc_raw = db.closeness_centrality(wf_improved=False)
+            self.assertNotEqual(cc_wf['A'], cc_raw['A'])
+            self.assertAlmostEqual(cc_raw['A'], 1.0)   # within its own 2-node component
+
+            # distance=: weighted closeness via edge weights; missing the
+            # attribute on an edge defaults that edge's weight to 1
+            build(db, [('A', 'B', False, {'weight': 5}), ('B', 'C', False)])
+            cc_w = db.closeness_centrality(distance='weight')
+            self.assertTrue(all(0.0 <= v <= 1.0 for v in cc_w.values()))
+            # unweighted (hop-count) closeness must differ from weighted here,
+            # since A-B costs 5 while B-C costs the default of 1
+            cc_unw = db.closeness_centrality()
+            self.assertNotAlmostEqual(cc_w['B'], cc_unw['B'])
+
+            # =====================================================
             # Centrality: pagerank
             # =====================================================
             build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', True)])
@@ -926,6 +990,17 @@ class TestJDb(unittest.TestCase):
             pr2 = db.pagerank()
             self.assertAlmostEqual(sum(pr2.values()), 1.0, places=5)
 
+            # weight=: rank splits across out-edges in proportion to edge
+            # weight (matches networkx's default weight='weight'); missing
+            # the property on an edge defaults that edge's weight to 1
+            build(db, [('A', 'B', True, {'weight': 5}), ('A', 'C', True)])
+            pr3 = db.pagerank(max_iter=300, tol=1e-12)
+            self.assertAlmostEqual(sum(pr3.values()), 1.0, places=5)
+            self.assertGreater(pr3['B'], pr3['C'])   # B gets the heavier share
+
+            # weight=None: pure structural PageRank, ignoring any weight prop
+            pr4 = db.pagerank(weight=None, max_iter=300, tol=1e-12)
+            self.assertAlmostEqual(pr4['B'], pr4['C'])
             # =====================================================
             # centrality: betweenness_centrality
             # =====================================================
@@ -962,6 +1037,20 @@ class TestJDb(unittest.TestCase):
             # a direct edge (1 hop) is preferred over any 2-hop alternative
             build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
             self.assertEqual(db.all_shortest_paths('A', 'C'), [['A', 'C']])
+
+            # weight=: minimum-total-weight paths instead of fewest-hop; a
+            # longer (more hops) but lighter path can beat a direct heavy edge
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', True, {'w': 1}),
+                   ('A', 'C', True, {'w': 5})])
+            self.assertEqual(db.all_shortest_paths('A', 'C', weight='w'), [['A', 'B', 'C']])
+            # ties at equal minimum weight are all returned
+            build(db, [('A', 'B', True, {'w': 2}), ('A', 'C', True, {'w': 1}),
+                   ('B', 'D', True, {'w': 1}), ('C', 'D', True, {'w': 2})])
+            self.assertEqual(sorted(db.all_shortest_paths('A', 'D', weight='w')),
+                             [['A', 'B', 'D'], ['A', 'C', 'D']])
+            # missing weight property defaults that edge's weight to 1
+            build(db, [('A', 'B', True), ('B', 'C', True, {'w': 2})])
+            self.assertEqual(db.all_shortest_paths('A', 'C', weight='w'), [['A', 'B', 'C']])
 
             # =====================================================
             # #7 strongly_connected_components
@@ -1148,6 +1237,40 @@ class TestJDb(unittest.TestCase):
 
             build(db, [])
             self.assertEqual(db.average_clustering(), 0.0)                 # empty graph
+
+            # clustering() with no args returns a dict for every node
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
+            all_cc = db.clustering()
+            self.assertEqual(set(all_cc), {'A', 'B', 'C'})
+            self.assertEqual(all_cc['A'], 1.0)
+
+            # nodes=: an iterable of ids returns a dict for just those
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)], nodes=('D',))
+            subset_cc = db.clustering(nodes=['A', 'D'])
+            self.assertEqual(set(subset_cc), {'A', 'D'})
+            self.assertEqual(subset_cc['A'], 1.0)
+            self.assertEqual(subset_cc['D'], 0.0)   # isolated
+
+            # weight=: weighted (geometric-mean) undirected clustering
+            build(db, [('A', 'B', False, {'weight': 2}), ('B', 'C', False, {'weight': 4}),
+                   ('A', 'C', False, {'weight': 8})])
+            unweighted = db.clustering('A')
+            weighted = db.clustering('A', weight='weight')
+            self.assertAlmostEqual(unweighted, 1.0)         # still a full triangle
+            self.assertLess(weighted, 1.0)                  # but weights aren't all equal to the max
+
+            # average_clustering(count_zeros=False) excludes exact-zero nodes
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)], nodes=('D',))
+            self.assertLess(db.average_clustering(), db.average_clustering(count_zeros=False))
+            self.assertAlmostEqual(db.average_clustering(count_zeros=False), 1.0)
+
+            # directed graph: uses the Fagiolo directed-triangle formula
+            # (distinct from the undirected formula), matching networkx's
+            # clustering() for a DiGraph
+            build(db, [('A', 'B', True), ('B', 'C', True), ('C', 'A', True)])
+            dc = db.clustering()
+            self.assertTrue(all(0.0 <= v <= 1.0 for v in dc.values()))
+            self.assertGreater(dc['A'], 0.0)   # A is part of a 3-cycle
 
             # =====================================================
             # density()

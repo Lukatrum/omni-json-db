@@ -419,7 +419,7 @@ class GraphDb(JDb):
         with self.open() as fp:
             f_get_adj = self.f_get_adj
             neighbors_u = {entry[1:] for entry in f_get_adj(fp, u)}
-            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)}
+            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)} if u != v else neighbors_u
 
         return neighbors_u & neighbors_v
 
@@ -443,7 +443,7 @@ class GraphDb(JDb):
         with self.open() as fp:
             f_get_adj = self.f_get_adj
             neighbors_u = {entry[1:] for entry in f_get_adj(fp, u)}
-            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)}
+            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)} if u != v  else neighbors_u
 
         union = neighbors_u | neighbors_v
         if not union:
@@ -1217,70 +1217,307 @@ class GraphDb(JDb):
                 ``[0, 1]``. All zeros when there is only one node.
         """
         with self.open() as fp:
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
-            n = len(nodes)
-            norm = (n - 1) if n > 1 else 1
             f_get_adj = self.f_get_adj
-            return {nid: len(f_get_adj(fp, nid)) / norm for nid in nodes}
+            degrees = []
+            for node_id, _row in self.f_iter_nodes(fp):
+                degrees.append((node_id, len(f_get_adj(fp, node_id))))
 
-    def clustering(self, node_id:str) -> float:
-        """Compute the local clustering coefficient of a node.
+        n = len(degrees)
+        norm = (n - 1) if n > 1 else 1
+        return {node_id:n_neighbors/norm for node_id,n_neighbors in degrees}
 
-        Measures how connected a node's neighbors are to each other: the
-        fraction of neighbor pairs that are themselves connected, out of all
-        possible neighbor pairs. Uses the same direction-agnostic notion of
-        "neighbor" as ``neighbors``. Computed purely from adjacency sets
-        (no edge-key lookups needed), costing ``O(degree(node_id) +
-        sum(degree(neighbor) for neighbor in neighbors))``.
+    def closeness_centrality(self, u:Optional[str]=None, distance:Optional[str]=None, wf_improved:bool=True, direction:str='in') -> Union[Dict[str,float],float]:
+        """Compute closeness centrality for one or all nodes.
+
+        Mirrors networkx's ``closeness_centrality(G, u=None, distance=None,
+        wf_improved=True)`` signature and formula. Closeness centrality of a
+        node ``x`` is the reciprocal of the average shortest-path distance to
+        ``x`` over every node that can reach it: ``C(x) = (n-1) / sum(d(v, x)
+        for v in reachable)``, where ``n`` is the size of the set of nodes
+        that can reach ``x`` (including ``x`` itself).
+
+        Matches networkx's convention for directed graphs: distances are
+        measured *to* each node (how easily others can reach it), not *from*
+        it. This corresponds to ``direction='in'`` (the default) — at each
+        step the walk follows incoming edges, exactly mirroring how
+        networkx internally reverses a ``DiGraph`` before computing this
+        (``direction`` has no networkx equivalent — it exists here because,
+        unlike networkx, a GraphDb graph can mix directed and undirected
+        edges). Pass ``direction='out'`` to instead measure how quickly a
+        node can reach everyone else, or ``direction='both'`` to ignore
+        direction entirely. Undirected edges are always traversable
+        regardless of this setting.
 
         Args:
-            node_id (str): Node identifier.
+            u (Optional[str], optional): If given, return only that node's
+                score as a float instead of a dict for every node. Defaults
+                to None (all nodes).
+            distance (Optional[str], optional): Edge property to use as edge
+                weight (via Dijkstra); edges missing the property default to
+                weight 1. Defaults to None (every edge has weight/distance 1,
+                i.e. plain hop count via BFS).
+            wf_improved (bool, optional): If True (default), scale each
+                node's score by the fraction of the whole graph its reachable
+                set covers — the Wasserman and Faust improved formula — so
+                nodes in small disconnected components aren't overstated
+                relative to nodes in the main component: ``C(x) *=
+                (n-1)/(N-1)`` where ``N`` is the total node count. If False,
+                use the raw reciprocal of average distance within the node's
+                own reachable set only.
+            direction (str, optional): Which edges to follow when measuring
+                distance to a node — ``'in'`` (default, matches networkx),
+                ``'out'``, or ``'both'``.
 
         Returns:
-            float: Clustering coefficient in ``[0, 1]``. 0.0 if the node is
-                missing or has fewer than 2 neighbors (no possible pairs).
-        """
-        with self.open() as fp:
-            if not self.f_has_node(fp, node_id):
-                return 0.0
-
-            f_get_adj = self.f_get_adj
-            neighbors = {entry[1:] for entry in f_get_adj(fp, node_id)}
-            k = len(neighbors)
-            if k < 2:
-                return 0.0
-
-            links = sum(len({entry[1:] for entry in f_get_adj(fp, nb)} & neighbors) for nb in neighbors)
-
-        return links / (k * (k - 1))
-
-    def average_clustering(self) -> float:
-        """Compute the average local clustering coefficient over all nodes.
-
-        Reads every node's adjacency in a single transaction (rather than
-        calling ``clustering`` once per node, which would open a
-        fresh transaction each time), then reduces to the mean.
-
-        Returns:
-            float: Mean clustering coefficient in ``[0, 1]``. 0.0 for an
-                empty graph.
+            Union[Dict[str, float], float]: Mapping of node id to closeness
+                centrality (or a single float if ``u`` is given). 0.0 for a
+                node nothing can reach it from (under the chosen
+                ``direction``), including fully isolated nodes.
         """
         with self.open() as fp:
             f_get_adj = self.f_get_adj
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
-            if not nodes:
-                return 0.0
-            adj = {nid: {entry[1:] for entry in f_get_adj(fp, nid)} for nid in nodes}
+            f_read = self.f_read
+            _generate_edge_key = self._generate_edge_key
+            adj = {}
+            query_nodes = [] if u is None else [u]
+            N = 0
+            for node_id, _row_id in self.f_iter_nodes(fp):
+                N += 1
+                if u is None:
+                    query_nodes.append(node_id)
+                lst = []
+                for entry in f_get_adj(fp, node_id):
+                    d, other = entry[0], entry[1:]
+                    if direction == 'out' and d == '<': continue
+                    if direction == 'in' and d == '>': continue
+                    if distance is None:
+                        weight = 1
+                    else:
+                        edge_key = _generate_edge_key(other, node_id, True) if d == '<' else \
+                                _generate_edge_key(node_id, other, d == '>')
+                        props = f_read(fp, edge_key, copy=False)
+                        weight = props.get(distance, 1) if isinstance(props, dict) else 1
+                    lst.append((other, weight))
+                adj[node_id] = lst
 
-        total = 0.0
-        for nid in nodes:
-            neighbors = adj[nid]
-            k = len(neighbors)
-            if k >= 2:
-                links = sum(len(adj.get(nb, set()) & neighbors) for nb in neighbors)
-                total += links / (k * (k - 1))
+        result = {}
+        for start in query_nodes:
+            dist = {start: 0}
+            if distance is None:
+                queue = deque([start])
+                while queue:
+                    cur = queue.popleft()
+                    for nb, _w in adj.get(cur, []):
+                        if nb not in dist:
+                            dist[nb] = dist[cur] + 1
+                            queue.append(nb)
+            else:
+                heap = [(0, start)]
+                visited = set()
+                while heap:
+                    d0, cur = heappop(heap)
+                    if cur in visited: continue
+                    visited.add(cur)
+                    for nb, w in adj.get(cur, []):
+                        nd = d0 + w
+                        if nd < dist.get(nb, float('inf')):
+                            dist[nb] = nd
+                            heappush(heap, (nd, nb))
 
-        return total / len(nodes)
+            n_reachable = len(dist)
+            total = sum(dist.values())
+            if total <= 0 or N <= 1:
+                score = 0.0
+            else:
+                score = (n_reachable - 1) / total
+                if wf_improved:
+                    score *= (n_reachable - 1) / (N - 1)
+            result[start] = score
+
+        if u is not None:
+            return result[u]
+
+        return result
+
+    def _compute_clustering(self, fp, target_ids:List[str], all_ids:List[str], weight:Optional[str]) -> Dict[str,float]:
+        """Internal: compute clustering coefficient for ``target_ids``.
+
+        ``all_ids`` (every node in the graph) is needed regardless of
+        ``target_ids`` to detect whether the graph has any directed edge
+        (picking the undirected or directed formula, see ``clustering``) and,
+        for the weighted undirected formula, to find the graph-wide maximum
+        edge weight used for normalization. Must be called inside an
+        ``open()`` context.
+        """
+        f_get_adj = self.f_get_adj
+        f_read = self.f_read
+        _generate_edge_key = self._generate_edge_key
+
+        out_set = {}
+        in_set = {}
+        has_directed = False
+        for nid in all_ids:
+            o = set(); i = set()
+            for entry in f_get_adj(fp, nid):
+                d, other = entry[0], entry[1:]
+                if d == '>':
+                    o.add(other); has_directed = True
+                elif d == '<':
+                    i.add(other); has_directed = True
+                else:
+                    o.add(other); i.add(other)
+            out_set[nid] = o
+            in_set[nid] = i
+
+        result = {}
+
+        if not has_directed:
+            # undirected: unweighted (triangle fraction) or weighted (geometric mean)
+            max_w = 1.0
+            if weight is not None:
+                seen_max = 0.0
+                for nid in all_ids:
+                    for other in out_set[nid]:
+                        if other <= nid: continue  # each undirected edge has 2 entries; visit once
+                        props = f_read(fp, _generate_edge_key(nid, other, False), copy=False)
+                        w = props.get(weight, 1) if isinstance(props, dict) else 1
+                        if w > seen_max: seen_max = w
+                if seen_max > 0: max_w = seen_max
+
+            def edge_w(u, v):
+                props = f_read(fp, _generate_edge_key(u, v, False), copy=False)
+                w = props.get(weight, 1) if isinstance(props, dict) else 1
+                return w / max_w
+
+            for nid in target_ids:
+                neighbors = out_set.get(nid, set())
+                k = len(neighbors)
+                if k < 2:
+                    result[nid] = 0.0
+                    continue
+                if weight is None:
+                    links = sum(len(out_set.get(nb, set()) & neighbors) for nb in neighbors)
+                    result[nid] = links / (k * (k - 1))
+                else:
+                    nbs = list(neighbors)
+                    total = 0.0
+                    for a in range(len(nbs)):
+                        for b in range(len(nbs)):
+                            if a == b: continue
+                            v, w2 = nbs[a], nbs[b]
+                            if w2 not in out_set.get(v, set()): continue
+                            cube = edge_w(nid, v) * edge_w(nid, w2) * edge_w(v, w2)
+                            total += cube ** (1.0 / 3.0)
+                    result[nid] = total / (k * (k - 1))
+        else:
+            # directed (Fagiolo formula); weight is not supported for
+            # directed graphs, matching networkx
+            for nid in target_ids:
+                node_out = out_set.get(nid, set())
+                node_in = in_set.get(nid, set())
+                any_dir = node_out | node_in
+                deg_tot = len(node_out) + len(node_in)
+                deg_recip = len(node_out & node_in)
+                denom = 2.0 * (deg_tot * (deg_tot - 1) - 2 * deg_recip)
+                if denom <= 0:
+                    result[nid] = 0.0
+                    continue
+                neigh_list = list(any_dir)
+                total = 0.0
+                for a in range(len(neigh_list)):
+                    j = neigh_list[a]
+                    w_uj = (1 if j in node_out else 0) + (1 if j in node_in else 0)
+                    for b in range(len(neigh_list)):
+                        if a == b: continue
+                        k_ = neigh_list[b]
+                        w_uk = (1 if k_ in node_out else 0) + (1 if k_ in node_in else 0)
+                        w_jk = (1 if k_ in out_set.get(j, set()) else 0) + \
+                               (1 if k_ in in_set.get(j, set()) else 0)
+                        total += w_uj * w_uk * w_jk
+                result[nid] = total / denom
+
+        return result
+
+    def clustering(self, nodes:Optional[Any]=None, weight:Optional[str]=None) -> Union[float,Dict[str,float]]:
+        """Compute the clustering coefficient for one, several, or all nodes.
+
+        Mirrors networkx's ``clustering(G, nodes=None, weight=None)``. For a
+        purely undirected graph this is the fraction of a node's neighbor
+        pairs that are themselves connected (or, with ``weight``, the
+        geometric mean of normalized edge weights around each triangle). If
+        the graph has any directed edge, the directed (Fagiolo) formula is
+        used instead — measuring directed-triangle density using total
+        (in+out) degree and reciprocal degree — matching what networkx
+        computes for a ``DiGraph``; ``weight`` is not supported in that case
+        (matching networkx, which also does not support it for directed
+        graphs) and is ignored. Undirected edges count as a reciprocal pair
+        when mixed with directed edges, the same convention ``to_networkx``
+        uses.
+
+        Args:
+            nodes (Optional[Any], optional): A single node id (returns a
+                float), an iterable of node ids (returns a dict for just
+                those), or None for every node (dict). Defaults to None.
+            weight (Optional[str], optional): Edge property to use as edge
+                weight for the undirected weighted formula; edges missing
+                the property default to weight 1. Ignored if the graph has
+                any directed edge. Defaults to None (unweighted).
+
+        Returns:
+            Union[float, Dict[str, float]]: Clustering coefficient(s) in
+                ``[0, 1]``. 0.0 for a node with fewer than 2 (any-direction)
+                neighbors, including missing nodes.
+        """
+        single = isinstance(nodes, str)
+        query = [nodes] if single else (list(nodes) if nodes is not None else None)
+
+        with self.open() as fp:
+            all_ids = [nid for nid, _row in self.f_iter_nodes(fp)]
+            target_ids = query if query is not None else all_ids
+            result = self._compute_clustering(fp, target_ids, all_ids, weight)
+
+        if single:
+            return result.get(nodes, 0.0)
+
+        return result
+
+    def average_clustering(self, nodes:Optional[Any]=None, weight:Optional[str]=None, count_zeros:bool=True) -> float:
+        """Compute the average clustering coefficient over a set of nodes.
+
+        Mirrors networkx's ``average_clustering(G, nodes=None, weight=None,
+        count_zeros=True)``. Reads every node's adjacency in a single
+        transaction, computes each node's coefficient via the same formula
+        ``clustering`` uses (undirected, or directed/Fagiolo if the graph has
+        any directed edge), then reduces to the mean.
+
+        Args:
+            nodes (Optional[Any], optional): Iterable of node ids to average
+                over. Defaults to None (every node).
+            weight (Optional[str], optional): Edge property to use as edge
+                weight for the undirected weighted formula; ignored if the
+                graph has any directed edge. Defaults to None (unweighted).
+            count_zeros (bool, optional): If False, nodes with a coefficient
+                of exactly 0.0 are excluded from the average. Defaults to
+                True.
+
+        Returns:
+            float: Mean clustering coefficient in ``[0, 1]``. 0.0 if there is
+                nothing to average.
+        """
+        query = list(nodes) if nodes is not None else None
+
+        with self.open() as fp:
+            all_ids = [nid for nid, _row in self.f_iter_nodes(fp)]
+            target_ids = query if query is not None else all_ids
+            result = self._compute_clustering(fp, target_ids, all_ids, weight)
+
+        values = list(result.values())
+        if not count_zeros:
+            values = [v for v in values if v != 0.0]
+        if not values:
+            return 0.0
+
+        return sum(values) / len(values)
 
     def density(self) -> float:
         """Compute the density of the graph.
@@ -1311,7 +1548,7 @@ class GraphDb(JDb):
 
         return (directed_count + 2 * undirected_count) / (n * (n - 1))
 
-    def pagerank(self, alpha:float=0.85, max_iter:int=100, tol:float=1e-6) -> Dict[str,float]:
+    def pagerank(self, alpha:float=0.85, max_iter:int=100, tol:float=1e-6, weight:Optional[str]='weight') -> Dict[str,float]:
         """Rank nodes by PageRank over the directed graph.
 
         Outgoing directed edges and undirected edges (both directions) define
@@ -1323,24 +1560,46 @@ class GraphDb(JDb):
             alpha (float, optional): Damping factor. Defaults to 0.85.
             max_iter (int, optional): Maximum iterations. Defaults to 100.
             tol (float, optional): L1 convergence threshold. Defaults to 1e-6.
+            weight (Optional[str], optional): Edge property used as the
+                transition weight, matching networkx's default of
+                ``'weight'``: each node's rank is split across its out-edges
+                in proportion to that edge's weight (edges missing the
+                property default to weight 1) rather than split evenly. Pass
+                None for pure structural PageRank, where every out-edge gets
+                an equal share regardless of any weight property.
 
         Returns:
             Dict[str, float]: Mapping of node id to PageRank score; scores sum
                 to approximately 1. Empty for an empty graph.
         """
         with self.open() as fp:
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
-            n = len(nodes)
-            if n == 0:
-                return {}
-
+            nodes = []
             out = {}
             f_get_adj = self.f_get_adj
-            for nid in nodes:
-                # dedupe: a neighbor linked by both a directed and an
-                # undirected edge must only count as one out-link
-                out[nid] = list(dict.fromkeys(
-                    entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+            f_read = self.f_read
+            _generate_edge_key = self._generate_edge_key
+            for nid, _row in self.f_iter_nodes(fp):
+                nodes.append(nid)
+                lst = []
+                seen = set()
+                for entry in f_get_adj(fp, nid):
+                    d, other = entry[0], entry[1:]
+                    # dedupe: a neighbor linked by both a directed and an
+                    # undirected edge must only count as one out-link
+                    if d == '<' or other in seen: continue
+                    seen.add(other)
+                    if weight is None:
+                        w = 1
+                    else:
+                        edge_key = _generate_edge_key(nid, other, d == '>')
+                        props = f_read(fp, edge_key, copy=False)
+                        w = props.get(weight, 1) if isinstance(props, dict) else 1
+                    lst.append((other, w))
+                out[nid] = lst
+
+        n = len(nodes)
+        if n == 0:
+            return {}
 
         rank = {nid: 1.0 / n for nid in nodes}
         base = (1.0 - alpha) / n
@@ -1350,9 +1609,15 @@ class GraphDb(JDb):
             for nid in nodes:
                 targets = out[nid]
                 if targets:
-                    share = alpha * rank[nid] / len(targets)
-                    for t in targets:
-                        new_rank[t] += share
+                    total_w = sum(w for _t, w in targets)
+                    if total_w > 0:
+                        share = alpha * rank[nid] / total_w
+                        for t, w in targets:
+                            new_rank[t] += share * w
+                    else:
+                        share = alpha * rank[nid] / len(targets)
+                        for t, _w in targets:
+                            new_rank[t] += share
 
             delta = sum(abs(new_rank[nid] - rank[nid]) for nid in nodes)
             rank = new_rank
@@ -1378,13 +1643,14 @@ class GraphDb(JDb):
             Dict[str, float]: Mapping of node id to betweenness centrality.
         """
         with self.open() as fp:
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            nodes = []
             adj = {}
             f_get_adj = self.f_get_adj
-            for nid in nodes:
+            for nid, _row in self.f_iter_nodes(fp):
+                nodes.append(nid)
                 # dedupe: a neighbor linked by both a directed and an
                 # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(\
+                adj[nid] = list(dict.fromkeys(
                         entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
         cb = {nid: 0.0 for nid in nodes}
@@ -1445,13 +1711,14 @@ class GraphDb(JDb):
                 ``export_graph``) to its betweenness score.
         """
         with self.open() as fp:
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            nodes = []
             adj = {}
             f_get_adj = self.f_get_adj
-            for nid in nodes:
+            for nid, _row in self.f_iter_nodes(fp):
+                nodes.append(nid)
                 # dedupe: a neighbor linked by both a directed and an
                 # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(\
+                adj[nid] = list(dict.fromkeys(
                         entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
             # resolve each (v, w) reachability pair to its real edge-key
@@ -1509,15 +1776,19 @@ class GraphDb(JDb):
 
         return result
 
-    def all_shortest_paths(self, source:str, target:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[List[str]]:
-        """Find every shortest (fewest-hop) path between two nodes.
+    def all_shortest_paths(self, source:str, target:str, direction:str='out', edge_filter:Optional[Any]=None, weight:Optional[str]=None) -> List[List[str]]:
+        """Find every shortest path between two nodes.
 
-        Runs a BFS that records all predecessors at the shortest distance,
-        then enumerates every path through that predecessor DAG.
+        Without ``weight`` this is fewest-hop (BFS); with ``weight`` it is
+        minimum total edge weight (Dijkstra — weights must be non-negative).
+        Either way, every path tied for shortest is returned, found by
+        computing distances then enumerating every path through the
+        resulting predecessor DAG (edges where ``dist[u] + w(u, v) ==
+        dist[v]``).
 
         Args:
-            source (str): source node identifier.
-            target (str): target node identifier.
+            source (str): Start node identifier.
+            target (str): End node identifier.
             direction (str, optional): Edge direction to follow from each
                 node — ``'out'`` (default) follows outgoing directed and
                 undirected edges, ``'in'`` follows incoming directed and
@@ -1526,6 +1797,9 @@ class GraphDb(JDb):
                 given, only cross an edge when ``edge_filter(props)`` is
                 truthy for that edge's properties. Defaults to None (no
                 filtering).
+            weight (Optional[str], optional): Edge property to use as edge
+                weight (matches networkx); edges missing the property
+                default to weight 1. Defaults to None (fewest-hop via BFS).
 
         Returns:
             List[List[str]]: All shortest paths (each a node-id list from
@@ -1543,34 +1817,75 @@ class GraphDb(JDb):
             f_get_adj = self.f_get_adj
             f_read = self.f_read
             _generate_edge_key = self._generate_edge_key
-            dist = {source: 0}
-            preds = {source: []}
-            queue = deque([source])
-            found_depth = None
-            while queue:
-                cur = queue.popleft()
-                if found_depth is None or dist[cur] < found_depth:
-                    for entry in f_get_adj(fp, cur):
-                        d, neighbor = entry[0], entry[1:]
-                        if direction == 'out' and d == '<': continue
-                        if direction == 'in' and d == '>': continue
-                        if edge_filter is not None:
-                            edge_key = _generate_edge_key(neighbor, cur, True) if d == '<' else \
-                                    _generate_edge_key(cur, neighbor, d == '>')
-                            props = f_read(fp, edge_key, copy=False)
-                            if not edge_filter(props if isinstance(props, dict) else {}):
-                                continue
+            adj = {}
 
-                        nd = dist[cur] + 1
-                        if neighbor not in dist:
+            def get_adj(node_id):
+                cached = adj.get(node_id)
+                if cached is not None:
+                    return cached
+                lst = []
+                for entry in f_get_adj(fp, node_id):
+                    d, neighbor = entry[0], entry[1:]
+                    if direction == 'out' and d == '<': continue
+                    if direction == 'in' and d == '>': continue
+                    w = 1
+                    if edge_filter is not None or weight is not None:
+                        edge_key = _generate_edge_key(neighbor, node_id, True) if d == '<' else \
+                                _generate_edge_key(node_id, neighbor, d == '>')
+                        props = f_read(fp, edge_key, copy=False)
+                        props = props if isinstance(props, dict) else {}
+                        if edge_filter is not None and not edge_filter(props):
+                            continue
+                        if weight is not None:
+                            w = props.get(weight, 1)
+                    lst.append((neighbor, w))
+                adj[node_id] = lst
+                return lst
+
+            if weight is None:
+                dist = {source: 0}
+                preds = {source: []}
+                queue = deque([source])
+                found_depth = None
+                while queue:
+                    cur = queue.popleft()
+                    if found_depth is None or dist[cur] < found_depth:
+                        for neighbor, _w in get_adj(cur):
+                            nd = dist[cur] + 1
+                            if neighbor not in dist:
+                                dist[neighbor] = nd
+                                preds[neighbor] = [cur]
+                                if neighbor == target:
+                                    found_depth = nd
+                                else:
+                                    queue.append(neighbor)
+                            elif dist[neighbor] == nd:
+                                preds[neighbor].append(cur)
+            else:
+                dist = {source: 0}
+                visited = set()
+                heap = [(0, source)]
+                while heap:
+                    d0, cur = heappop(heap)
+                    if cur in visited: continue
+                    visited.add(cur)
+                    for neighbor, w in get_adj(cur):
+                        nd = d0 + w
+                        if nd < dist.get(neighbor, float('inf')):
                             dist[neighbor] = nd
-                            preds[neighbor] = [cur]
-                            if neighbor == target:
-                                found_depth = nd
-                            else:
-                                queue.append(neighbor)
-                        elif dist[neighbor] == nd:
-                            preds[neighbor].append(cur)
+                            heappush(heap, (nd, neighbor))
+
+                if target not in dist:
+                    return []
+
+                # build the shortest-path DAG: an edge (u, v) belongs to it
+                # iff it achieves the exact minimum known distance to v
+                preds = {n: [] for n in dist}
+                for u in dist:
+                    du = dist[u]
+                    for neighbor, w in get_adj(u):
+                        if neighbor in dist and du + w == dist[neighbor]:
+                            preds[neighbor].append(u)
 
             if target not in dist:
                 return []
@@ -1601,13 +1916,14 @@ class GraphDb(JDb):
                 any directed cycle).
         """
         with self.open() as fp:
-            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            nodes = []
             adj = {}
             f_get_adj = self.f_get_adj
-            for nid in nodes:
+            for nid, _row in self.f_iter_nodes(fp):
+                nodes.append(nid)
                 # dedupe: a neighbor linked by both a directed and an
                 # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(\
+                adj[nid] = list(dict.fromkeys(
                     entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
         index_counter = [0]
