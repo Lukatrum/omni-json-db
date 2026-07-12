@@ -367,13 +367,13 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(db.add_node('B', role='user'))
             self.assertTrue(db.add_node('C', role='user'))
 
-            self.assertEqual({k for k,v in db.iter_nodes()}, {'A','B','C','D'})
-            self.assertEqual(sum(1 for k in db.iter_edges()), 4)
+            self.assertEqual({k for k,v in db.nodes()}, {'A','B','C','D'})
+            self.assertEqual(sum(1 for k in db.edges()), 4)
 
-            self.assertIn('B', db.get_successors('A'))
-            self.assertIn('C', db.get_successors('A'))
-            self.assertIn('A', db.get_predecessors('B'))
-            self.assertNotIn('B', db.get_predecessors('A'))
+            self.assertIn('B', db.successors('A'))
+            self.assertIn('C', db.successors('A'))
+            self.assertIn('A', db.predecessors('B'))
+            self.assertNotIn('B', db.predecessors('A'))
 
             self.assertFalse(db.is_cyclic())
 
@@ -404,8 +404,8 @@ class TestJDb(unittest.TestCase):
             db.add_edge('E', 'F', directed=False, relation='peer', weight=2.)
             db.add_edge('B', 'C', directed=True, relation='peer')
 
-            self.assertIn('E', db.get_neighbors('F'))
-            self.assertIn('F', db.get_neighbors('E'))
+            self.assertIn('E', db.neighbors('F'))
+            self.assertIn('F', db.neighbors('E'))
 
             weight = db.get_edge('E', 'F', directed=False)['weight']
             db.boost_edge_weights(relation_type='peer', boost_value=4.)
@@ -439,10 +439,10 @@ class TestJDb(unittest.TestCase):
 
             db.remove_node('C')
             self.assertFalse(db.has_node('C'))
-            self.assertNotIn('C', db.get_successors('A'))
-            self.assertNotIn('C', db.get_successors('B'))
-            self.assertNotIn('C', db.get_predecessors('D'))
-            self.assertEqual(len(db.get_successors('B')), 0)
+            self.assertNotIn('C', db.successors('A'))
+            self.assertNotIn('C', db.successors('B'))
+            self.assertNotIn('C', db.predecessors('D'))
+            self.assertEqual(len(db.successors('B')), 0)
 
             # only show nodes
             res = db.show(db.NODE_RE)
@@ -523,11 +523,11 @@ class TestJDb(unittest.TestCase):
             # undirected edge appears in BOTH successors and predecessors
             # =====================================================
             build(db, [('X', 'Y', False, {'r': 'peer'})])
-            self.assertIn('Y', db.get_successors('X'))
-            self.assertIn('X', db.get_successors('Y'))
-            self.assertIn('Y', db.get_predecessors('X'))
-            self.assertIn('X', db.get_predecessors('Y'))
-            self.assertEqual(db.get_neighbors('X'), {'Y'})
+            self.assertIn('Y', db.successors('X'))
+            self.assertIn('X', db.successors('Y'))
+            self.assertIn('Y', db.predecessors('X'))
+            self.assertIn('X', db.predecessors('Y'))
+            self.assertEqual(db.neighbors('X'), {'Y'})
 
             # =====================================================
             # CYCLE VARIETIES  (the heart of the robustness suite)
@@ -839,7 +839,7 @@ class TestJDb(unittest.TestCase):
             Grt = db.to_networkx()
             db_nx3 = GraphDb(data_type=jdb.data_type, zip_type=jdb.zip_type, key_limit=jdb.key_limit, cache_limit=cache_limit)
             db_nx3.from_networkx(Grt)
-            self.assertEqual(db_nx3.get_neighbors('A'), db.get_neighbors('A'))
+            self.assertEqual(db_nx3.neighbors('A'), db.neighbors('A'))
             self.assertEqual(db_nx3.get_edge('A', 'B', directed=True), db.get_edge('A', 'B', directed=True))
 
             # full round trip is faithful for a purely undirected graph
@@ -1000,15 +1000,15 @@ class TestJDb(unittest.TestCase):
             self.assertIn(('A', '>B'), v['orphan'])
             self.assertIn(('B', '<A'), v['orphan'])
             self.assertEqual(v['missing'], [])
-            self.assertIn('B', db.get_neighbors('A'))          # phantom neighbor before repair
+            self.assertIn('B', db.neighbors('A'))          # phantom neighbor before repair
 
             res = db.reindex()
             self.assertGreaterEqual(res['removed'], 1)
             self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
-            self.assertNotIn('B', db.get_neighbors('A'))       # phantom neighbor gone
-            self.assertNotIn('A', db.get_neighbors('B'))
-            self.assertIn('C', db.get_neighbors('A'))          # surviving edges untouched
-            self.assertIn('C', db.get_neighbors('B'))
+            self.assertNotIn('B', db.neighbors('A'))       # phantom neighbor gone
+            self.assertNotIn('A', db.neighbors('B'))
+            self.assertIn('C', db.neighbors('A'))          # surviving edges untouched
+            self.assertIn('C', db.neighbors('B'))
 
             # undirected edge deleted directly: stale entry on both endpoints
             build(db, [('X', 'Y', False), ('Y', 'Z', True)])
@@ -1018,8 +1018,8 @@ class TestJDb(unittest.TestCase):
             self.assertIn(('Y', '-X'), v2['orphan'])
             db.reindex()
             self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
-            self.assertNotIn('Y', db.get_neighbors('X'))
-            self.assertIn('Z', db.get_neighbors('Y'))           # surviving edge untouched
+            self.assertNotIn('Y', db.neighbors('X'))
+            self.assertIn('Z', db.neighbors('Y'))           # surviving edge untouched
 
             # an edge key written directly (bypassing add_edge) is detected
             # as 'missing' adjacency rather than 'orphan'
@@ -1031,8 +1031,169 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(v3['orphan'], [])
             db.reindex()
             self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
-            self.assertIn('C', db.get_neighbors('A'))
+            self.assertIn('C', db.neighbors('A'))
 
+            # =====================================================
+            # common_neighbors() / jaccard_coefficient()
+            # =====================================================
+            # diamond: B and C share the exact same neighbor set {A, D}
+            build(db, [('A', 'B', True), ('A', 'C', True), ('B', 'D', True), ('C', 'D', True)])
+            self.assertEqual(db.common_neighbors('B', 'C'), {'A', 'D'})
+            self.assertEqual(db.jaccard_coefficient('B', 'C'), 1.0)
+
+            # disjoint neighbor sets
+            build(db, [('A', 'B', True), ('C', 'D', True)])
+            self.assertEqual(db.common_neighbors('A', 'C'), set())
+            self.assertEqual(db.jaccard_coefficient('A', 'C'), 0.0)
+
+            # partial overlap: A={B,C}, D={C,E} -> common={C}, union={B,C,E}
+            build(db, [('A', 'B', True), ('A', 'C', True), ('D', 'C', True), ('D', 'E', True)])
+            self.assertEqual(db.common_neighbors('A', 'D'), {'C'})
+            self.assertAlmostEqual(db.jaccard_coefficient('A', 'D'), 1 / 3)
+
+            # both nodes isolated -> jaccard is 0.0 by convention (empty union)
+            build(db, [], nodes=('X', 'Y'))
+            self.assertEqual(db.common_neighbors('X', 'Y'), set())
+            self.assertEqual(db.jaccard_coefficient('X', 'Y'), 0.0)
+
+            # missing node -> empty result, no error raised
+            build(db, [('A', 'B', True)])
+            self.assertEqual(db.common_neighbors('A', 'ZZZ'), set())
+            self.assertEqual(db.jaccard_coefficient('A', 'ZZZ'), 0.0)
+
+            # direction-agnostic, same as get_neighbors: undirected + directed mix
+            build(db, [('A', 'B', False), ('C', 'B', True)])
+            self.assertEqual(db.common_neighbors('A', 'C'), {'B'})
+
+            # comparing a node with itself: identical sets -> jaccard 1.0
+            build(db, [('A', 'B', True), ('A', 'C', True)])
+            self.assertEqual(db.common_neighbors('A', 'A'), {'B', 'C'})
+            self.assertEqual(db.jaccard_coefficient('A', 'A'), 1.0)
+
+            # =====================================================
+            # batch write API
+            # =====================================================
+            db -= db
+            n = db.add_nodes_from(['A', ('B', {'x': 1}), 'C'])
+            self.assertEqual(n, 3)
+            self.assertEqual(db.get_node('A'), {})
+            self.assertEqual(db.get_node('B'), {'x': 1})
+
+            n2 = db.add_nodes_from({'X': {'y': 2}, 'Z': {}})
+            self.assertEqual(n2, 2)
+            self.assertEqual(db.get_node('X'), {'y': 2})
+
+            # merge semantics on re-add
+            db -= db
+            db.add_nodes_from([('A', {'a': 1})])
+            self.assertEqual(db.add_nodes_from([('A', {'b': 2})]), 1)   # merge counted
+            self.assertEqual(db.get_node('A'), {'a': 1, 'b': 2})
+            self.assertEqual(db.add_nodes_from([('A', {'a': 1, 'b': 2})]), 0)  # no-op not counted
+
+            # validation preserved
+            with self.assertRaises(KeyError):
+                db.add_nodes_from(['bad:id'])
+
+            # edges: (u,v) / (u,v,directed) / (u,v,directed,props) all accepted
+            db -= db
+            n3 = db.add_edges_from([('A', 'B'), ('B', 'C', False), ('C', 'D', True, {'w': 5})])
+            self.assertEqual(n3, 3)
+            self.assertEqual(db.get_edge('A', 'B', directed=True), {})
+            self.assertEqual(db.get_edge('B', 'C', directed=False), {})
+            self.assertEqual(db.get_edge('C', 'D', directed=True), {'w': 5})
+
+            with self.assertRaises(KeyError):
+                db.add_edges_from([('A', 'A')])                          # self-loop
+            with self.assertRaises(KeyError):
+                db.add_edges_from([('bad:id', 'X')])                     # invalid id
+
+            # =====================================================
+            # weighted_degree(): sum of edge weights, grouped by direction
+            # =====================================================
+            build(db, [('A', 'B', True, {'weight': 3}), ('C', 'A', True, {'weight': 5}),
+                    ('A', 'D', False, {'weight': 2})], nodes=('ISO',))
+            self.assertEqual(db.weighted_degree('A'), {'in': 5, 'out': 3, 'undirected': 2, 'total': 10})
+            self.assertEqual(db.weighted_degree('ISO'),
+                             {'in': 0.0, 'out': 0.0, 'undirected': 0.0, 'total': 0.0})
+            self.assertEqual(db.weighted_degree('ZZZ'),
+                             {'in': 0.0, 'out': 0.0, 'undirected': 0.0, 'total': 0.0})
+
+            # missing weight property falls back to `default`
+            build(db, [('A', 'B', True)])
+            self.assertEqual(db.weighted_degree('A', default=1.0)['out'], 1.0)
+            self.assertEqual(db.weighted_degree('A', default=7.0)['out'], 7.0)
+
+            # custom weight_key
+            build(db, [('A', 'B', True, {'cost': 4})])
+            self.assertEqual(db.weighted_degree('A', weight_key='cost')['out'], 4)
+
+            # =====================================================
+            # clustering() / average_clustering()
+            # =====================================================
+            # triangle: fully connected -> coefficient 1.0
+            build(db, [('A', 'B', False), ('B', 'C', False), ('A', 'C', False)])
+            self.assertEqual(db.clustering('A'), 1.0)
+            self.assertEqual(db.average_clustering(), 1.0)
+
+            # star: leaves not connected to each other -> center coefficient 0.0
+            build(db, [('H', 'B', False), ('H', 'C', False), ('H', 'D', False)])
+            self.assertEqual(db.clustering('H'), 0.0)
+            self.assertEqual(db.clustering('B'), 0.0)          # < 2 neighbors
+
+            # path: middle node's 2 neighbors are not connected -> 0.0
+            build(db, [('A', 'B', False), ('B', 'C', False)])
+            self.assertEqual(db.clustering('B'), 0.0)
+
+            self.assertEqual(db.clustering('ZZZ'), 0.0)        # missing node
+
+            build(db, [])
+            self.assertEqual(db.average_clustering(), 0.0)                 # empty graph
+
+            # =====================================================
+            # density()
+            # =====================================================
+            build(db, [])
+            self.assertEqual(db.density(), 0.0)                            # empty graph
+
+            db -= db
+            db.add_node('A')
+            self.assertEqual(db.density(), 0.0)                            # single node
+
+            # complete directed graph on 3 nodes: 6 possible ordered pairs, all present -> density 1.0
+            build(db, [('A', 'B', True), ('B', 'A', True), ('B', 'C', True),
+                   ('C', 'B', True), ('A', 'C', True), ('C', 'A', True)])
+            self.assertAlmostEqual(db.density(), 1.0)
+
+            # single undirected edge on 3 nodes: counts as 2 directed-equivalents / 6 possible
+            build(db, [('A', 'B', False)], nodes=('C',))
+            self.assertAlmostEqual(db.density(), 2 / 6)
+
+            # =====================================================
+            # edge_betweenness_centrality()
+            # =====================================================
+            # path A-B-C (undirected): both edges carry equal, nonzero betweenness
+            build(db, [('A', 'B', False), ('B', 'C', False)])
+            eb = db.edge_betweenness_centrality(normalized=False)
+            self.assertEqual(eb[('A', '-', 'B')], eb[('B', '-', 'C')])
+            self.assertGreater(eb[('A', '-', 'B')], 0.0)
+
+            # single directed edge: the only shortest path (its two endpoints)
+            # crosses it entirely -> betweenness 1.0 (matches networkx)
+            build(db, [('A', 'B', True)])
+            self.assertEqual(db.edge_betweenness_centrality(normalized=False), {('A', '>', 'B'): 1.0})
+
+            # mixed graph: edge-type in the result key matches how each edge was created
+            build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', False, {'w': 2})])
+            eb2 = db.edge_betweenness_centrality(normalized=False)
+            self.assertIn(('A', '>', 'B'), eb2)
+            self.assertIn(('B', '-', 'C'), eb2)
+            self.assertTrue(all(v >= 0.0 for v in eb2.values()))
+
+            # no edges -> empty result, no error
+            db -= db
+            n = db.add_nodes_from(['X', 'Y'])
+            self.assertEqual(n, 2)
+            self.assertEqual(db.edge_betweenness_centrality(), {})
             # =====================================================
             self.assertEqual(jdb, db)
             self.assertEqual(jdb.keys[:], db.keys[:])

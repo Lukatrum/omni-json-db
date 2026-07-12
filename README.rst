@@ -276,7 +276,7 @@ Graph Database
    db.add_edge('Charlie', 'Alice', directed=False, weight=0.5) # Undirected edge
 
    # 3. Neighborhood & Adjacency queries (O(1) lookups)
-   print(db.get_neighbors('Alice')) 
+   print(db.neighbors('Alice')) 
    # Output: {'Bob', 'Charlie'}
    
    print(db.degree('Alice'))        

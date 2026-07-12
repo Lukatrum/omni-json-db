@@ -151,7 +151,7 @@ class GraphDb(JDb):
             ret[matched.groups()[0]] = val
         return ret
 
-    def iter_nodes(self) -> Generator[Tuple[str,int],None,None]:
+    def nodes(self) -> Generator[Tuple[str,int],None,None]:
         """Iterate over all nodes in the graph.
  
         Yields:
@@ -235,6 +235,77 @@ class GraphDb(JDb):
 
         return False
 
+    def add_nodes_from(self, nodes:Any) -> int:
+        """Add multiple nodes in a single transaction.
+
+        Writes directly via ``f_add_node`` inside one write transaction
+        (a single ``open()``/lock acquisition for the whole batch), rather
+        than one ``open()`` per node through ``add_node`` in a loop. Still
+        applies the same id validation as ``add_node`` (enforced by
+        ``f_add_node``).
+
+        Args:
+            nodes (Any): Iterable of items, each either a plain node id, or a
+                ``(node_id, properties_dict)`` 2-tuple. A ``dict`` of
+                ``{node_id: properties_dict}`` is also accepted (its
+                ``.items()`` are used).
+
+        Returns:
+            int: Count of nodes that resulted in a write (new node, or an
+                existing node whose properties changed).
+
+        Raises:
+            KeyError: If any node id is empty or contains ``':'``.
+        """
+        n = 0
+        items = nodes.items() if isinstance(nodes, dict) else nodes
+        with self.open(read_only=False) as fp:
+            f_add_node = self.f_add_node
+            for item in items:
+                if isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], dict):
+                    node_id, props = item
+                else:
+                    node_id, props = item, {}
+                if f_add_node(fp, node_id, **props):
+                    n += 1
+
+        return n
+
+    def add_edges_from(self, edges:Any) -> int:
+        """Add multiple edges in a single transaction.
+
+        Writes directly via ``f_add_edge`` inside one write transaction
+        (a single ``open()``/lock acquisition for the whole batch), rather
+        than one ``open()`` per edge through ``add_edge`` in a loop. Still
+        applies the same id/self-loop validation as ``add_edge`` (enforced
+        by ``f_add_edge``).
+
+        Args:
+            edges (Any): Iterable of ``(u, v)``, ``(u, v, directed)``, or
+                ``(u, v, directed, properties_dict)`` tuples. ``directed``
+                defaults to True and ``properties_dict`` defaults to empty
+                when omitted.
+
+        Returns:
+            int: Count of edges that resulted in a write (new edge, or an
+                existing edge whose properties changed).
+
+        Raises:
+            KeyError: If any edge is a self-loop (``u == v``), or if either
+                id is empty or contains ``':'``.
+        """
+        n = 0
+        with self.open(read_only=False) as fp:
+            f_add_edge = self.f_add_edge
+            for spec in edges:
+                u, v = spec[0], spec[1]
+                directed = spec[2] if len(spec) > 2 else True
+                props = spec[3] if len(spec) > 3 else {}
+                if f_add_edge(fp, u, v, directed, **props):
+                    n += 1
+
+        return n
+
     def get_edge(self, u:str, v:str, directed:bool=True) -> Dict[str,Any]:
         """Get the properties of an edge.
  
@@ -289,7 +360,7 @@ class GraphDb(JDb):
 
         return ret
 
-    def iter_edges(self) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
+    def edges(self) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
         """Iterate over all edges in the graph.
  
         Yields:
@@ -310,8 +381,11 @@ class GraphDb(JDb):
         with self.open() as fp: # pylint: disable=W0135
             yield from self.f_iter_adjs(fp)
 
-    def get_neighbors(self, node_id: str) -> Set[str]:
+    def neighbors(self, node_id: str) -> Set[str]:
         """Get all neighbors of a node, ignoring edge direction.
+
+        Reads the node's adjacency directly via ``f_get_adj`` (only the
+        neighbor ids are needed here, so no edge-key reconstruction happens).
 
         Args:
             node_id (str): Node identifier.
@@ -320,14 +394,64 @@ class GraphDb(JDb):
             Set[str]: Identifiers of every node connected to ``node_id`` by
                 any edge (directed or undirected, either endpoint).
         """
-        neighbors = set()
         with self.open() as fp:
-            for neighbor, _key, _row_id in self.f_iter_neighbors(fp, node_id):
-                neighbors.add(neighbor)
+            neighbors = {entry[1:] for entry in self.f_get_adj(fp, node_id)}
 
         return neighbors
 
-    def get_successors(self, node_id:str) -> Dict[str,Dict[str,Any]]:
+    def common_neighbors(self, u:str, v:str) -> Set[str]:
+        """Find nodes that are neighbors of both ``u`` and ``v``.
+
+        Uses the same direction-agnostic notion of "neighbor" as
+        ``neighbors`` (any edge, directed or undirected, either
+        endpoint). Reads each node's adjacency directly via ``f_get_adj``, so
+        the cost is proportional to ``degree(u) + degree(v)`` rather than the
+        total node/edge count.
+
+        Args:
+            u (str): First node identifier.
+            v (str): Second node identifier.
+
+        Returns:
+            Set[str]: Node ids adjacent to both ``u`` and ``v``. Empty if
+                either node is missing or they share no neighbors.
+        """
+        with self.open() as fp:
+            f_get_adj = self.f_get_adj
+            neighbors_u = {entry[1:] for entry in f_get_adj(fp, u)}
+            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)}
+
+        return neighbors_u & neighbors_v
+
+    def jaccard_coefficient(self, u:str, v:str) -> float:
+        """Compute the Jaccard similarity between two nodes' neighbor sets.
+
+        Defined as ``|common neighbors| / |union of neighbors|``, using the
+        same direction-agnostic notion of "neighbor" as ``neighbors``.
+        A value of 1.0 means ``u`` and ``v`` have identical neighbor sets; 0.0
+        means they share none (including the case where both have no
+        neighbors at all, by convention). Reads each node's adjacency
+        directly via ``f_get_adj``, same as ``common_neighbors``.
+
+        Args:
+            u (str): First node identifier.
+            v (str): Second node identifier.
+
+        Returns:
+            float: Jaccard similarity in ``[0, 1]``.
+        """
+        with self.open() as fp:
+            f_get_adj = self.f_get_adj
+            neighbors_u = {entry[1:] for entry in f_get_adj(fp, u)}
+            neighbors_v = {entry[1:] for entry in f_get_adj(fp, v)}
+
+        union = neighbors_u | neighbors_v
+        if not union:
+            return 0.0
+
+        return len(neighbors_u & neighbors_v) / len(union)
+
+    def successors(self, node_id:str) -> Dict[str,Dict[str,Any]]:
         """Get nodes reachable from a node in one hop, with edge properties.
 
         Follows outgoing directed edges and undirected edges from ``node_id``.
@@ -347,7 +471,7 @@ class GraphDb(JDb):
 
         return successors
 
-    def get_predecessors(self, node_id:str) -> Dict[str,Dict[str,Any]]:
+    def predecessors(self, node_id:str) -> Dict[str,Dict[str,Any]]:
         """Get nodes that can reach a node in one hop, with edge properties.
 
         Follows incoming directed edges and undirected edges of ``node_id``.
@@ -395,6 +519,46 @@ class GraphDb(JDb):
 
         return {'in': i_deg, 'out': o_deg, 'undirected': u_deg, 'total': i_deg + o_deg + u_deg}
 
+    def weighted_degree(self, node_id:str, weight_key:str='weight', default:float=1.0) -> Dict[str,float]:
+        """Sum edge weights incident to a node, grouped by direction.
+
+        Like ``degree``, but sums a numeric edge property instead of just
+        counting edges. Reads the node's adjacency plus one edge record per
+        incident edge, so the cost is proportional to the node's degree
+        rather than the total edge count.
+
+        Args:
+            node_id (str): Node identifier.
+            weight_key (str, optional): Edge property to sum. Defaults to
+                ``'weight'``.
+            default (float, optional): Value used for edges missing
+                ``weight_key``. Defaults to 1.0.
+
+        Returns:
+            Dict[str, float]: Sums with keys ``'in'`` (incoming directed),
+                ``'out'`` (outgoing directed), ``'undirected'``, and
+                ``'total'`` (sum of the three). All zero if the node is
+                missing or has no incident edges.
+        """
+        i_wt = o_wt = u_wt = 0.0
+        with self.open() as fp:
+            if self.f_has_node(fp, node_id):
+                f_read = self.f_read
+                _generate_edge_key = self._generate_edge_key
+                for entry in self.f_get_adj(fp, node_id):
+                    d, other = entry[0], entry[1:]
+                    if d == '>':
+                        edge_key = _generate_edge_key(node_id, other, True)
+                        o_wt += (f_read(fp, edge_key, copy=False) or {}).get(weight_key, default)
+                    elif d == '<':
+                        edge_key = _generate_edge_key(other, node_id, True)
+                        i_wt += (f_read(fp, edge_key, copy=False) or {}).get(weight_key, default)
+                    else:
+                        edge_key = _generate_edge_key(node_id, other, False)
+                        u_wt += (f_read(fp, edge_key, copy=False) or {}).get(weight_key, default)
+
+        return {'in': i_wt, 'out': o_wt, 'undirected': u_wt, 'total': i_wt + o_wt + u_wt}
+
     def boost_edge_weights(self, relation_type:str, boost_value:float):
         """Increase the ``weight`` property of all edges with a given relation.
 
@@ -409,15 +573,15 @@ class GraphDb(JDb):
         self.update_if(Edge._id.matches(self.EDGE_RE) & (Edge.relation == relation_type), \
                 patch=lambda edge,props: {'weight' : props.get('weight', 1) + boost_value})
 
-    def bfs_shortest_path(self, start:str, end:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[str]:
+    def bfs_shortest_path(self, source:str, target:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[str]:
         """Find a shortest path (fewest hops) between two nodes using BFS.
 
         By default directed edges are followed forward only and undirected
         edges are traversed in both directions.
 
         Args:
-            start (str): Start node identifier.
-            end (str): End node identifier.
+            source (str): Start node identifier.
+            target (str): End node identifier.
             direction (str, optional): Edge direction to follow from each
                 node — ``'out'`` (default) follows outgoing directed and
                 undirected edges, ``'in'`` follows incoming directed and
@@ -428,23 +592,23 @@ class GraphDb(JDb):
                 filtering).
 
         Returns:
-            List[str]: Node ids along a shortest path from ``start`` to
-                ``end`` inclusive, or an empty list if either node is missing
+            List[str]: Node ids along a shortest path from ``source`` to
+                ``target`` inclusive, or an empty list if either node is missing
                 or no path exists.
         """
         with self.open() as fp:
-            if not self.f_has_node(fp, start) or not self.f_has_node(fp, end):
+            if not self.f_has_node(fp, source) or not self.f_has_node(fp, target):
                 return []
 
-            previous_nodes = {start: None}
-            queue = deque([start])
-            visited = {start}
+            previous_nodes = {source: None}
+            queue = deque([source])
+            visited = {source}
             f_get_adj = self.f_get_adj
             f_read = self.f_read
             _generate_edge_key = self._generate_edge_key
             while queue:
                 current_node = queue.popleft()
-                if current_node == end:
+                if current_node == target:
                     path = []
                     while current_node is not None:
                         path.append(current_node)
@@ -468,7 +632,7 @@ class GraphDb(JDb):
                         queue.append(neighbor)
         return []
 
-    def dijkstra_shortest_path(self, start:str, end:str, weight_key:str="weight") -> Tuple[float,List[str]]:
+    def dijkstra_shortest_path(self, source:str, target:str, weight_key:str="weight") -> Tuple[float,List[str]]:
         """Find the minimum-weight path between two nodes using Dijkstra.
  
         Edge weights are read from each edge's ``weight_key`` property and
@@ -479,8 +643,8 @@ class GraphDb(JDb):
         traversed in both directions.
  
         Args:
-            start (str): Start node identifier.
-            end (str): End node identifier.
+            source (str): Start node identifier.
+            target (str): End node identifier.
             weight_key (str, optional): Edge property holding the weight.
                 Defaults to ``"weight"``.
  
@@ -490,19 +654,19 @@ class GraphDb(JDb):
                 missing or no path exists.
         """
         with self.open() as fp:
-            if not self.f_has_node(fp, start) or not self.f_has_node(fp, end):
+            if not self.f_has_node(fp, source) or not self.f_has_node(fp, target):
                 return float('inf'), []
 
             f_read = self.f_read
             f_get_adj = self.f_get_adj
             _generate_edge_key = self._generate_edge_key
 
-            distances = {start: 0}
-            previous_nodes = {start: None}
-            queue = [(0, start)]
+            distances = {source: 0}
+            previous_nodes = {source: None}
+            queue = [(0, source)]
             while queue:
                 current_dist, current_node = heappop(queue)
-                if current_node == end:
+                if current_node == target:
                     path = []
                     while current_node is not None:
                         path.append(current_node)
@@ -526,14 +690,14 @@ class GraphDb(JDb):
 
         return float('inf'), []
 
-    def dfs_traverse(self, start:str, visited:Optional[Set[str]]=None, direction:str='out', edge_filter:Optional[Any]=None) -> list:
-        """Depth-first traversal from a start node, following edge direction.
+    def dfs_traverse(self, source:str, visited:Optional[Set[str]]=None, direction:str='out', edge_filter:Optional[Any]=None) -> list:
+        """Depth-first traversal from a source node, following edge direction.
 
         By default directed edges are followed forward only and undirected
         edges are followed in both directions.
 
         Args:
-            start (str): Start node identifier.
+            source (str): Start node identifier.
             visited (Optional[Set[str]], optional): Pre-populated visited set,
                 allowing traversal state to be shared across calls. Mutated
                 in place. Defaults to a new empty set.
@@ -547,7 +711,7 @@ class GraphDb(JDb):
                 filtering).
 
         Returns:
-            list: Node ids in DFS pre-order starting from ``start``.
+            list: Node ids in DFS pre-order starting from ``source``.
         """
         f_get_adj = self.f_get_adj
         f_read = self.f_read
@@ -577,8 +741,8 @@ class GraphDb(JDb):
 
         if visited is None: visited = set()
         with self.open() as fp:
-            if self.f_has_node(fp, start):
-                return dfs(fp, start, visited)
+            if self.f_has_node(fp, source):
+                return dfs(fp, source, visited)
 
         return []
 
@@ -1059,7 +1223,95 @@ class GraphDb(JDb):
             f_get_adj = self.f_get_adj
             return {nid: len(f_get_adj(fp, nid)) / norm for nid in nodes}
 
-    def pagerank(self, damping:float=0.85, max_iter:int=100, tol:float=1e-6) -> Dict[str,float]:
+    def clustering(self, node_id:str) -> float:
+        """Compute the local clustering coefficient of a node.
+
+        Measures how connected a node's neighbors are to each other: the
+        fraction of neighbor pairs that are themselves connected, out of all
+        possible neighbor pairs. Uses the same direction-agnostic notion of
+        "neighbor" as ``neighbors``. Computed purely from adjacency sets
+        (no edge-key lookups needed), costing ``O(degree(node_id) +
+        sum(degree(neighbor) for neighbor in neighbors))``.
+
+        Args:
+            node_id (str): Node identifier.
+
+        Returns:
+            float: Clustering coefficient in ``[0, 1]``. 0.0 if the node is
+                missing or has fewer than 2 neighbors (no possible pairs).
+        """
+        with self.open() as fp:
+            if not self.f_has_node(fp, node_id):
+                return 0.0
+
+            f_get_adj = self.f_get_adj
+            neighbors = {entry[1:] for entry in f_get_adj(fp, node_id)}
+            k = len(neighbors)
+            if k < 2:
+                return 0.0
+
+            links = sum(len({entry[1:] for entry in f_get_adj(fp, nb)} & neighbors) for nb in neighbors)
+
+        return links / (k * (k - 1))
+
+    def average_clustering(self) -> float:
+        """Compute the average local clustering coefficient over all nodes.
+
+        Reads every node's adjacency in a single transaction (rather than
+        calling ``clustering`` once per node, which would open a
+        fresh transaction each time), then reduces to the mean.
+
+        Returns:
+            float: Mean clustering coefficient in ``[0, 1]``. 0.0 for an
+                empty graph.
+        """
+        with self.open() as fp:
+            f_get_adj = self.f_get_adj
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            if not nodes:
+                return 0.0
+            adj = {nid: {entry[1:] for entry in f_get_adj(fp, nid)} for nid in nodes}
+
+        total = 0.0
+        for nid in nodes:
+            neighbors = adj[nid]
+            k = len(neighbors)
+            if k >= 2:
+                links = sum(len(adj.get(nb, set()) & neighbors) for nb in neighbors)
+                total += links / (k * (k - 1))
+
+        return total / len(nodes)
+
+    def density(self) -> float:
+        """Compute the density of the graph.
+
+        Ratio of actual edges to the maximum possible number of edges. An
+        undirected edge is counted as contributing to both of its endpoints
+        (equivalent to two directed edges), matching how ``degree`` and
+        ``degree_centrality`` already treat undirected edges, so the result
+        is the standard directed-density formula when the graph is fully
+        directed and the standard undirected-density formula when it is
+        fully undirected.
+
+        Returns:
+            float: Density in ``[0, 1]``. 0.0 for a graph with fewer than 2
+                nodes.
+        """
+        with self.open() as fp:
+            n = sum(1 for _nid, _row in self.f_iter_nodes(fp))
+            if n < 2:
+                return 0.0
+
+            directed_count = undirected_count = 0
+            for (_src, edge_type, _dst), _row in self.f_iter_edges(fp):
+                if edge_type == '>':
+                    directed_count += 1
+                else:
+                    undirected_count += 1
+
+        return (directed_count + 2 * undirected_count) / (n * (n - 1))
+
+    def pagerank(self, alpha:float=0.85, max_iter:int=100, tol:float=1e-6) -> Dict[str,float]:
         """Rank nodes by PageRank over the directed graph.
 
         Outgoing directed edges and undirected edges (both directions) define
@@ -1068,7 +1320,7 @@ class GraphDb(JDb):
         ``tol`` or after ``max_iter`` iterations.
 
         Args:
-            damping (float, optional): Damping factor. Defaults to 0.85.
+            alpha (float, optional): Damping factor. Defaults to 0.85.
             max_iter (int, optional): Maximum iterations. Defaults to 100.
             tol (float, optional): L1 convergence threshold. Defaults to 1e-6.
 
@@ -1091,14 +1343,14 @@ class GraphDb(JDb):
                     entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
         rank = {nid: 1.0 / n for nid in nodes}
-        base = (1.0 - damping) / n
+        base = (1.0 - alpha) / n
         for _ in range(max_iter):
-            dangling = damping * sum(rank[nid] for nid in nodes if not out[nid]) / n
+            dangling = alpha * sum(rank[nid] for nid in nodes if not out[nid]) / n
             new_rank = {nid: base + dangling for nid in nodes}
             for nid in nodes:
                 targets = out[nid]
                 if targets:
-                    share = damping * rank[nid] / len(targets)
+                    share = alpha * rank[nid] / len(targets)
                     for t in targets:
                         new_rank[t] += share
 
@@ -1170,15 +1422,102 @@ class GraphDb(JDb):
 
         return cb
 
-    def all_shortest_paths(self, start:str, end:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[List[str]]:
+    def edge_betweenness_centrality(self, normalized:bool=True) -> Dict[Tuple[str,str,str],float]:
+        """Compute (shortest-path) edge betweenness centrality via Brandes.
+
+        Betweenness of an edge is the sum over all node pairs of the
+        fraction of shortest paths that cross it. Uses the same reachability
+        graph as ``betweenness_centrality`` (outgoing directed and undirected
+        edges, deduped so a pair linked by both counts once for path
+        purposes), then attributes each Brandes accumulation step to the
+        specific edge it crosses instead of to the intermediate node.
+
+        Args:
+            normalized (bool, optional): If True, scale by ``1 / (N*(N-1))``
+                when every edge is directed, or ``2 / (N*(N-1))`` if any
+                undirected edge is present — matching the directed/undirected
+                normalization convention networkx uses for ``nx.DiGraph`` vs
+                ``nx.Graph``. Defaults to True.
+
+        Returns:
+            Dict[Tuple[str, str, str], float]: Mapping of ``(src, edge_type,
+                dst)`` (the same edge-key tuple shape used by ``subgraph``/
+                ``export_graph``) to its betweenness score.
+        """
+        with self.open() as fp:
+            nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
+            adj = {}
+            f_get_adj = self.f_get_adj
+            for nid in nodes:
+                # dedupe: a neighbor linked by both a directed and an
+                # undirected edge must only be traversed once
+                adj[nid] = list(dict.fromkeys(\
+                        entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+
+            # resolve each (v, w) reachability pair to its real edge-key
+            # tuple once, up front: prefer the directed edge if both a
+            # directed and an undirected edge exist between the same pair
+            _generate_edge_key = self._generate_edge_key
+            edge_match = self.EDGE_RE.match
+            key_table = self.io.key_table
+            pair_to_edge = {}
+            all_directed = True
+            for v in nodes:
+                for w in adj[v]:
+                    if (v, w) not in pair_to_edge:
+                        directed_key = _generate_edge_key(v, w, True)
+                        all_directed, edge_key = (all_directed, directed_key) if directed_key in key_table else \
+                                                (False, _generate_edge_key(v, w, False))
+                        matched = edge_match(edge_key)
+                        if matched:
+                            pair_to_edge[(v, w)] = matched.groups()
+
+        cb_pair = {}
+        for s in nodes:
+            stack = []
+            preds = {w: [] for w in nodes}
+            sigma = {w: 0.0 for w in nodes}
+            sigma[s] = 1.0
+            dist = {w: -1 for w in nodes}
+            dist[s] = 0
+            queue = deque([s])
+            while queue:
+                v = queue.popleft()
+                stack.append(v)
+                for w in adj[v]:
+                    if dist[w] < 0:
+                        dist[w] = dist[v] + 1
+                        queue.append(w)
+                    if dist[w] == dist[v] + 1:
+                        sigma[w] += sigma[v]
+                        preds[w].append(v)
+
+            delta = {w: 0.0 for w in nodes}
+            while stack:
+                w = stack.pop()
+                for v in preds[w]:
+                    if sigma[w]:
+                        c = (sigma[v] / sigma[w]) * (1.0 + delta[w])
+                        cb_pair[(v, w)] = cb_pair.get((v, w), 0.0) + c
+                        delta[v] += c
+
+        result = {pair_to_edge[pair]: score for pair, score in cb_pair.items() if pair in pair_to_edge}
+
+        if normalized and len(nodes) > 1:
+            scale = (1.0 if all_directed else 2.0) / (len(nodes) * (len(nodes) - 1))
+            result = {k: v * scale for k, v in result.items()}
+
+        return result
+
+    def all_shortest_paths(self, source:str, target:str, direction:str='out', edge_filter:Optional[Any]=None) -> List[List[str]]:
         """Find every shortest (fewest-hop) path between two nodes.
 
         Runs a BFS that records all predecessors at the shortest distance,
         then enumerates every path through that predecessor DAG.
 
         Args:
-            start (str): Start node identifier.
-            end (str): End node identifier.
+            source (str): source node identifier.
+            target (str): target node identifier.
             direction (str, optional): Edge direction to follow from each
                 node — ``'out'`` (default) follows outgoing directed and
                 undirected edges, ``'in'`` follows incoming directed and
@@ -1190,23 +1529,23 @@ class GraphDb(JDb):
 
         Returns:
             List[List[str]]: All shortest paths (each a node-id list from
-                ``start`` to ``end`` inclusive), or an empty list if either
-                node is missing or no path exists. For ``start == end``
-                returns ``[[start]]``.
+                ``source`` to ``target`` inclusive), or an empty list if either
+                node is missing or no path exists. For ``source == target``
+                returns ``[[source]]``.
         """
         with self.open() as fp:
-            if not self.f_has_node(fp, start) or not self.f_has_node(fp, end):
+            if not self.f_has_node(fp, source) or not self.f_has_node(fp, target):
                 return []
 
-            if start == end:
-                return [[start]]
+            if source == target:
+                return [[source]]
 
             f_get_adj = self.f_get_adj
             f_read = self.f_read
             _generate_edge_key = self._generate_edge_key
-            dist = {start: 0}
-            preds = {start: []}
-            queue = deque([start])
+            dist = {source: 0}
+            preds = {source: []}
+            queue = deque([source])
             found_depth = None
             while queue:
                 cur = queue.popleft()
@@ -1226,26 +1565,26 @@ class GraphDb(JDb):
                         if neighbor not in dist:
                             dist[neighbor] = nd
                             preds[neighbor] = [cur]
-                            if neighbor == end:
+                            if neighbor == target:
                                 found_depth = nd
                             else:
                                 queue.append(neighbor)
                         elif dist[neighbor] == nd:
                             preds[neighbor].append(cur)
 
-            if end not in dist:
+            if target not in dist:
                 return []
 
-            # backtrack every path from end to start through preds
+            # backtrack every path from target to source through preds
             paths = []
             def build(node, acc):
-                if node == start:
-                    paths.append([start] + acc[::-1])
+                if node == source:
+                    paths.append([source] + acc[::-1])
                     return
                 for p in preds[node]:
                     build(p, acc + [node])
 
-            build(end, [])
+            build(target, [])
             return paths
 
     def strongly_connected_components(self) -> List[List[str]]:
@@ -1480,30 +1819,6 @@ class GraphDb(JDb):
                 adj_id, = matched.groups()
                 adj = f_read_row(fp, row_id, with_value=True)[-1] or []
                 yield adj_id, (row_id, adj)
-
-    def f_iter_neighbors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
-        """Iterate over all edges incident to a node, ignoring direction.
-
-        Reads the node's persisted adjacency (``X:{node_id}:``) so the work is
-        proportional to the node's degree rather than the total edge count.
-        Low-level helper; must be called inside an ``open()`` context.
-
-        Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
-            node_id (str): Node identifier.
-
-        Yields:
-            (str, str, int): ``(neighbor_id, edge_key, row_id)`` for each
-                edge touching ``node_id``.
-        """
-        key_table = self.io.key_table
-        _generate_edge_key = self._generate_edge_key
-        for entry in self.f_get_adj(fp, node_id):
-            direction, neighbor = entry[0], entry[1:]
-            edge_key = _generate_edge_key(neighbor, node_id, True) if direction == '<' else \
-                        _generate_edge_key(node_id, neighbor, direction == '>')
-
-            yield neighbor, edge_key, key_table.get(edge_key, -1)
 
     def f_iter_successors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
         """Iterate over one-hop successors of a node, respecting direction.
