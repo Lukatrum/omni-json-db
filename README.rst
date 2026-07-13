@@ -8,10 +8,6 @@
 
 |Build Status| |readthedocs| |Pylint| |Codacy| |Coverage|
 
-📌 Supported Python Versions
-****************************
-
-**omni-json-db** has been tested with Python 3.7+ and PyPy3.
 
 |Python Version|
 
@@ -24,35 +20,62 @@
 **************
 
 - `✨ Introduction`_
+- `🤔 Why omni-json-db?`_
+- `🚀 Features`_
 - `🛠️ Quick Start`_
 - `📝 Specifications`_
 - `📊 Benchmarking`_
 - `📄 Documentation <https://omni-json-db.readthedocs.io>`_
 - `👥 Contributing`_
+- `📄 License`_
 
 
 ✨ Introduction
 ****************
 **omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store, the powerful querying capabilities of a document database, and the relationships of a graph database.
 
-Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, a distributed microservice, or a complex knowledge graph, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
-
-Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo), and native graph operations.
+Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer. Whether you are building a local cache, a log aggregator, a distributed microservice, or a complex knowledge graph, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 * **Server-LESS**: Direct disk access without the overhead of a database server.
 * **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
 
+
+🤔 Why omni-json-db?
+********************
+
+Unlike traditional SQL or NoSQL databases, **omni-json-db** lets you use native
+Python syntax — slicing, lambdas, regex, and ``set`` operations — to query and
+manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
+engine, and pluggable serialization/compression.
+
++---------------------------+-------------------+-----------+-----------+-----------+
+|                           | **omni-json-db**  | TinyDB    | SQLite    | shelve    |
++===========================+===================+===========+===========+===========+
+| Pythonic queries (lambda) | ✅                 | ✅         | ❌         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+| Graph database engine     | ✅                 | ❌         | ❌         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+| Undo / Redo (Time-Travel) | ✅                 | ❌         | ❌         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+| Compression built-in      | ✅ (6 algorithms)  | ❌         | ❌         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+| Network mode              | ✅                 | ❌         | ❌         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+| Thread-safe concurrency   | ✅ (MR/SW)         | ❌         | ✅         | ❌         |
++---------------------------+-------------------+-----------+-----------+-----------+
+
+ **omni-json-db** has been tested with Python 3.7+ and PyPy3.
+
 🚀 Features
 ***********
-* **Native Graph Database Engine**: Transform your Key-Value store into a powerful Property Graph! The new ``GraphDb`` layer provides seamless node and edge management, $O(1)$ adjacency indexing, and built-in classic graph algorithms (BFS/Dijkstra shortest paths, DFS traversal, cycle detection, topological sorting, and connected components) without compromising the extreme speed of the underlying engine.
-  [refer to `Graph Database`_]
+* **Native Graph Database Engine**: Transform your Key-Value store into a powerful Property Graph! The new ``GraphDb`` layer provides seamless node and edge management, O(1) adjacency indexing, and built-in classic graph algorithms (BFS/Dijkstra shortest paths, DFS traversal, cycle detection, topological sorting, and connected components) without compromising the extreme speed of the underlying engine. [refer to `Graph Database`_]
 
 * **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. [refer to `Basic`_ + `Operator`_]
 
 * **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
 
-* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
+* **Powerful Query Engine**: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
 
@@ -68,7 +91,7 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 
 * **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (*SQLite*) into *NoSQL* grouped structures. It also natively supports parsing structured configuration files (*INI*, *TOML*) and handling complex *CSV* datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
 
-* **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Time-Series`_]
+* **Time-Series Support**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Time-Series`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
@@ -102,7 +125,7 @@ Basic
    user = jdb["user1"]
    print(user["name"], user["role"]) # Output: Ryan Developer
    
-All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``, ``set()``, ``pop()``, ``setdefault()``, ``update()``.
+All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``,  ``pop()``, ``setdefault()``, ``update()``.
 
 In-Memory Mode
 ---------------
@@ -126,7 +149,7 @@ In-Memory Mode
    # Store data to 2nd JDb
    jdb2["user2"] = {"name" : "Kathy", "role": "CEO"}
 
-   # Retrieve the new inserted data (by 2nd JDb)
+   # newly inserted data (by 2nd JDb)
    print(jdb1["user2"]["name"]) # Output: Kathy
 
 Query Engine
@@ -247,7 +270,7 @@ Groups Mode
    print(jdb['red:::apple'])           # Output: {'red:::apple': {'qty': 1}}
    print(jdb['yellow:::banana'])       # Output: {'yellow:::banana': {'qty': 4}}
 
-   # find fruits which contains 'a' from all groups
+   # find fruits which contain 'a' from all groups
    matches = jdb.find(r':::a')
    print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
 
@@ -286,7 +309,7 @@ Graph Database
    print(f"Distance: {dist}, Path: {path}") 
    # Output: Distance: 0.5, Path: ['Alice', 'Charlie']
 
-   # Detect cycles in the graph (Alice -> Bob -> Charlie - Alice)
+   # Detect cycles in the graph (Alice -> Bob -> Charlie -> Alice)
    print(db.is_cyclic()) 
    # Output: True 
 
@@ -322,17 +345,17 @@ CSV Import / Export
    jdb1.to_csv('example.csv')
 
    # show table
-   jdb1.show();
+   jdb1.show()
 
    # create another JDb in memory
    jdb2 = JDb()
    
    # import the data from CSV
    jdb2.from_csv('example.csv')
-   print(jdb2.find(RE='Bob')) # Output: {'name': 'Bob', 'age': 42}
+   print(jdb2.find(RE='Bob')) # Output: {'2': {'name': 'Bob', 'age': 42}}
 
    # show table
-   jdb2.show(RE='Bob');
+   jdb2.show(RE='Bob')
 
 INI / TOML Import
 -----------------
@@ -370,7 +393,7 @@ INI / TOML Import
 SQLite Import
 -------------
 
-Step 1: Prepare *sample.sql*
+Step 1: Prepare *sample.sqlite*
 
 .. code-block:: python
 
@@ -424,7 +447,7 @@ Step 2: Import to ``JDb``
    jdb = JDb("migrated_data.jdb")
 
    # Load an entire SQLite database with one line of code
-   jdb.from_sqlite('sample.sql')
+   jdb.from_sqlite('sample.sqlite')
 
    # SQLite tables (e.g., 'projects' and 'project_logs') automatically become groups
    projects = jdb['projects']
@@ -484,7 +507,7 @@ Change Type
    assert jdb == fruits
    print(jdb.data_type, jdb.zip_type) # Output: J+J no
 
-   # change date_type to 'S+S' and zip_type to 'lz'
+   # change data_type to 'S+S' and zip_type to 'lz'
    jdb.upgrade(data_type='S+S', zip_type='lz')
    assert jdb == fruits
    print(jdb.data_type, jdb.zip_type) # Output: S+S lz
@@ -741,12 +764,12 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res2 = jdb.find(vals={'name': 'Alice'})
    assert res == res2
 
-   # RE/RE2 convert value into JSON string format for searching.
+   # converts values into JSON string format for searching.
    # Find any record that has the string 'designer' inside it
    res = jdb.find(RE=r'designer')
    assert list(res) == ['user_4']
 
-   # RE2 remove some JSON symbol (,[]{}") before searching
+   # RE2 removes JSON symbols (,[]{}") before searching
    res = jdb.find(RE2=r'role:designer')
    assert list(res) == ['user_4']
 
@@ -891,14 +914,14 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res2 = jdb.find(vals={'age.$mod': (2, 0)}, limit=1)
    assert res == res2
 
-   # Users has email
+   # Users with email
    res = jdb.find(vals={'email': lambda v: v != ''})
    assert list(res) == ['user_1', 'user_4']
 
    res2 = jdb.find(EXISTS='email')
    assert res == res2
 
-   # Users don't have email
+   # Users without email
    res = jdb.find(NOT={'email': lambda v: v != ''})
    assert list(res) == ['user_2', 'user_3']
 
@@ -1089,7 +1112,7 @@ Operators Reference
      - Casts the value to a float before comparing.
      - ``{'$float': 1.0}``
    * - ``$int``
-     - Casts the value to a integer before comparing.
+     - Casts the value to an integer before comparing.
      - ``{'$int': 1.0}``
    * - ``$neg``
      - Negates the value (``-val``) before comparing.
@@ -1200,7 +1223,7 @@ For developers who prefer a Pythonic and object-oriented syntax for filtering da
    res = jdb.update_if(User.role == 'admin', {'role': 'Administrator'})
    assert res == 1 and (User.role == 'Administrator') in jdb
    
-   jdb.show();
+   jdb.show()
 
 Methods & Operators Reference
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1245,7 +1268,7 @@ Methods & Operators Reference
      - Regular expression search (equivalent to ``re.search``)
      - ``User.name.matches(r'[bB]ob')``
    * - ``.fullmatch(pattern)``
-     - expression full match (equivalent to ``re.fullmatch``)
+     - Regular expression full match (equivalent to ``re.fullmatch``)
      - ``User.name.fullmatch(r'.lic.')``
    * - ``.one_of(col)``
      - Value is within the specified collection
@@ -1270,10 +1293,10 @@ Methods & Operators Reference
      - ``User.age.type_of(int)``
    * - ``.mod(div, rem)``
      - Modulo condition (remainder is ``rem`` when divided by ``div``)
-     - ``User._date.mode(7, 5)``
+     - ``User._date.mod(7, 5)``
    * - ``.near(target, tol)``
      -  Numeric value is near the target within tolerance ``tol``
-     - ``User._date.near(toady, 1)``
+     - ``User._date.near(today, 1)``
    * - ``.test(func)``
      - Passes a custom Lambda function for condition evaluation
      - ``User.age.test(lambda v: 40 >= v > 18)``
@@ -1291,7 +1314,7 @@ Methods & Operators Reference
      - ``Query().price.round() == 2``
    * - ``.float()``
      - Casts the value to a float before comparing.
-     - ``Query().price.float() == 2.1```
+     - ``Query().price.float() == 2.1``
    * - ``.int()``
      - Casts the value to a integer before comparing.
      - ``Query().price.int() != 1```
@@ -1466,10 +1489,10 @@ Configure ``data_type`` during initialization:
 * ``S+P``: MsgPack Key + Pickle Value
 * ``S+Y``: MsgPack Key + YAML Value
 
-*Data size = 70,840,580 (MB = 1,000,000B, no zip)*
+*Data size = 70,840,580 bytes (MB = 1,000,000 bytes, no zip)*
 
 +-------------------+------------+-------+----------+-----------+----------------+------------------+
-| ``data_type``     | size       | ratio | read     | write     | GOODs          | BADs             |
+| ``data_type``     | size       | ratio | read     | write     | Pros           | Cons             |
 +===================+============+=======+==========+===========+================+==================+
 | ``J+J`` or ``S+J``| 70,840,580 | 1.00  | 75.3MB/s | 358.0MB/s |* fastest write |* no set [a]_     |
 |                   |            |       |          |           |* faster read   |* no tuple [a]_   |
@@ -1518,7 +1541,7 @@ Configure ``zip_type`` during initialization:
 **Data size = 70,840,580 (MB = 1,000,000B)**
 
 +------------+------------+-------+----------+-----------+---------------+---------------+
-|``zip_type``| size       | ratio | read     | write     | GOODs         | BADs          |
+|``zip_type``| size       | ratio | read     | write     | Pros          | Cons          |
 +============+============+=======+==========+===========+===============+===============+
 | ``no``     | 70,840,580 | 1.00  | 75.3MB/s | 358.0MB/s |* fastest speed|* biggest size |
 +------------+------------+-------+----------+-----------+---------------+---------------+
@@ -1573,19 +1596,19 @@ Testing
 
 .. code-block:: python
 
-   >> from omni_json_db import JDb
-   >> size = 1_000_000
-   >> jdb = JDb(data_type='J+J')
-   >> data = {f'key{k}':k for k in range(size)}
+   >>> from omni_json_db import JDb
+   >>> size = 1_000_000
+   >>> jdb = JDb(data_type='J+J')
+   >>> data = {f'key{k}':k for k in range(size)}
    
-   >> # Benchmarking operations
-   >> jdb += data        # insert
-   >> jdb[:]             # get_all
-   >> jdb -= data        # remove
-   >> jdb ^= data        # revert=unremove
-   >> jdb[data] = -1     # replace
-   >> jdb ^= data        # revert=unmodify
-   >> print(jdb == data) # Output: True
+   >>> # Benchmarking operations
+   >>> jdb += data        # insert
+   >>> jdb[:]             # get_all
+   >>> jdb -= data        # remove
+   >>> jdb ^= data        # revert=unremove
+   >>> jdb[data] = -1     # replace
+   >>> jdb ^= data        # revert=unmodify
+   >>> print(jdb == data) # Output: True
 
 Results
 -------
@@ -1608,15 +1631,25 @@ Results
 | 1M    | 3.87 s  | 2.78 s  | 7 s     | 6.09 s   | 8.15 s  | 9.83 s   |
 +-------+---------+---------+---------+----------+---------+----------+
 
+ 
 👥 Contributing
 ***************
-
-Whether reporting bugs, discussing improvements and new ideas or writing extensions: Contributions to **omni-json-db** are welcome! Here's how to get started:
-
-1. Check for open issues or open a fresh issue to start a discussion around a feature idea or a bug.
-2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on Github, create a new branch off the **master** branch and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
+ 
+Whether reporting bugs, discussing improvements and new ideas, or writing
+extensions — contributions to **omni-json-db** are welcome! Here's how to get started:
+ 
+1. Check for open issues or open a fresh issue to start a discussion around a feature idea or a bug. Issues labeled ``good first issue`` are a great entry point.
+2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on GitHub, create a new branch off **main**, and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
 3. Write a test which shows that the bug was fixed or that the feature works as expected.
 4. Send a pull request and bug the maintainer until it gets merged and published ☺
+ 
+ 
+📄 License
+**********
+ 
+**omni-json-db** is released under the terms described in the
+`LICENSE <https://github.com/lukatrum/omni-json-db/blob/main/LICENSE>`_ file.
+ 
 
 .. |Logo| image:: https://raw.githubusercontent.com/lukatrum/omni-json-db/master/artwork/logo.png
       :height: 400px
