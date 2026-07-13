@@ -2360,6 +2360,7 @@ class GraphDb(JDb):
             io = self.io
             f_write = self.f_write
             f_delete = self.f_delete
+            f_has_node = self.f_has_node
             key_table = io.key_table
             adj_match = self.ADJ_RE.match
             edge_match = self.EDGE_RE.match
@@ -2375,6 +2376,10 @@ class GraphDb(JDb):
                 matched = edge_match(key)
                 if matched:
                     src, edge_type, dst = matched.groups()
+                    if not f_has_node(fp, src) or not f_has_node(fp, dst):
+                        old_keys.append((row_id, key))
+                        continue
+
                     n_edges += 1
                     if edge_type == '>':
                         n_di_edges += 1

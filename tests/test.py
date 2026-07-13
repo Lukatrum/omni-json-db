@@ -1122,6 +1122,13 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
             self.assertIn('C', db.neighbors('A'))
 
+            del db['N:C:']
+            v4 = db.verify_index()
+            self.assertNotEqual(v4['counters']['N_NODES'], {})
+            db.reindex()
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
+            self.assertFalse(db.has_node('C'))
+
             # =====================================================
             # common_neighbors() / jaccard_coefficient()
             # =====================================================
