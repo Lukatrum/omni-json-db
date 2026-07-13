@@ -25,12 +25,12 @@ class GraphDb(JDb):
     a derived adjacency blob under ``X:{node_id}:`` (a list of
     direction-prefixed neighbor ids) that traversals read on demand instead
     of scanning every edge, and the whole graph has three maintained counter
-    keys — ``N_NODES``, ``N_EDGES``, ``N_DIRECTED`` — backing the O(1)
-    ``number_of_nodes()``/``number_of_edges()``/``is_directed()``/
+    keys — ``N_NODES`` , ``N_EDGES`` , ``N_DIRECTED`` — backing the O(1)
+    ``number_of_nodes()`` / ``number_of_edges()`` / ``is_directed()`` /
     ``density()``. Both the adjacency blobs and the counters are derived,
-    cached data that ``add_node``/``add_edge``/``remove_node``/
+    cached data that ``add_node`` / ``add_edge`` / ``remove_node`` /
     ``remove_edge`` (and their low-level ``f_`` equivalents) keep in sync as
-    a side effect of every write; ``verify_index()``/``reindex()`` detect and
+    a side effect of every write; ``verify_index()`` / ``reindex()`` detect and
     repair drift in the adjacency blobs specifically if an edge key is ever
     created or deleted outside those methods, and a full ``reindex()`` also
     recomputes all three counters from scratch.
@@ -48,7 +48,7 @@ class GraphDb(JDb):
     NODE_RE     = re_compile(r'^N:(.+?):$')
     N_NODES     = '#:N:'    # number of nodes Key ID
     N_EDGES     = '#:E:'    # number of edges key ID
-    N_DIRECTED  = '#:>:' # number of directed edges key ID
+    N_DIRECTED  = '#:>:'    # number of directed edges key ID
 
     def __init__(self,\
             KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\
@@ -892,8 +892,8 @@ class GraphDb(JDb):
                 from. Defaults to None (try every node).
 
         Returns:
-            List[Tuple[str, str, str]]: The cycle's edges as ``(src,
-                edge_type, dst)`` tuples, in traversal order around the cycle
+            List[Tuple[str, str, str]]: The cycle's edges as ``(src, edge_type, dst)``
+                tuples, in traversal order around the cycle
                 (each edge's ``dst`` equals the next edge's ``src``) — for an
                 undirected edge this may list its endpoints in the opposite
                 order from its canonical storage key (as used by
@@ -1171,7 +1171,7 @@ class GraphDb(JDb):
         return result
 
     def ego_graph(self, node_id:str, k:int=1, direction:str='both') -> Dict[str,Any]:
-        """Extract the ``k``-hop ego subgraph centered on a node.
+        """Extract the ``k`` - hop ego subgraph centered on a node.
 
         The subgraph contains ``node_id`` plus every node within ``k`` hops
         (using ``direction`` for reachability), and every edge of the graph
@@ -1180,14 +1180,13 @@ class GraphDb(JDb):
         Args:
             node_id (str): Center node identifier.
             k (int, optional): Neighbourhood radius in hops. Defaults to 1.
-            direction (str, optional): Edge direction used to decide
-                reachability of the node set — ``'out'``, ``'in'`` or
-                ``'both'`` (default). See ``k_hop_neighbors``.
+            direction (str, optional): Edge direction 
+                used to decide reachability of the node set — 
+                ``'out'``, ``'in'`` or ``'both'`` (default). See ``k_hop_neighbors`` .
 
         Returns:
-            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
-                dst): props}}`` for the induced subgraph. Empty node/edge maps
-                if ``node_id`` is missing.
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type, dst): props}}`` 
+                 for the induced subgraph. Empty node/edge maps if ``node_id`` is missing.
         """
         result = {'nodes': {}, 'edges': {}}
         with self.open() as fp:
@@ -1234,10 +1233,9 @@ class GraphDb(JDb):
             nodes (Any): Iterable of node identifiers to include.
 
         Returns:
-            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type,
-                dst): props}}`` for the induced subgraph — every edge of the
-                graph whose endpoints are both in ``nodes``. Empty node/edge
-                maps if none of the given ids exist.
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': {(src, type, dst): props}}`` 
+                for the induced subgraph — every edge of the graph whose endpoints are both in ``nodes``. 
+                Empty node/edge maps if none of the given ids exist.
         """
         result = {'nodes': {}, 'edges': {}}
         with self.open() as fp:
@@ -1288,8 +1286,7 @@ class GraphDb(JDb):
                 Defaults to None (export the whole graph).
 
         Returns:
-            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': [{'u': src,
-                'v': dst, 'directed': bool, 'properties': props}, ...]}``.
+            Dict[str, Any]: ``{'nodes': {id: props}, 'edges': [{'u': src, 'v': dst, 'directed': bool, 'properties': props}, ...]}``.
         """
         if nodes is not None:
             sub = self.subgraph(nodes)
@@ -1319,14 +1316,13 @@ class GraphDb(JDb):
 
         Args:
             data (Dict[str, Any]): Export data in the format produced by
-                ``export_graph`` — ``{'nodes': {id: props}, 'edges': [{'u':
-                src, 'v': dst, 'directed': bool, 'properties': props}, ...]}``.
+                ``export_graph``
+                - ``{'nodes': {id: props}, 'edges': [{'u': src, 'v': dst, 'directed': bool, 'properties': props}, ...]}``.
 
         Returns:
-            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges':
-                n_edges_written}`` — counts of add calls that actually wrote
-                (new or changed), per the return value of ``add_node``/
-                ``add_edge``.
+            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges': n_edges_written}`` 
+                — counts of add calls that actually wrote (new or changed),
+                    per the return value of ``add_node``/ ``add_edge``.
         """
         add_node = self.add_node
         add_edge = self.add_edge
@@ -1424,8 +1420,7 @@ class GraphDb(JDb):
                 import of ``networkx`` is required by this method itself).
 
         Returns:
-            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges':
-                n_edges_written}``.
+            Dict[str, int]: ``{'nodes': n_nodes_written, 'edges': n_edges_written}``.
 
         Raises:
             KeyError: If a node id is empty or contains ``':'``, or if an
@@ -1992,9 +1987,10 @@ class GraphDb(JDb):
                 ``nx.Graph``. Defaults to True.
 
         Returns:
-            Dict[Tuple[str, str, str], float]: Mapping of ``(src, edge_type,
-                dst)`` (the same edge-key tuple shape used by ``subgraph``/
+            Dict[Tuple[str, str, str], float]: Mapping of ``(src, edge_type, dst)``
+                (the same edge-key tuple shape used by ``subgraph`` /
                 ``export_graph``) to its betweenness score.
+
         """
         with self.open() as fp:
             nodes = []
@@ -2276,25 +2272,22 @@ class GraphDb(JDb):
         (the source of truth) against what is actually stored in each node's
         ``X:`` blob, without modifying anything. This detects drift caused by
         an edge key being deleted (or otherwise written) directly, bypassing
-        ``remove_edge``/``f_remove_edge``, which would leave a stale entry in
+        ``remove_edge`` / ``f_remove_edge`` , which would leave a stale entry in
         the surviving endpoint's adjacency and never touch the deleted edge's
         own endpoint.
 
-        Also compares the maintained ``N_NODES``/``N_EDGES``/``N_DIRECTED``
-        counters (backing ``number_of_nodes()``/``number_of_edges()``/
-        ``is_directed()``/``density()``) against a fresh count taken during
+        Also compares the maintained ``N_NODES`` / ``N_EDGES`` / ``N_DIRECTED`` 
+        counters (backing ``number_of_nodes()`` / ``number_of_edges()`` / 
+        ``is_directed()``/ ``density()`` ) against a fresh count taken during
         the same scan — those counters are derived, cached data with the
         same drift risk as the adjacency blobs, whether from a raw key
         write/delete or a bug in the counter-maintenance code itself.
 
         Returns:
-            Dict[str, Any]: ``{'missing': [(node_id, entry), ...], 'orphan':
-                [(node_id, entry), ...], 'counters': {name: {'cached': int,
-                'actual': int}, ...}}``. ``missing`` entries should exist (a
-                backing edge is present) but do not. ``orphan`` entries exist
-                in a node's adjacency but have no backing edge. ``counters``
-                only includes an entry for a counter that is actually out of
-                sync (keyed by ``'N_NODES'``/``'N_EDGES'``/``'N_DIRECTED'``).
+            Dict[str, Any]: 
+                ``{'missing': [(node_id, entry), ...], 'orphan': [(node_id, entry), ...], 'counters': {name: {'cached': int, 'actual': int}, ...}}`` .
+                ``missing`` entries should exist (a backing edge is present) but do not. ``orphan`` entries exist in a node's adjacency but have no backing edge. 
+                ``counters`` only includes an entry for a counter that is actually out of sync (keyed by ``'N_NODES'``/``'N_EDGES'``/``'N_DIRECTED'``).
                 Everything empty means the graph is fully consistent.
         """
         with self.open() as fp:
@@ -2348,13 +2341,11 @@ class GraphDb(JDb):
         Drops every ``X:`` adjacency key and regenerates it from the ``E:``
         edge records. Use to repair adjacency drift — most commonly after an
         edge key was deleted directly (e.g. via a raw key delete or an
-        external process) instead of through ``remove_edge``/
-        ``f_remove_edge``, which leaves the other endpoint's adjacency
-        pointing at a now-nonexistent edge.
+        external process) instead of through ``remove_edge``/ ``f_remove_edge``,
+        which leaves the other endpoint's adjacency pointing at a now-nonexistent edge.
  
         Returns:
-            Dict[str, int]: ``{'removed': n_old_adjacency_keys, 'rebuilt':
-                n_new_adjacency_keys}``.
+            Dict[str, int]: ``{'removed': n_old_adjacency_keys, 'rebuilt': n_new_adjacency_keys}`` .
         """
         with self.open(read_only=False) as fp:
             io = self.io

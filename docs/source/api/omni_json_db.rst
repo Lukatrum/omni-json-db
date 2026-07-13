@@ -11,6 +11,7 @@ omni\_json\_db.jdb
    :members:
    :show-inheritance:
    :undoc-members:
+   :exclude-members:
 
 omni\_json\_db.jdb\_file
 ------------------------------------
@@ -19,6 +20,7 @@ omni\_json\_db.jdb\_file
    :members:
    :show-inheritance:
    :undoc-members:
+   :exclude-members: 
 
 omni\_json\_db.jdb\_graph
 ------------------------------------
@@ -45,7 +47,7 @@ omni\_json\_db.jdb\_lite
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: JFlag
+   :exclude-members: JFlag, JDbReader
 
 omni\_json\_db.jdb\_net
 ------------------------------------
