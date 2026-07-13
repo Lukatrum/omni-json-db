@@ -32,11 +32,11 @@
 
 ✨ 簡介
 *******
-**omni-json-db** 是一款專為 Python 開發者設計的高效能嵌入式資料庫引擎。 它填補了極速鍵值（Key-Value）儲存與強大文件資料庫查詢功能之間的空白。   
+**omni-json-db** 是一款專為 Python 開發者設計的高效能嵌入式資料庫引擎。 它填補了極速鍵值（Key-Value）儲存、強大文件資料庫查詢功能，以及圖形資料庫關聯性之間的空白。
 
-**omni-json-db** 專為超高吞吐量和執行緒安全而構建，利用現代序列化技術（如 *JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）和壓縮算法，提供了一個在處理大量 *JSON* 工作負載時通常比 *SQLite* 快顯著許多的儲存層。 無論您是在構建本地快取、日誌聚合器還是分散式微服務，它都能以「零配置」的簡易性處理大規模資料。
+**omni-json-db** 專為超高吞吐量和執行緒安全而構建，利用現代序列化技術（如 *JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）和壓縮算法，提供了一個在處理大量 *JSON* 工作負載時通常比 *SQLite* 快顯著許多的儲存層。 無論您是在構建本地快取、日誌聚合器、分散式微服務，還是複雜的知識圖譜，它都能以「零配置」的簡易性處理大規模資料。
 
-與傳統的 *SQLite* 或 *NoSQL* 資料庫不同，**omni-json-db** 允許您使用原生的 Python 語法（切片、Lambdas、正則表達式、集合運算）來查詢和操作資料。 它還內建了「時光旅行」功能，支援狀態回滾（復原/重做）。   
+與傳統的 *SQLite* 或 *NoSQL* 資料庫不同，**omni-json-db** 允許您使用原生的 Python 語法（切片、Lambdas、正則表達式、集合運算）來查詢和操作資料。 它還內建了「時光旅行」功能，支援狀態回滾（復原/重做）以及原生的圖形操作。 
 
 * **無模式 (Schema-LESS)**：無需預先定義表格即可儲存複雜、嵌套的資料。   
 
@@ -47,7 +47,9 @@
 🚀 核心特性
 ***********
 
-* **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]  
+* **原生圖形資料庫引擎 (Native Graph Database Engine)**：將您的鍵值儲存轉換為強大的屬性圖（Property Graph）！全新的 ``GraphDb`` 層提供無縫的節點與邊緣管理、$O(1)$ 鄰接索引，並內建經典圖形演算法（BFS/Dijkstra 最短路徑、DFS 遍歷、循環偵測、拓撲排序及連通分量），同時維持底層引擎的極致速度。 [參考 `圖形資料庫`_]
+
+* **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]
 
 * **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
 
@@ -243,6 +245,57 @@ Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``
    # 查詢所有群組的水果有'a'字
    matches = jdb.find(r':::a')
    print(matches) # 輸出: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+
+圖形資料庫
+----------
+**omni-json-db** 透過 ``GraphDb`` 類別原生支援屬性圖（Property Graph）結構。您可以輕鬆管理節點、邊緣，並開箱即用地執行複雜的圖形演算法。
+
+.. code-block:: python
+
+   from omni_json_db import GraphDb, Query
+
+   # 初始化圖形資料庫（記憶體模式或檔案模式）
+   db = GraphDb()
+
+   # 1. 新增具備無模式（Schema-less）屬性的節點
+   db.add_node('Alice', age=25, role='admin')
+   db.add_node('Bob', age=30, role='user')
+   db.add_node('Charlie', age=35, role='user')
+
+   # 2. 新增具備屬性的邊緣（有向或無向）
+   db.add_edge('Alice', 'Bob', directed=True, weight=1.5, relation='friend')
+   db.add_edge('Bob', 'Charlie', directed=True, weight=2.0, relation='colleague')
+   db.add_edge('Charlie', 'Alice', directed=False, weight=0.5) # 無向邊緣
+
+   # 3. 鄰居與鄰接查詢（$O(1)$ 尋找）
+   print(db.neighbors('Alice')) 
+   # 輸出: {'Bob', 'Charlie'}
+   
+   print(db.degree('Alice'))
+   # 輸出: {'in': 0, 'out': 1, 'undirected': 1, 'total': 2}
+
+   # 4. 內建經典圖形演算法
+   # 基於邊緣權重，使用 Dijkstra 尋找最短路徑
+   dist, path = db.dijkstra_shortest_path('Alice', 'Charlie', weight_key='weight')
+   print(f"距離: {dist}, 路徑: {path}") 
+   # 輸出: 距離: 3.5, 路徑: ['Alice', 'Bob', 'Charlie']
+
+   # 偵測圖形中的循環 (Alice -> Bob -> Charlie - Alice)
+   print(db.is_cyclic()) 
+   # 輸出: True 
+
+   # 5. 無縫整合查詢引擎
+   # 您仍然可以使用強大的 Query 物件來過濾節點與邊緣！
+   q = Query()
+   admin_nodes = db.find_nodes(q.role == 'admin')
+   print(list(admin_nodes)) 
+   # 輸出: ['Alice']
+
+   # 6. 級聯刪除
+   # 刪除節點會自動清理所有連接的邊緣
+   db.remove_node('Bob')
+   print(db.has_node('Bob')) # 輸出: False
+   print(db.get_edge('Alice', 'Bob', directed=True)) # 輸出: None
 
 CSV 匯入 / 匯出
 -------------------

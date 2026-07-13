@@ -32,17 +32,11 @@
 
 ✨ はじめに
 **********
-**omni-json-db** は、Python 開発者のために設計された高性能な組み込みデータベースエンジンです。超高速なキー・バリュー（Key-Value）ストアと、強力なドキュメントデータベースのクエリ機能との間のギャップを埋めるツールです。
+**omni-json-db** は、Python 開発者のために設計された高性能な組み込みデータベースエンジンです。超高速なキー・バリュー（Key-Value）ストア、強力なドキュメントデータベースのクエリ機能、そしてグラフデータベースのリレーションシップの間のギャップを埋めるツールです。
 
-超高スループットとスレッドセーフを考慮して構築された **omni-json-db** は、最新のシリアライズ技術（*JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）と圧縮アルゴリズムを活用し、大量の *JSON* ワークロードを処理する際に、通常 *SQLite* よりも大幅に高速なストレージレイヤーを提供します。ローカルキャッシュ、ログアグリゲーター、分散マイクロサービスのいずれを構築する場合でも、「ゼロコンフィギュレーション」のシンプルさで大規模なデータを処理できます。
+超高スループットとスレッドセーフを考慮して構築された **omni-json-db** は、最新のシリアライズ技術（*JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）と圧縮アルゴリズムを活用し、大量の *JSON* ワークロードを処理する際に、通常 *SQLite* よりも大幅に高速なストレージレイヤーを提供します。ローカルキャッシュ、ログアグリゲーター、分散マイクロサービス、あるいは複雑なナレッジグラフのいずれを構築する場合でも、「ゼロコンフィギュレーション」のシンプルさで大規模なデータを処理できます。
 
-従来の *SQLite* や *NoSQL* データベースとは異なり、**omni-json-db** ではネイティブな Python 構文（スライス、Lambda、正規表現、集合演算）を使用してデータのクエリと操作を行うことができます。また、状態のロールバック（元に戻す / やり直し）をサポートする「タイムトラベル」機能も組み込まれています。
-
-**omni-json-db** 是一款專為 Python 開發者設計的高效能嵌入式資料庫引擎。 它填補了極速鍵值（Key-Value）儲存與強大文件資料庫查詢功能之間的空白。   
-
-**omni-json-db** 專為超高吞吐量和執行緒安全而構建，利用現代序列化技術（如 *JSON*、*MsgPack*、*marshal*、*pickle*、*YAML*）和壓縮算法，提供了一個在處理大量 *JSON* 工作負載時通常比 *SQLite* 快顯著許多的儲存層。 無論您是在構建本地快取、日誌聚合器還是分散式微服務，它都能以「零配置」的簡易性處理大規模資料。
-
-與傳統的 *SQLite* 或 *NoSQL* 資料庫不同，**omni-json-db** 允許您使用原生的 Python 語法（切片、Lambdas、正則表達式、集合運算）來查詢和操作資料。 它還內建了「時光旅行」功能，支援狀態回滾（復原/重做）。   
+従来の *SQLite* や *NoSQL* データベースとは異なり、**omni-json-db** ではネイティブな Python 構文（スライス、Lambda、正規表現、集合演算）を使用してデータのクエリと操作を行うことができます。また、状態のロールバック（元に戻す / やり直し）をサポートする「タイムトラベル」機能や、ネイティブなグラフ操作も組み込まれています。  
 
 * **スキーマレス (Schema-LESS)**: 事前にテーブルを定義することなく、複雑でネストされたデータを保存できます。
 
@@ -52,6 +46,8 @@
 
 🚀 主な機能
 ***********
+
+* **ネイティブグラフデータベースエンジン (Native Graph Database Engine)**: キー・バリュー（Key-Value）ストアを強力なプロパティグラフ（Property Graph）に変換します！新しい ``GraphDb`` レイヤーは、シームレスなノードとエッジの管理、$O(1)$ の隣接インデックス、および組み込みの古典的なグラフアルゴリズム（BFS / Dijkstra 最短経路、DFS 探索、閉路検出、トポロジカルソート、連結成分）を提供し、基盤となるエンジンの極限の速度を損なうことはありません。[参照: `グラフデータベース`_]
 
 * **ディープな Python 化**: SQL に別れを告げましょう！標準的な Python の ``dict`` メソッド、スライス、さらには ``set`` 演算を使用してデータベースと対話します。[参照: `基本的な使い方`_ + `演算子`_]
 
@@ -225,6 +221,56 @@ Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``
    matches = jdb.find(r':::a')
    print(matches) # 出力: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
 
+グラフデータベース
+---------------
+**omni-json-db** は、``GraphDb`` クラスを通じてプロパティグラフ（Property Graph）構造をネイティブにサポートします。ノードやエッジを簡単に管理し、複雑なグラフアルゴリズムをすぐに実行できます。
+
+.. code-block:: python
+
+   from omni_json_db import GraphDb, Query
+
+   # メモリ上でグラフデータベースを初期化（またはファイルから）
+   db = GraphDb()
+
+   # 1. スキーマレスなプロパティを持つノードを追加する
+   db.add_node('Alice', age=25, role='admin')
+   db.add_node('Bob', age=30, role='user')
+   db.add_node('Charlie', age=35, role='user')
+
+   # 2. プロパティを持つエッジを追加する（有向または無向）
+   db.add_edge('Alice', 'Bob', directed=True, weight=1.5, relation='friend')
+   db.add_edge('Bob', 'Charlie', directed=True, weight=2.0, relation='colleague')
+   db.add_edge('Charlie', 'Alice', directed=False, weight=0.5) # 無向エッジ
+
+   # 3. 近傍および隣接クエリ（$O(1)$ 検索）
+   print(db.neighbors('Alice')) 
+   # 出力: {'Bob', 'Charlie'}
+   
+   print(db.degree('Alice'))
+   # 出力: {'in': 0, 'out': 1, 'undirected': 1, 'total': 2}
+
+   # 4. 組み込みの古典的なグラフアルゴリズム
+   # エッジの重みに基づいて Dijkstra 法で最短経路を検索する
+   dist, path = db.dijkstra_shortest_path('Alice', 'Charlie', weight_key='weight')
+   print(f"距離: {dist}, 経路: {path}") 
+   # 出力: 距離: 3.5, 経路: ['Alice', 'Bob', 'Charlie']
+
+   # グラフ内の閉路を検出する (Alice -> Bob -> Charlie - Alice)
+   print(db.is_cyclic()) 
+   # 出力: True 
+
+   # 5. クエリエンジンとのシームレスな統合
+   # 強力な Query オブジェクトを使用してノードやエッジをフィルタリングできます！
+   q = Query()
+   admin_nodes = db.find_nodes(q.role == 'admin')
+   print(list(admin_nodes)) 
+   # 出力: ['Alice']
+
+   # 6. カスケード削除
+   # ノードを削除すると、接続されているすべてのエッジが自動的にクリーンアップされます
+   db.remove_node('Bob')
+   print(db.has_node('Bob')) # 出力: False
+   print(db.get_edge('Alice', 'Bob', directed=True)) # 出力: None
 
 CSV インポート / エクスポート
 --------------------------

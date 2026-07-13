@@ -312,7 +312,7 @@ class GraphDb(JDb):
 
         return False
 
-    def add_nodes_from(self, nodes:Any) -> int:
+    def add_nodes(self, nodes:Any) -> int:
         """Add multiple nodes in a single transaction.
 
         Writes directly via ``f_add_node`` inside one write transaction
@@ -348,7 +348,7 @@ class GraphDb(JDb):
 
         return n
 
-    def add_edges_from(self, edges:Any) -> int:
+    def add_edges(self, edges:Any) -> int:
         """Add multiple edges in a single transaction.
 
         Writes directly via ``f_add_edge`` inside one write transaction
@@ -448,7 +448,7 @@ class GraphDb(JDb):
         with self.open() as fp: # pylint: disable=W0135
             yield from self.f_iter_edges(fp)
 
-    def iter_adjs(self) ->  Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
+    def iter_adjs(self) -> Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
         """Iterate over all adjacencies in the graph.
  
         Yields:

@@ -33,16 +33,14 @@
 
 ✨ Introduction
 ****************
-**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
+**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store, the powerful querying capabilities of a document database, and the relationships of a graph database.
 
-Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
+Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, a distributed microservice, or a complex knowledge graph, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
 
-Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
+Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo), and native graph operations.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
-
 * **Server-LESS**: Direct disk access without the overhead of a database server.
-
 * **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
 
 🚀 Features
@@ -279,14 +277,14 @@ Graph Database
    print(db.neighbors('Alice')) 
    # Output: {'Bob', 'Charlie'}
    
-   print(db.degree('Alice'))        
+   print(db.degree('Alice'))
    # Output: {'in': 0, 'out': 1, 'undirected': 1, 'total': 2}
 
    # 4. Classic Graph Algorithms Built-in
    # Find the shortest path using Dijkstra based on edge weights
    dist, path = db.dijkstra_shortest_path('Alice', 'Charlie', weight_key='weight')
    print(f"Distance: {dist}, Path: {path}") 
-   # Output: Distance: 3.5, Path: ['Alice', 'Bob', 'Charlie']
+   # Output: Distance: 0.5, Path: ['Alice', 'Charlie']
 
    # Detect cycles in the graph (Alice -> Bob -> Charlie - Alice)
    print(db.is_cyclic()) 

@@ -1163,38 +1163,38 @@ class TestJDb(unittest.TestCase):
             # batch write API
             # =====================================================
             db -= db
-            n = db.add_nodes_from(['A', ('B', {'x': 1}), 'C'])
+            n = db.add_nodes(['A', ('B', {'x': 1}), 'C'])
             self.assertEqual(n, 3)
             self.assertEqual(db.get_node('A'), {})
             self.assertEqual(db.get_node('B'), {'x': 1})
 
-            n2 = db.add_nodes_from({'X': {'y': 2}, 'Z': {}})
+            n2 = db.add_nodes({'X': {'y': 2}, 'Z': {}})
             self.assertEqual(n2, 2)
             self.assertEqual(db.get_node('X'), {'y': 2})
 
             # merge semantics on re-add
             db -= db
-            db.add_nodes_from([('A', {'a': 1})])
-            self.assertEqual(db.add_nodes_from([('A', {'b': 2})]), 1)   # merge counted
+            db.add_nodes([('A', {'a': 1})])
+            self.assertEqual(db.add_nodes([('A', {'b': 2})]), 1)   # merge counted
             self.assertEqual(db.get_node('A'), {'a': 1, 'b': 2})
-            self.assertEqual(db.add_nodes_from([('A', {'a': 1, 'b': 2})]), 0)  # no-op not counted
+            self.assertEqual(db.add_nodes([('A', {'a': 1, 'b': 2})]), 0)  # no-op not counted
 
             # validation preserved
             with self.assertRaises(KeyError):
-                db.add_nodes_from(['bad:id'])
+                db.add_nodes(['bad:id'])
 
             # edges: (u,v) / (u,v,directed) / (u,v,directed,props) all accepted
             db -= db
-            n3 = db.add_edges_from([('A', 'B'), ('B', 'C', False), ('C', 'D', True, {'w': 5})])
+            n3 = db.add_edges([('A', 'B'), ('B', 'C', False), ('C', 'D', True, {'w': 5})])
             self.assertEqual(n3, 3)
             self.assertEqual(db.get_edge('A', 'B', directed=True), {})
             self.assertEqual(db.get_edge('B', 'C', directed=False), {})
             self.assertEqual(db.get_edge('C', 'D', directed=True), {'w': 5})
 
             with self.assertRaises(KeyError):
-                db.add_edges_from([('A', 'A')])                          # self-loop
+                db.add_edges([('A', 'A')])                          # self-loop
             with self.assertRaises(KeyError):
-                db.add_edges_from([('bad:id', 'X')])                     # invalid id
+                db.add_edges([('bad:id', 'X')])                     # invalid id
 
             # =====================================================
             # weighted_degree(): sum of edge weights, grouped by direction
@@ -1314,7 +1314,7 @@ class TestJDb(unittest.TestCase):
 
             # no edges -> empty result, no error
             db -= db
-            n = db.add_nodes_from(['X', 'Y'])
+            n = db.add_nodes(['X', 'Y'])
             self.assertEqual(n, 2)
             self.assertEqual(db.edge_betweenness_centrality(), {})
 
