@@ -24,9 +24,16 @@ class GraphDb(JDb):
     Edge records are the single source of truth; each node additionally has
     a derived adjacency blob under ``X:{node_id}:`` (a list of
     direction-prefixed neighbor ids) that traversals read on demand instead
-    of scanning every edge. ``verify_index()``/``reindex()`` detect and
-    repair drift between the two if an edge key is ever created or deleted
-    outside ``add_edge``/``remove_edge``.
+    of scanning every edge, and the whole graph has three maintained counter
+    keys — ``N_NODES``, ``N_EDGES``, ``N_DIRECTED`` — backing the O(1)
+    ``number_of_nodes()``/``number_of_edges()``/``is_directed()``/
+    ``density()``. Both the adjacency blobs and the counters are derived,
+    cached data that ``add_node``/``add_edge``/``remove_node``/
+    ``remove_edge`` (and their low-level ``f_`` equivalents) keep in sync as
+    a side effect of every write; ``verify_index()``/``reindex()`` detect and
+    repair drift in the adjacency blobs specifically if an edge key is ever
+    created or deleted outside those methods, and a full ``reindex()`` also
+    recomputes all three counters from scratch.
 
     Provides node/edge CRUD, neighborhood queries (including k-hop and ego
     subgraphs), direction- and property-filtered traversal, classic graph
@@ -35,11 +42,13 @@ class GraphDb(JDb):
     components), and centrality measures (degree, PageRank, betweenness)
     executed directly over the underlying key table.
     """
-    __slots__ = ()
-
-    ADJ_RE = re_compile(r'^X:(.+?):$')
-    EDGE_RE = re_compile(r'^E:(.+?):([->]):(.+?):$')
-    NODE_RE = re_compile(r'^N:(.+?):$')
+    __slots__   = ()
+    ADJ_RE      = re_compile(r'^X:(.+?):$')
+    EDGE_RE     = re_compile(r'^E:(.+?):([->]):(.+?):$')
+    NODE_RE     = re_compile(r'^N:(.+?):$')
+    N_NODES     = '#:N:'    # number of nodes Key ID
+    N_EDGES     = '#:E:'    # number of edges key ID
+    N_DIRECTED  = '#:>:' # number of directed edges key ID
 
     def __init__(self,\
             KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\
@@ -159,26 +168,28 @@ class GraphDb(JDb):
         fixed type. A graph with no edges, or only undirected edges, returns
         False.
 
+        Backed by a maintained counter key (``N_DIRECTED``) updated on every
+        add/remove, so this is O(1) rather than a full edge scan.
+
         Returns:
             bool: True if at least one directed edge exists.
         """
         with self.open() as fp:
-            for (_src, edge_type, _dst), _row in self.f_iter_edges(fp):
-                if edge_type == '>':
-                    return True
-
-        return False
+            di_edges = self.f_read(fp, self.N_DIRECTED, 0)
+            return di_edges > 0
 
     def number_of_nodes(self) -> int:
         """Count the nodes in the graph.
 
-        Mirrors networkx's ``G.number_of_nodes()`` / ``len(G)``.
+        Mirrors networkx's ``G.number_of_nodes()`` / ``len(G)``. Backed by a
+        maintained counter key (``N_NODES``) updated on every add/remove, so
+        this is O(1) rather than a full node scan.
 
         Returns:
             int: Total node count.
         """
         with self.open() as fp:
-            return sum(1 for _nid, _row in self.f_iter_nodes(fp))
+            return self.f_read(fp, self.N_NODES, 0)
 
     def number_of_edges(self) -> int:
         """Count the edges in the graph.
@@ -186,13 +197,14 @@ class GraphDb(JDb):
         Mirrors networkx's ``G.number_of_edges()``. Counts each edge once
         regardless of direction (a directed and an undirected edge between
         the same pair count as two separate edges, since they are distinct
-        records).
+        records). Backed by a maintained counter key (``N_EDGES``) updated
+        on every add/remove, so this is O(1) rather than a full edge scan.
 
         Returns:
             int: Total edge count.
         """
         with self.open() as fp:
-            return sum(1 for _e, _row in self.f_iter_edges(fp))
+            return self.f_read(fp, self.N_EDGES, 0)
 
     def find_nodes(self, condition:Union[Dict[str,Any],Condition], date:Optional[Any]=None, limit:int=0, skip:int=0, **kwargs) -> Dict[str,Any]:
         """Find nodes whose properties match a query condition.
@@ -941,11 +953,12 @@ class GraphDb(JDb):
             if source is not None:
                 if not self.f_has_node(fp, source):
                     raise JValueError('source node not found')
-                start_nodes = [source]
-            else:
-                start_nodes = [nid for nid, _row in self.f_iter_nodes(fp)]
 
-            for node_id in start_nodes:
+                nodes_iter = [(source,-1)]
+            else:
+                nodes_iter = self.f_iter_nodes(fp)
+
+            for node_id,_row in nodes_iter:
                 if node_id not in visited:
                     found = dfs(fp, node_id, visited, set(), [])
                     if found is not None:
@@ -1282,7 +1295,7 @@ class GraphDb(JDb):
             sub = self.subgraph(nodes)
             edges = [
                 {'u': src, 'v': dst, 'directed': edge_type == '>', 'properties': props}
-                for (src, edge_type, dst), props in sub['edges'].items()
+                    for (src, edge_type, dst), props in sub['edges'].items()
             ]
             return {'nodes': sub['nodes'], 'edges': edges}
 
@@ -1290,8 +1303,8 @@ class GraphDb(JDb):
             out_nodes = {nid: self.f_get_node(fp, nid) for nid, _row in self.f_iter_nodes(fp)}
             out_edges = [
                 {'u': src, 'v': dst, 'directed': edge_type == '>', 'properties': props}
-                for (src, edge_type, dst), _row in self.f_iter_edges(fp)
-                for props in [self.f_get_edge(fp, src, dst, edge_type == '>')]
+                    for (src, edge_type, dst), _row in self.f_iter_edges(fp)
+                        for props in [self.f_get_edge(fp, src, dst, edge_type == '>')]
             ]
 
         return {'nodes': out_nodes, 'edges': out_edges}
@@ -1802,23 +1815,24 @@ class GraphDb(JDb):
         directed and the standard undirected-density formula when it is
         fully undirected.
 
+        Now derived entirely from the maintained ``N_NODES``/``N_EDGES``/
+        ``N_DIRECTED`` counters, so this is O(1) rather than a full edge scan.
+
         Returns:
             float: Density in ``[0, 1]``. 0.0 for a graph with fewer than 2
                 nodes.
         """
         with self.open() as fp:
-            n = sum(1 for _nid, _row in self.f_iter_nodes(fp))
-            if n < 2:
+            f_read = self.f_read
+            n_nodes = f_read(fp, self.N_NODES, 0)
+            n_edges = f_read(fp, self.N_EDGES, 0)
+            if n_nodes < 2 or n_edges <= 0:
                 return 0.0
 
-            directed_count = undirected_count = 0
-            for (_src, edge_type, _dst), _row in self.f_iter_edges(fp):
-                if edge_type == '>':
-                    directed_count += 1
-                else:
-                    undirected_count += 1
+            directed_count = f_read(fp, self.N_DIRECTED, 0)
+            undirected_count = n_edges - directed_count
 
-        return (directed_count + 2 * undirected_count) / (n * (n - 1))
+        return (directed_count + 2 * undirected_count) / (n_nodes * (n_nodes - 1))
 
     def pagerank(self, alpha:float=0.85, max_iter:int=100, tol:float=1e-6, weight:Optional[str]='weight') -> Dict[str,float]:
         """Rank nodes by PageRank over the directed graph.
@@ -2255,9 +2269,9 @@ class GraphDb(JDb):
 
         return components
 
-    def verify_index(self) -> Dict[str,list]:
-        """Check the persisted adjacency blobs against the edge records.
- 
+    def verify_index(self) -> Dict[str,Any]:
+        """Check the persisted adjacency blobs and node/edge counters.
+
         Compares the adjacency entries implied by the ``E:`` edge records
         (the source of truth) against what is actually stored in each node's
         ``X:`` blob, without modifying anything. This detects drift caused by
@@ -2265,19 +2279,32 @@ class GraphDb(JDb):
         ``remove_edge``/``f_remove_edge``, which would leave a stale entry in
         the surviving endpoint's adjacency and never touch the deleted edge's
         own endpoint.
- 
+
+        Also compares the maintained ``N_NODES``/``N_EDGES``/``N_DIRECTED``
+        counters (backing ``number_of_nodes()``/``number_of_edges()``/
+        ``is_directed()``/``density()``) against a fresh count taken during
+        the same scan — those counters are derived, cached data with the
+        same drift risk as the adjacency blobs, whether from a raw key
+        write/delete or a bug in the counter-maintenance code itself.
+
         Returns:
-            Dict[str, list]: ``{'missing': [(node_id, entry), ...], 'orphan':
-                [(node_id, entry), ...]}`` sorted for stable output.
-                ``missing`` entries should exist (a backing edge is present)
-                but do not. ``orphan`` entries exist in a node's adjacency but
-                have no backing edge — the symptom of an edge deleted outside
-                ``remove_edge``. Both empty means the index is consistent.
+            Dict[str, Any]: ``{'missing': [(node_id, entry), ...], 'orphan':
+                [(node_id, entry), ...], 'counters': {name: {'cached': int,
+                'actual': int}, ...}}``. ``missing`` entries should exist (a
+                backing edge is present) but do not. ``orphan`` entries exist
+                in a node's adjacency but have no backing edge. ``counters``
+                only includes an entry for a counter that is actually out of
+                sync (keyed by ``'N_NODES'``/``'N_EDGES'``/``'N_DIRECTED'``).
+                Everything empty means the graph is fully consistent.
         """
         with self.open() as fp:
             expected = {}
+            n_edges_actual = 0
+            n_directed_actual = 0
             for (src, edge_type, dst), _row_id in self.f_iter_edges(fp):
+                n_edges_actual += 1
                 if edge_type == '>':
+                    n_directed_actual += 1
                     expected.setdefault(src, set()).add(f'>{dst}')
                     expected.setdefault(dst, set()).add(f'<{src}')
                 else:
@@ -2287,6 +2314,13 @@ class GraphDb(JDb):
             actual = {}
             for adj_id, (_row_id, adj) in self.f_iter_adjs(fp):
                 actual[adj_id] = set(adj)
+
+            n_nodes_actual = sum(1 for _nid, _row in self.f_iter_nodes(fp))
+
+            f_read = self.f_read
+            n_nodes_cached = f_read(fp, self.N_NODES, 0)
+            n_edges_cached = f_read(fp, self.N_EDGES, 0)
+            n_directed_cached = f_read(fp, self.N_DIRECTED, 0)
 
         missing = []
         orphan = []
@@ -2298,7 +2332,15 @@ class GraphDb(JDb):
             for entry in sorted(act - exp):
                 orphan.append((node_id, entry))
 
-        return {'missing': missing, 'orphan': orphan}
+        counters = {}
+        if n_nodes_cached != n_nodes_actual:
+            counters['N_NODES'] = {'cached': n_nodes_cached, 'actual': n_nodes_actual}
+        if n_edges_cached != n_edges_actual:
+            counters['N_EDGES'] = {'cached': n_edges_cached, 'actual': n_edges_actual}
+        if n_directed_cached != n_directed_actual:
+            counters['N_DIRECTED'] = {'cached': n_directed_cached, 'actual': n_directed_actual}
+
+        return {'missing': missing, 'orphan': orphan, 'counters': counters}
 
     def reindex(self) -> Dict[str,int]:
         """Rebuild every adjacency blob from the edge records (source of truth).
@@ -2314,29 +2356,48 @@ class GraphDb(JDb):
             Dict[str, int]: ``{'removed': n_old_adjacency_keys, 'rebuilt':
                 n_new_adjacency_keys}``.
         """
-        with self.open() as fp:
-            io, fp, _key_fp = self.f_get_fp(fp)
+        with self.open(read_only=False) as fp:
+            io = self.io
+            f_write = self.f_write
+            f_delete = self.f_delete
             key_table = io.key_table
             adj_match = self.ADJ_RE.match
-            old_keys = [(row_id, key) for key, row_id in key_table.items() if adj_match(key)]
-
+            edge_match = self.EDGE_RE.match
+            node_match = self.NODE_RE.match
+            old_keys = []
+            n_nodes = n_edges = n_di_edges = 0
             new_adj = {}
-            for (src, edge_type, dst), _row_id in self.f_iter_edges(fp):
-                if edge_type == '>':
-                    new_adj.setdefault(src, []).append(f'>{dst}')
-                    new_adj.setdefault(dst, []).append(f'<{src}')
-                else:
-                    new_adj.setdefault(src, []).append(f'-{dst}')
-                    new_adj.setdefault(dst, []).append(f'-{src}')
+            for key,row_id in key_table.items():
+                if adj_match(key):
+                    old_keys.append((row_id, key))
+                    continue
 
-            io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
-            f_delete = self.f_delete
+                matched = edge_match(key)
+                if matched:
+                    src, edge_type, dst = matched.groups()
+                    n_edges += 1
+                    if edge_type == '>':
+                        n_di_edges += 1
+                        new_adj.setdefault(src, []).append(f'>{dst}')
+                        new_adj.setdefault(dst, []).append(f'<{src}')
+                    else:
+                        new_adj.setdefault(src, []).append(f'-{dst}')
+                        new_adj.setdefault(dst, []).append(f'-{src}')
+                    continue
+
+                matched = node_match(key)
+                if matched:
+                    n_nodes += 1
+
             for row_id, key in sorted(old_keys, reverse=True):
-                f_delete(fp, key, row=row_id)
+                f_delete(fp, key, row=row_id, read_value=False)
 
-            f_write = self.f_write
             for node_id, entries in new_adj.items():
                 f_write(fp, f'X:{node_id}:', entries, overwrite=True, max_wsize=0)
+
+            f_write(fp, self.N_NODES, n_nodes)
+            f_write(fp, self.N_EDGES, n_edges)
+            f_write(fp, self.N_DIRECTED, n_di_edges)
 
         return {'removed': len(old_keys), 'rebuilt': len(new_adj)}
 
@@ -2494,8 +2555,9 @@ class GraphDb(JDb):
 
         If the node already exists, ``properties`` are merged over the stored
         properties (shallow update); nothing is written when the merge does
-        not change anything. Low-level helper; must be called inside an
-        ``open()`` context. 
+        not change anything. Also maintains the ``N_NODES`` counter (only on
+        genuine creation, not on a merge into an existing node). Low-level
+        helper; must be called inside an ``open()`` context.
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -2508,19 +2570,25 @@ class GraphDb(JDb):
         if not node_id or node_id.find(':') >= 0:
             raise JKeyError('invalid node_id')
 
+        f_write = self.f_write
+        f_read = self.f_read
         node_key = f'N:{node_id}:'
         if node_key not in self.io.key_table:
-            return self.f_write(fp, node_key, properties)
+            if f_write(fp, node_key, properties):
+                n_nid = self.N_NODES
+                f_write(fp, n_nid, max(f_read(fp, n_nid, 0),0)+1)
+                return True
+            return False
 
-        old_props = self.f_read(fp, node_key, copy=False)
+        old_props = f_read(fp, node_key, copy=False)
         if isinstance(old_props, dict):
             new_props = {**old_props, **properties}
             if new_props != old_props:
-                return self.f_write(fp, node_key, new_props)
+                return f_write(fp, node_key, new_props)
             else:
                 return False
 
-        return self.f_write(fp, node_key, properties)
+        return f_write(fp, node_key, properties)
 
     def f_remove_node(self, fp:Dict[int,IO], node_id:str) -> Dict[str,Any]:
         """Remove a node together with all edges connected to it.
@@ -2529,8 +2597,9 @@ class GraphDb(JDb):
         edge, then deletes each edge record, this node's adjacency, the node
         itself, and cleans the mirror entry on each neighbour's adjacency.
         A neighbour linked by both a directed and an undirected edge has each
-        edge collected separately. Low-level helper; must be called inside an
-        ``open()`` context.
+        edge collected separately. Also maintains the ``N_NODES``/``N_EDGES``/
+        ``N_DIRECTED`` counters for every key actually deleted. Low-level
+        helper; must be called inside an ``open()`` context.
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -2549,13 +2618,13 @@ class GraphDb(JDb):
         if row_id >= 0:
             matched_keys.append((row_id, node_key))
 
+        f_read = self.f_read
+        f_write = self.f_write
         adj_key = f'X:{node_id}:'
         row_id = key_table.get(adj_key, -1)
         if row_id >= 0:
             matched_keys.append((row_id, adj_key))
             _generate_edge_key = self._generate_edge_key
-            f_read = self.f_read
-            f_write = self.f_write
             cleaned_adjs = set()
             for adj_id in self.f_get_adj(fp, node_id):
                 neighbor = adj_id[1:]
@@ -2591,11 +2660,27 @@ class GraphDb(JDb):
 
         if matched_keys:
             io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
+            n_nid = self.N_NODES
+            n_eid = self.N_EDGES
+            n_did = self.N_DIRECTED
+            n_nodes = f_read(fp, n_nid, 0)
+            n_edges = f_read(fp, n_eid, 0)
+            n_di_edges = f_read(fp, n_did, 0)
             f_delete = self.f_delete
             matched_keys.sort(reverse=True)
             for row_id,key in matched_keys:
                 val = f_delete(fp, key, row=row_id)
                 ret[key] = val
+                if key.startswith('N:'):
+                    n_nodes -= 1
+                elif key.startswith('E:'):
+                    n_edges -= 1
+                    if key.find(':>:') >= 3:
+                        n_di_edges -= 1
+
+            f_write(fp, n_nid, max(0, n_nodes))
+            f_write(fp, n_eid, max(0, n_edges))
+            f_write(fp, n_did, max(0, n_di_edges))
 
         return ret
 
@@ -2641,8 +2726,11 @@ class GraphDb(JDb):
         Writes the edge record plus the two adjacency entries (one on each
         endpoint) when the edge is new. If the edge already exists,
         ``properties`` are merged over the stored properties and nothing is
-        written when the merge does not change anything. Low-level helper;
-        must be called inside an ``open()`` context.
+        written when the merge does not change anything. Also maintains the
+        ``N_NODES`` (for any endpoint created), ``N_EDGES``, and (when
+        ``directed``) ``N_DIRECTED`` counters, but only on genuine creation,
+        not on a merge into an existing edge. Low-level helper; must be
+        called inside an ``open()`` context.
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -2665,29 +2753,45 @@ class GraphDb(JDb):
         key_table = self.io.key_table
         if edge_key not in key_table:
             _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
+            f_read = self.f_read
+            f_write = self.f_write
+            n_nid = self.N_NODES
+            n_nodes = f_read(fp, n_nid, 0)
             u_key = f'N:{u}:'
             if u_key not in key_table:
-                self.f_write(fp, u_key, {}, overwrite=True, max_wsize=0)
+                if f_write(fp, u_key, {}, overwrite=True, max_wsize=0):
+                    n_nodes += 1
 
             v_key = f'N:{v}:'
             if v_key not in key_table:
-                self.f_write(fp, v_key, {}, overwrite=True, max_wsize=0)
+                if f_write(fp, v_key, {}, overwrite=True, max_wsize=0):
+                    n_nodes += 1
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'
-            adj = self.f_read(fp, xu_key, copy=False) if xu_key in key_table else []
+            adj = f_read(fp, xu_key, copy=False) if xu_key in key_table else []
             if xu_val not in adj:
                 adj.append(xu_val)
-                self.f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
-            adj = self.f_read(fp, xv_key, copy=False) if xv_key in key_table else []
+            adj = f_read(fp, xv_key, copy=False) if xv_key in key_table else []
             if xv_val not in adj:
                 adj.append(xv_val)
-                self.f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
 
-            return self.f_write(fp, edge_key, properties)
+            f_write(fp, n_nid, max(0, n_nodes))
+            if f_write(fp, edge_key, properties):
+                n_eid = self.N_EDGES
+                f_write(fp, n_eid, max(f_read(fp, n_eid, 0), 0) + 1)
+                if directed:
+                    n_did = self.N_DIRECTED
+                    f_write(fp, n_did, max(f_read(fp, n_did, 0), 0) + 1)
+
+                return True
+
+            return False
 
         old_props = self.f_read(fp, edge_key, copy=False)
         if not isinstance(old_props, dict): # pragma: no cover
@@ -2699,7 +2803,9 @@ class GraphDb(JDb):
     def f_remove_edge(self, fp:Dict[int,IO], u:str, v:str, directed:bool=True) -> Dict[str,Any]:
         """Remove an edge and clean both endpoints' adjacency entries.
 
-        Low-level helper; must be called inside an ``open()`` context.
+        Also maintains the ``N_EDGES`` and (when ``directed``) ``N_DIRECTED``
+        counters. Low-level helper; must be called inside an ``open()``
+        context.
 
         Args:
             fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
@@ -2716,23 +2822,30 @@ class GraphDb(JDb):
         ret = {}
         key_table = self.io.key_table
         if edge_key in key_table:
+            f_write = self.f_write
+            f_read = self.f_read
             _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
             props = self.f_delete(fp, edge_key)
             ret[edge_key] = props
+            n_eid = self.N_EDGES
+            f_write(fp, n_eid, max(0, f_read(fp, n_eid, 0) - 1))
+            if directed:
+                n_did = self.N_DIRECTED
+                f_write(fp, n_did, max(0, f_read(fp, n_did, 0) - 1))
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'
-            adj = self.f_read(fp, xu_key, copy=False) if xu_key in key_table else []
+            adj = f_read(fp, xu_key, copy=False) if xu_key in key_table else []
             if xu_val in adj:
                 adj.remove(xu_val)
-                self.f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
-            adj = self.f_read(fp, xv_key, copy=False) if xv_key in key_table else []
+            adj = f_read(fp, xv_key, copy=False) if xv_key in key_table else []
             if xv_val in adj:
                 adj.remove(xv_val)
-                self.f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
 
         return ret
 

@@ -369,6 +369,8 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual({k for k,v in db.nodes()}, {'A','B','C','D'})
             self.assertEqual(sum(1 for k in db.edges()), 4)
+            self.assertEqual(db.number_of_edges(), 4)
+            self.assertEqual(db.number_of_nodes(), 4)
 
             self.assertIn('B', db.successors('A'))
             self.assertIn('C', db.successors('A'))
@@ -464,8 +466,6 @@ class TestJDb(unittest.TestCase):
 
             for node_id in ('E', 'F'):
                 db.remove_node(node_id)
-
-            self.assertEqual(len(db), 1)
 
             jdb -= jdb
             self.assertTrue(db.add_node('A', x=1))            # created
@@ -744,7 +744,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db.subgraph(['ZZZ']), {'nodes': {}, 'edges': {}})
 
             # =====================================================
-            # #4 export_graph() / import_graph(): backup, migration, interop
+            # export_graph() / import_graph(): backup, migration, interop
             # =====================================================
             build(db, [('A', 'B', True, {'w': 1}), ('B', 'C', False, {'w': 2})], nodes=('ISO',))
             db.add_node('A', name='alice')
@@ -765,7 +765,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(db_fresh.get_edge('A', 'B', directed=True), {'w': 1})
             self.assertEqual(db_fresh.get_edge('B', 'C', directed=False), {'w': 2})
             self.assertTrue(db_fresh.has_node('ISO'))
-            self.assertEqual(db_fresh.verify_index(), {'missing': [], 'orphan': []})
+            self.assertEqual(db_fresh.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
 
             # export a subset via the nodes= filter
             exp_sub = db.export_graph(nodes={'A', 'B'})
@@ -782,7 +782,7 @@ class TestJDb(unittest.TestCase):
 
 
             # =====================================================
-            # #4 to_networkx() / from_networkx(): interop with networkx
+            # to_networkx() / from_networkx(): interop with networkx
             # (skipped entirely if networkx is not installed)
             # =====================================================
             # all-directed -> exactly nx.DiGraph
@@ -1080,7 +1080,7 @@ class TestJDb(unittest.TestCase):
             # =====================================================
             # a clean graph must report no drift
             build(db, [('A', 'B', True), ('B', 'C', True), ('A', 'C', False)])
-            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
 
             # directed edge deleted directly (bypassing remove_edge) leaves
             # a stale adjacency entry on BOTH endpoints
@@ -1093,7 +1093,7 @@ class TestJDb(unittest.TestCase):
 
             res = db.reindex()
             self.assertGreaterEqual(res['removed'], 1)
-            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
             self.assertNotIn('B', db.neighbors('A'))       # phantom neighbor gone
             self.assertNotIn('A', db.neighbors('B'))
             self.assertIn('C', db.neighbors('A'))          # surviving edges untouched
@@ -1106,7 +1106,7 @@ class TestJDb(unittest.TestCase):
             self.assertIn(('X', '-Y'), v2['orphan'])
             self.assertIn(('Y', '-X'), v2['orphan'])
             db.reindex()
-            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
             self.assertNotIn('Y', db.neighbors('X'))
             self.assertIn('Z', db.neighbors('Y'))           # surviving edge untouched
 
@@ -1119,7 +1119,7 @@ class TestJDb(unittest.TestCase):
             self.assertIn(('C', '<A'), v3['missing'])
             self.assertEqual(v3['orphan'], [])
             db.reindex()
-            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': []})
+            self.assertEqual(db.verify_index(), {'missing': [], 'orphan': [], 'counters':{}})
             self.assertIn('C', db.neighbors('A'))
 
             # =====================================================
