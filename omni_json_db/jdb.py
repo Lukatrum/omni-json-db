@@ -466,35 +466,31 @@ class JDb(JDbReader):
                     key = str(key)
 
             elif isinstance(key, (slice, dt_date, datetime, Condition)):
-                matched_keys = [_key for _key,_val in self.find_iter(key)] if isinstance(key, Condition) else \
-                                [_key for _key,_info in self.f_key_iter(fp, key)]
-
-                if matched_keys:
-                    io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
-                    has_SIGINT = self.file_lock.has_SIGINT
-                    f_write = self.f_write
+                matched_keys = self.find_iter(key) if isinstance(key, Condition) else \
+                                self.f_key_iter(fp, key)
+                has_SIGINT = self.file_lock.has_SIGINT
+                f_write = self.f_write
+                f_read = self.f_read
+                key_table = io.key_table
+                for _key,_val in matched_keys:
+                    if has_SIGINT(): break
                     if func:
-                        f_read = self.f_read
-                        key_table = io.key_table
-                        for _key in matched_keys:
-                            if has_SIGINT(): break
-                            row_id = key_table[_key]
-                            old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=True)
-                            new_val = func(_key, deepcopy(old_val))
-                            if new_val != old_val:
-                                f_write(fp, _key, new_val, overwrite=True)
-
+                        row_id = key_table[_key]
+                        old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
+                        new_val = func(_key, deepcopy(old_val))
+                        if new_val != old_val:
+                            f_write(fp, _key, new_val, overwrite=True)
                     else:
-                        for _key in matched_keys:
-                            if has_SIGINT(): break
-                            f_write(fp, _key, val)
+                        f_write(fp, _key, val)
 
                 return
 
             elif k_arg_cnt > 0:
-                keys = {}
+                has_SIGINT = self.file_lock.has_SIGINT
+                f_write = self.f_write
                 f_read = self.f_read
                 for _key,row_id in io.sorted_key_table_items():
+                    if has_SIGINT(): break
                     if k_arg_cnt == 2:
                         old_val = f_read(fp, _key, row=row_id, copy=False)
                         _is_matched = is_matched(_key, old_val)
@@ -506,17 +502,10 @@ class JDb(JDbReader):
                         if func:
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                keys[_key] = new_val
+                                f_write(fp, _key, new_val, overwrite=True)
 
                         elif old_val != val:
-                            keys[_key] = val
-
-                if keys:
-                    has_SIGINT = self.file_lock.has_SIGINT
-                    f_write = self.f_write
-                    for _key,_val in keys.items():
-                        if has_SIGINT(): break
-                        f_write(fp, _key, _val)
+                            f_write(fp, _key, val, overwrite=True)
 
                 return
 
@@ -1739,7 +1728,6 @@ class JDb(JDbReader):
                 io.row_bytes = index_size - io.min_value_size * (1 + io.reserved_rate)
                 io._n_lines = 0
                 io.write_header(key_fp)
-                io.load_keys(key_fp, force=True)
                 self.fsize = io.file_size
 
             del tmp_jdb
@@ -2431,33 +2419,41 @@ class JDb(JDbReader):
             patch_func = patch
 
         count = 0
+        del_keys = []
         with self.open(read_only=True) as fp:
-            matched_keys = {key:val for key,val in self.find_iter(vals=condition, with_value=True, with_date=False) if isinstance(val, dict)}
-            if matched_keys:
-                _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp) # switch to write mode
-                has_SIGINT = self.file_lock.has_SIGINT
-                f_write = self.f_write
+            key_table = self.io.key_table
+            has_SIGINT = self.file_lock.has_SIGINT
+            f_write = self.f_write
+            for key,val in self.find_iter(vals=condition, with_value=True, with_date=False, reverse=True):
+                if has_SIGINT(): break
+                if not isinstance(val, dict): continue
+                _patch = patch_func(key, val) if callable(patch_func) else patch
+                if _patch != val:
+                    if _patch is None:
+                        del_keys.append(key)
+                        continue
+
+                    if not _patch or not isinstance(_patch, dict): continue
+                    new_val = val.copy()
+                    for kk,vv in _patch.items():
+                        if vv is None:
+                            new_val.pop(kk, None)
+                        else:
+                            new_val[kk] = vv
+
+                    if new_val != val:
+                        f_write(fp, key, new_val, overwrite=True)
+                        count += 1
+
+            if del_keys:
                 f_delete = self.f_delete
-                for key,val in matched_keys.items():
-                    if has_SIGINT(): break
-                    _patch = patch_func(key, val) if callable(patch_func) else patch
-                    if _patch != val:
-                        if _patch is None:
-                            f_delete(fp, key, read_value=False)
-                            count += 1
-                            continue
+                del_keys = [(key_table[key],key) for key in del_keys]
+                del_keys.sort(reverse=True)
+                for _row,key in del_keys:
+                    if _row >= 0:
+                        f_delete(fp, key, read_value=False)
+                        count += 1
 
-                        if not _patch or not isinstance(_patch, dict): continue
-                        new_val = val.copy()
-                        for kk,vv in _patch.items():
-                            if vv is None:
-                                new_val.pop(kk, None)
-                            else:
-                                new_val[kk] = vv
-
-                        if new_val != val:
-                            f_write(fp, key, new_val, overwrite=True)
-                            count += 1
         return count
 
     def replace(self, records:Dict[str,Any], default_val:Optional[Any]=None, **kwargs) -> Dict[str,Any]:

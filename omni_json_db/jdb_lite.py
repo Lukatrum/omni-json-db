@@ -777,6 +777,7 @@ class JDbKey:
                     io_conv_date = io.z_conv_date
                     n_records = io.n_records
                     for row_id in range(io.n_records):
+                        key_fp = fp[-1]
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         if ver == sync_id:
                             old_date, new_date = io_conv_date(days)
@@ -793,6 +794,7 @@ class JDbKey:
                 io_conv_date = io.z_conv_date
                 if k_arg_cnt == 2:
                     for row_id in range(io.n_records):
+                        key_fp = fp[-1]
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         old_date, new_date = io_conv_date(days)
                         val = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -802,6 +804,7 @@ class JDbKey:
                 elif k_arg_cnt == 1:
                     for _key,row_id in io.key_table.items():
                         if io.n_records > row_id >= 0 and is_matched(_key):
+                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -828,6 +831,7 @@ class JDbKey:
                             row_id = io.n_records + row_id
 
                         if io.n_records > row_id >= 0:
+                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -2988,28 +2992,21 @@ class JDbReader(JDbBase):
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
             f_read = self.f_read
-            for key,row in self.io.key_table.items():
-                yield f_read(fp, key, row=row, copy=False)
+            for row in range(self.io.n_records):
+                yield f_read(fp, None, row=row, copy=False)
 
-    def items(self, read_only:bool=True) -> Generator[Tuple[str,Any], None, None]:
+    def items(self) -> Generator[Tuple[str,Any], None, None]:
         """Generate structured key-value maps pairs extracted from indices tables.
-
-        Args:
-            read_only (bool, optional): Engage shared serialization pipes logic optimization. Defaults to True.
 
         Yields:
             (str, Any): A structural tuple pair associating key name strings with content values.
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
-        with self.open(read_only=read_only) as fp:
-            f_read = self.f_read
-            if read_only:
-                for key,row in self.io.key_table.items():
-                    yield key, f_read(fp, key, row=row, copy=False)
-            else:
-                for key,row in self.io.sorted_key_table_items(copy=True):
-                    # cannot use row argument while using yield
-                    yield key, f_read(fp, key, copy=False)
+        with self.open(read_only=True) as fp:
+            f_read_row = self.f_read_row
+            for row in range(self.io.n_records):
+                info = f_read_row(fp, row, with_value=True)
+                yield info[0], info[-1]
 
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,Any]]:
         """Iterate entities across datasets utilizing customizable indexing, criteria lambdas or slices parameters.
@@ -3095,6 +3092,7 @@ class JDbReader(JDbBase):
                     io_read_key = io.read_key
                     n_records = io.n_records
                     for row_id in range(n_records):
+                        key_fp = fp[-1]
                         _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
                         if _ver == sync_id:
                             yield _key, self.f_read(fp, _key, row=row_id, copy=False)
@@ -3182,7 +3180,7 @@ class JDbReader(JDbBase):
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, reverse:bool=False, **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3310,7 +3308,7 @@ class JDbReader(JDbBase):
                         if not (key_rule and not key_rule.search(child_name)):
                             child = f_get_child(fp, child_name)
                             if isinstance(child, JDbReader):
-                                for _key,_val in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, **kwargs):
+                                for _key,_val in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse, **kwargs):
                                     yield f'{child_name}{SEP_SYM}{_key}', _val
                 return
 
@@ -3362,7 +3360,7 @@ class JDbReader(JDbBase):
                     _val_conds.append(({cmd:rules}, use_bytes))
 
             cache = self._cache
-            for key,row_id in io.sorted_key_table_items():
+            for key,row_id in io.sorted_key_table_items(reverse=reverse):
                 n_loops += 1
                 if count >= limit > 0:
                     break
@@ -3372,6 +3370,7 @@ class JDbReader(JDbBase):
                     k_filter += 1
                     continue
 
+                key_fp = fp[-1]
                 if date is not None:
                     _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
                     cdate, mdate = io_conv_date(_days)
@@ -3420,7 +3419,7 @@ class JDbReader(JDbBase):
                         _vals, _keys, _date = vals, None, date
 
                     child_limit = (limit-count) if limit > 0 else 0
-                    for _key,_val in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value, with_date=with_date):
+                    for _key,_val in child.find_iter(keys=_keys, vals=_vals, date=_date, limit=child_limit, with_value=old_with_value, with_date=with_date, reverse=reverse):
                         if skipped < skip:
                             skipped += 1
                             continue
@@ -4567,6 +4566,7 @@ class JDbReader(JDbBase):
                 if not match_KEY_rules(_key, key_rules):
                     continue
 
+                key_fp = fp[-1]
                 __key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4581,6 +4581,7 @@ class JDbReader(JDbBase):
 
         else:
             for row_id in range(start, stop, step):
+                key_fp = fp[-1]
                 _key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue

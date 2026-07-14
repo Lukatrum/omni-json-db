@@ -1796,8 +1796,9 @@ class JIo(JIoBase):
         zip_type = self._zip_type
         try:
             fp = files_obj.KEY_open('rb')
-            header = fp.read(HEADER_SIZE)
-            if len(header) == HEADER_SIZE:
+            header = bytearray(HEADER_SIZE)
+            _len = fp.readinto(header)
+            if _len == HEADER_SIZE:
                 if header[0] == 91: # = '['
                     info = json_loads(header)
                 else: # pragma: no cover
@@ -2544,8 +2545,9 @@ class JIo(JIoBase):
         if fp.tell() != pos:
             fp.seek(pos)
 
-        data = fp.read(index_size)
-        info = self.KEY_loads(data)
+        buf = bytearray(index_size)
+        rd_size = fp.readinto(buf)
+        info = self.KEY_loads(buf if rd_size > 0 else b'')
         if row_id < self.n_records:
             _KEY_rows[row_id] = info
             while len(_KEY_rows) > TOTAL_KEY_ROWS:
@@ -2667,8 +2669,8 @@ class JIo(JIoBase):
             JIo: The synchronized processing engine master instance context reference.
         """
         if fp.tell() != 0: fp.seek(0)
-        header = fp.read(HEADER_SIZE)
-        _len = len(header)
+        header = bytearray(HEADER_SIZE)
+        _len = fp.readinto(header)
         if _len == HEADER_SIZE:
             sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver = self.HEAD_loads(header)
         else:
@@ -3225,7 +3227,6 @@ class JIo(JIoBase):
         self.index_size = index_size
         self._n_lines = 0
         self.write_header(fp)
-        self.load_keys(fp, force=True)
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
 

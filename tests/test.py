@@ -928,7 +928,8 @@ class TestJDb(unittest.TestCase):
             # empty graph / single node
             build(db, [])
             self.assertEqual(db.closeness_centrality(), {})
-            db.clear(agree='yes', wait_sec=0, **config)
+
+            db -= db
             db.add_node('A')
             self.assertEqual(db.closeness_centrality(), {'A': 0.0})
 
@@ -7443,7 +7444,7 @@ class TestJDb(unittest.TestCase):
             for val in jdb.values():
                 self.assertEqual(expect[f'xxx{val-10000}'], val)
 
-            for key,val in jdb.items(read_only=False):
+            for key,val in jdb.items():
                 jdb.f_write(None, key, val + 1)
                 self.assertEqual(val + 1, jdb.f_read(None, key))
 

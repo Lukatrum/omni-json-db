@@ -3,11 +3,11 @@ requires = ["setuptools >= 77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-exclude = ["artwork", "tests"]
+exclude = ["artwork", "tests", "benchmark"]
 
 [project]
 name = "omni_json_db"
-version = "2.14.00"
+version = "2.14.01"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
