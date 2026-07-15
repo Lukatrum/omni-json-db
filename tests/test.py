@@ -1521,11 +1521,19 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(sort=[user._date.last(), user.age])
             self.assertEqual(res, users)
 
+            today = dt.date.today()
+            res = jdb.find(date=Query() >= today, with_value=True)
+            self.assertEqual(res, users)
+
+            yesterday = today - dt.timedelta(days=1)
+            res = jdb.find(date=frozenset([str(today), str(yesterday)]), with_value=True)
+            self.assertEqual(res, users)
+
             jdb.keys[user.name == 'Alice'] = dt_2000 = dt.datetime(2000, 1, 1) # change created date
             jdb.keys[user.role.ihas('develop')] = dt_2005 = dt.datetime(2005, 5, 5) # change created date
             jdb.keys[user.age >= 35] = dt_2010 = dt.datetime(2010, 10, 10) # change created date
             jdb.keys[user.email.endswith('test.com')] = dt_2015 = dt.datetime(2015, 12, 12) # change created date
-            jdb.keys['user_1'] = today = dt.date.today() # change modified date
+            jdb.keys['user_1'] = today  # change modified date
             jdb.keys['user_2'] = prev_date1 = today - dt.timedelta(days=1) # change modified date
             jdb.keys['user_3'] = prev_date2 = today - dt.timedelta(days=2) # change modified date
             jdb.keys['user_4'] = prev_date3 = today - dt.timedelta(days=3) # change modified date
@@ -3271,6 +3279,27 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(matches), {'key2'})
 
             jmem1 += {str(v):v for v in range(10)}
+
+            matches = jmem1.find(5, with_value=True)
+            self.assertEqual(matches['5'], jmem1['5'])
+
+            matches_2 = jmem1.find(vals=lambda k,v: k == '5' and v == 5)
+            self.assertEqual(matches, matches_2)
+
+            matches_2 = jmem1.find(vals=lambda v: v == 5)
+            self.assertEqual(matches, matches_2)
+
+            matches_2 = jmem1.find(vals=5)
+            self.assertEqual(matches, matches_2)
+
+            matches_2 = jmem1.find(vals=[5,15,25])
+            self.assertEqual(matches, matches_2)
+
+            matches = jmem1.find(vals=range(5, 10))
+            self.assertEqual(matches, jmem1[5,6,7,8,9])
+
+            matches_2 = jmem1.find(vals=re.compile(r'^[5-9]$'))
+            self.assertEqual(matches, matches_2)
 
             matches = jmem1.find(vals={'$len': {'$gt': 3}})
             self.assertEqual(set(matches), {'key1', 'key2', 'key3'})

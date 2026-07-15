@@ -158,7 +158,7 @@ class JNetIO(RawIOBase):
             if self.closed: # pragma: no cover
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
         if args is None: args = ()

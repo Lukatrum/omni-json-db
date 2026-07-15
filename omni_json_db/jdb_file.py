@@ -264,8 +264,6 @@ except ImportError:
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
-from operator import index as _op_index
-
 class JBytesIO(RawIOBase):
     """An optimized, in-memory binary stream interface managing a mutable bytearray buffer.
 
@@ -390,15 +388,12 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        if type(offset) is not int: # pylint: disable=unidiomatic-typecheck
-            offset = _op_index(offset)  # raises TypeError for float etc., like BytesIO
-
         if whence == SEEK_SET:
-            next_idx = offset
+            next_idx = int(offset)
         elif whence == SEEK_END:
-            next_idx = len(self.buf)+offset
+            next_idx = len(self.buf)+int(offset)
         elif whence == SEEK_CUR:
-            next_idx = self.idx+offset
+            next_idx = self.idx+int(offset)
         else:
             raise ValueError(f"Invalid whence ({whence}, should be 0, 1 or 2)")
 
@@ -544,28 +539,14 @@ class JBytesIO(RawIOBase):
         if rest_size <= 0:
             return 0
 
-        if type(b) is bytearray: # pylint: disable=unidiomatic-typecheck
-            rd_size = min(len(b), rest_size)
-            if rd_size <= 0:
-                return 0
-
+        rd_size = min(len(b), rest_size)
+        if rd_size > 0:
             next_idx = idx+rd_size
             if rd_size < 8192:
                 b[:rd_size] = memoryview(buf)[idx:next_idx]
             else:
                 memoryview(b)[:rd_size] = memoryview(buf)[idx:next_idx]
 
-            self.idx = next_idx
-            return rd_size
-
-        mv_b = memoryview(b)
-        if mv_b.itemsize != 1: # e.g. array('I', ...): count in bytes, like BytesIO
-            mv_b = mv_b.cast('B')
-
-        rd_size = min(len(mv_b), rest_size)
-        if rd_size > 0:
-            next_idx = idx+rd_size
-            mv_b[:rd_size] = memoryview(buf)[idx:next_idx]
             self.idx = next_idx
 
         return max(rd_size, 0)
@@ -583,12 +564,6 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        if not isinstance(b, (bytes, bytearray)):
-            # normalize exotic buffers (memoryview slices, array('I'), ...)
-            # so len() below counts bytes and slice-assignment stays aligned
-            with memoryview(b) as mv:
-                return self.write(mv.tobytes())
-
         n_byte = len(b)
         if n_byte <= 0:
             return 0
@@ -598,11 +573,12 @@ class JBytesIO(RawIOBase):
         max_size = len(buf)
         if idx > max_size:
             buf.extend(bytes(idx - max_size)) # zero-fill the seek gap
-            max_size = idx
+            max_size = len(buf)
 
         if idx >= max_size:
             buf.extend(b)
             self.idx = len(buf)
+
         else:
             next_idx = idx + n_byte
             buf[idx:next_idx] = b

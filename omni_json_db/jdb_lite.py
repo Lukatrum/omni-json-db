@@ -2995,18 +2995,20 @@ class JDbReader(JDbBase):
             for row in range(self.io.n_records):
                 yield f_read(fp, None, row=row, copy=False)
 
-    def items(self) -> Generator[Tuple[str,Any], None, None]:
+    def items(self, reverse:bool=False) -> Generator[Tuple[str,Any], None, None]:
         """Generate structured key-value maps pairs extracted from indices tables.
+        
+        Args:
+            reverse (bool, optional): Reverse the sort order. Defaults to ``False``
 
         Yields:
             (str, Any): A structural tuple pair associating key name strings with content values.
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
-            f_read_row = self.f_read_row
-            for row in range(self.io.n_records):
-                info = f_read_row(fp, row, with_value=True)
-                yield info[0], info[-1]
+            f_read = self.f_read
+            for key,row in self.io.sorted_key_table_items(reverse=reverse):
+                yield key, f_read(fp, key, row=row, copy=False)
 
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,Any]]:
         """Iterate entities across datasets utilizing customizable indexing, criteria lambdas or slices parameters.
@@ -3297,7 +3299,7 @@ class JDbReader(JDbBase):
 
         if not keys and '_id' in vals:
             keys = vals.pop('_id', keys)
-        
+
         if keys is None:
             keys = {}
         elif isinstance(keys, dict):
@@ -3370,12 +3372,9 @@ class JDbReader(JDbBase):
         elif isinstance(date, (int, float, bool)):
             today = dt_date.today() if isinstance(date, int) else datetime.now()
             days = int(date)
-            if date == 0:
-                date = {'$eq': today}
-            elif date > 0:
-                date = {'$between': (today, today + timedelta(days=days))}
-            else:
-                date = {'$between': (today - timedelta(days=-days), today)}
+            date = {'$eq': today} if date == 0 else \
+                    {'$between': (today, today + timedelta(days=days))} if date > 0 else \
+                    {'$between': (today - timedelta(days=-days), today)}
         else:
             raise TypeError('invalid DATE type')
 
@@ -3414,7 +3413,7 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp[-1]
-                if date is not None:
+                if date:
                     _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
                     cdate, mdate = io_conv_date(_days)
                     if not match_DATE_rules(cdate, mdate, date):
