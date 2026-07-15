@@ -1028,7 +1028,7 @@ def match_KEY_rules(key:str, rules:Any, level:int=0) -> bool:
         elif callable(rules):
             rules = {'$func': rules}
         elif isinstance(rules, (list, set, frozenset, tuple, range)):
-            rules = {'$in': {str(_key) for _key in rules}}
+            rules = {'$in': {_key if isinstance(_key, str) else str(_key) for _key in rules}}
         elif isinstance(rules, (int, float, bool, bytes, dt_date, datetime)):
             rules = {'$eq': str(rules)}
         else:

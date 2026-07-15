@@ -3266,7 +3266,25 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
         """
         st_time = perf_counter()
-        vals = {} if not vals else dict(vals)
+        if vals is None:
+            vals = {}
+        elif isinstance(vals, Condition):
+            vals = dict(vals)
+        elif isinstance(vals, dict):
+            pass
+        elif callable(vals):
+            vals = {'$func': vals}
+        elif isinstance(vals, (str, int, float, bool, bytes, dt_date, datetime)):
+            vals = {'$eq': vals}
+        elif isinstance(vals, Pattern):
+            vals = {'$re': vals}
+        elif isinstance(vals, (list, set, tuple)):
+            vals = {'$in': vals}
+        elif isinstance(vals, (frozenset, range)):
+            vals = {'$in': set(vals)}
+        else:
+            raise TypeError('invalid VAL type')
+
         for key,val in kwargs.items():
             if key in QUERY_OPS:
                 vals[f'${key.lower()}'] = val
@@ -3276,15 +3294,18 @@ class JDbReader(JDbBase):
         if isinstance(keys, Condition):
             vals.update(keys)
             keys = {}
-        elif not keys:
+
+        if not keys and '_id' in vals:
+            keys = vals.pop('_id', keys)
+        
+        if keys is None:
             keys = {}
-
-        if isinstance(keys, dict):
+        elif isinstance(keys, dict):
             pass
-
+        elif callable(keys):
+            keys = {'$func': keys}
         elif isinstance(keys, Pattern):
             keys = {'$re': keys}
-
         elif isinstance(keys, str):
             idx = keys.find(SEP_SYM)
             if idx >= 0:
@@ -3311,34 +3332,56 @@ class JDbReader(JDbBase):
                                 for _key,_val in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse, **kwargs):
                                     yield f'{child_name}{SEP_SYM}{_key}', _val
                 return
-
             keys = {'$re': re_compile(keys)}
-
         elif isinstance(keys, (bytes, bytearray)): # pragma: no cover
             keys = bytes(keys) if isinstance(keys, bytearray) else keys
             try:
                 keys = {'$eq': keys.decode('utf8')}
             except (UnicodeDecodeError, ValueError):
                 keys = {'$eq': str(keys)}
-
-        elif callable(keys):
-            keys = {'$func': keys}
-
+        elif isinstance(keys, (int, float, bool, dt_date, datetime)):
+            keys = {'$eq': str(keys)}
         elif hasattr(keys, '__iter__'):
             keys = {'$in': {key if isinstance(key, str) else str(key) for key in keys}}
+        else:
+            raise TypeError('invalid KEY type')
 
-        if not isinstance(keys, dict):  # pragma: no cover
-            raise TypeError('invalid type')
+        if not date and '_date' in vals:
+            date = vals.pop('_date', date)
+
+        if date is None:
+            date = {}
+        elif isinstance(date, Condition):
+            date = dict(date)
+        elif isinstance(date, dict):
+            pass
+        elif callable(date):
+            date = {'$func': date}
+        elif isinstance(date, (dt_date, datetime)):
+            date = {'$eq': date}
+        elif isinstance(date, Pattern):
+            date = {'$re': date}
+        elif isinstance(date, (set, list, tuple)):
+            date = {'$anyin': date}
+        elif isinstance(date, (frozenset, range)):
+            date = {'$anyin': set(date)}
+        elif isinstance(date, str):
+            date = {'$has': date}
+        elif isinstance(date, (int, float, bool)):
+            today = dt_date.today() if isinstance(date, int) else datetime.now()
+            days = int(date)
+            if date == 0:
+                date = {'$eq': today}
+            elif date > 0:
+                date = {'$between': (today, today + timedelta(days=days))}
+            else:
+                date = {'$between': (today - timedelta(days=-days), today)}
+        else:
+            raise TypeError('invalid DATE type')
 
         old_with_value = with_value
         if vals and not old_with_value:
             with_value = True
-
-        if not keys and '_id' in vals:
-            keys = vals.pop('_id', keys)
-
-        if not date and '_date' in vals:
-            date = vals.pop('_date', date)
 
         n_loops = k_filter = d_filter = v_filter = m_count = 0
         # pylint: disable=contextmanager-generator-missing-cleanup
@@ -4300,18 +4343,18 @@ class JDbReader(JDbBase):
         key = str(key) if not isinstance(key, str) else key
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-
+        key_table = io.key_table
         # Priority: cache > file
         _cache = self._cache
         if _cache:
-            if row is None or io.key_table[key] == row:
+            if row is None or key_table[key] == row:
                 val = _cache.get(key, _MISSING)
                 if val is not _MISSING:
                     _cache.move_to_end(key, last=True)
                     return deepcopy(val) if copy else val
 
         if row is None:
-            row = io.key_table[key]
+            row = key_table[key]
             if row < 0:
                 if default_val is not _MISSING:
                     return default_val
@@ -4319,7 +4362,7 @@ class JDbReader(JDbBase):
                 raise JKeyError(key)
 
         if row >= io.n_records: # pragma: no cover
-            io.key_table.pop(key, -1)
+            key_table.pop(key, -1)
             if default_val is not _MISSING:
                 return default_val
 

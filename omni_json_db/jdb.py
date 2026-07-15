@@ -1627,9 +1627,12 @@ class JDb(JDbReader):
             old_index_size = io.index_size
 
             io.seek(key_fp, 0)
+            line = bytearray(old_index_size)
             for _row_id in range(io.n_lines):
-                row = key_fp.read(old_index_size).rstrip(b'\n \x00')
-                min_index_size = max(min_index_size, len(row)+extra_size)
+                _size = key_fp.readinto(line)
+                if _size == old_index_size:
+                    row = line.strip(b'\n \x00')
+                    min_index_size = max(min_index_size, len(row)+extra_size)
 
             print(f'resize_index_size(index_size={index_size}) index_size={old_index_size} check_size={min_index_size}')
             if index_size == 0:
@@ -3828,14 +3831,16 @@ class JDb(JDbReader):
             row = min(n_lines, start_row + window_size) - 1
             io.seek(key_fp, start_row)
             buffer_size = index_size * (row + 1 - start_row)
-            buffer = key_fp.read(buffer_size)
-            if len(buffer) == buffer_size:
+            lines = bytearray(buffer_size)
+            rd_size = key_fp.readinto(lines)
+            if rd_size == buffer_size:
+                mv_lines = memoryview(lines)
                 KEY_loads = io.KEY_loads
                 idx = buffer_size - index_size
                 ext_row = -1
                 while row >= start_row:
                     try:
-                        _dead_key, file_id, offset, row_size, __s, __v, __d = KEY_loads(buffer[idx:idx+index_size])
+                        _dead_key, file_id, offset, row_size, __s, __v, __d = KEY_loads(mv_lines[idx:idx+index_size])
                     except ValueError: # pragma: no cover
                         # reset dead row if fail to load
                         file_id = offset = row_size = 0
@@ -4899,9 +4904,12 @@ class JDb(JDbReader):
             extra_size  = 8 if jdb.io.api_ver > 0 else 24
 
             src_io.seek(key_fp, 0)
+            line = bytearray(old_index_size)
             for row_id in range(n_lines):
-                row = key_fp.read(old_index_size).rstrip(b'\n \x00')
-                index_size = max(index_size, len(row)+extra_size)
+                rd_size = key_fp.readinto(line)
+                if rd_size == old_index_size:
+                    row = line.rstrip(b'\n \x00')
+                    index_size = max(index_size, len(row)+extra_size)
 
             if index_size > src_io.index_size:
                 src_io.resize_keys(key_fp, index_size)

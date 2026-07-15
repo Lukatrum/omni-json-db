@@ -264,6 +264,8 @@ except ImportError:
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
+from operator import index as _op_index
+
 class JBytesIO(RawIOBase):
     """An optimized, in-memory binary stream interface managing a mutable bytearray buffer.
 
@@ -380,30 +382,23 @@ class JBytesIO(RawIOBase):
     def seek(self, offset:int, whence:int=SEEK_SET) -> int:
         """Change the stream position to the given byte offset.
 
-        Args:
-            offset (int): The byte offset relative to the position indicated by ``whence``.
-            whence (int, optional): The reference point. ``SEEK_SET`` (0) for start of stream, 
-                ``SEEK_CUR`` (1) for current position, ``SEEK_END`` (2) for end of stream. 
-                Defaults to ``SEEK_SET``.
-
-        Returns:
-            int: The new absolute stream position.
-
         Raises:
-            ValueError: If the stream is closed or an invalid ``whence`` value is provided.
+            TypeError: If ``offset`` is not an integer (matches ``io.BytesIO``).
+            ValueError: If the stream is closed, ``whence`` is invalid, or the
+                resulting position is negative.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
+        if type(offset) is not int: # pylint: disable=unidiomatic-typecheck
+            offset = _op_index(offset)  # raises TypeError for float etc., like BytesIO
+
         if whence == SEEK_SET:
             next_idx = offset
-
         elif whence == SEEK_END:
             next_idx = len(self.buf)+offset
-
         elif whence == SEEK_CUR:
             next_idx = self.idx+offset
-
         else:
             raise ValueError(f"Invalid whence ({whence}, should be 0, 1 or 2)")
 
@@ -441,34 +436,28 @@ class JBytesIO(RawIOBase):
 
         return self.idx
 
-    def truncate(self, size:Optional[int]=None):
+    def truncate(self, size:Optional[int]=None) -> int:
         """Resize the stream to the given size in bytes.
 
-        If the size is smaller than the current size, the stream is truncated.
-
-        Args:
-            size (int, optional): The target size in bytes. If ``None``, truncates to 
-                the current stream position. Defaults to ``None``.
-
-        Returns:
-            int: The new size of the stream.
+        Matches ``io.BytesIO`` semantics: never enlarges the buffer, raises on
+        negative sizes, and returns ``size`` (the requested size) rather than
+        the possibly-smaller actual buffer length.
 
         Raises:
-            ValueError: If the stream is closed.
+            ValueError: If the stream is closed or ``size`` is negative.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        buf = self.buf
         size = self.idx if size is None else size
-        max_size = len(buf)
-        if size < max_size:
-            del buf[size:]
-            new_size = len(buf)
-        else:
-            new_size = max_size
+        if size < 0:
+            raise ValueError(f"negative size value {size}")
 
-        return new_size
+        buf = self.buf
+        if size < len(buf):
+            del buf[size:]
+
+        return size
 
     def writable(self) -> bool: # pragma: no cover
         """Determine if the stream supports writing.
@@ -500,25 +489,20 @@ class JBytesIO(RawIOBase):
             self.write(line)
 
     def read(self, size:Optional[int]=-1) -> bytes:
-        """Read up to size bytes from the stream.
-
-        Args:
-            size (int, optional): The maximum number of bytes to read. Defaults to -1 (read all).
-
-        Returns:
-            bytes: The extracted binary data.
-
-        Raises:
-            ValueError: If the stream is closed.
-        """
+        """Read up to size bytes from the stream (single-copy)."""
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        mv_buf = memoryview(self.buf)
-        max_size = len(mv_buf)
+        buf = self.buf
+        max_size = len(buf)
         idx = self.idx
         next_idx = max_size if size is None or size < 0 else min(max_size, idx+size)
-        result = mv_buf[idx:next_idx].tobytes()
+        if next_idx <= idx:
+            return b''
+
+        with memoryview(buf) as mv_buf:
+            result = mv_buf[idx:next_idx].tobytes()
+
         self.idx = next_idx
         return result
 
@@ -536,11 +520,17 @@ class JBytesIO(RawIOBase):
     def readinto(self, b) -> int:
         """Read bytes directly into a pre-allocated, mutable byte-like object.
 
-        Args:
-            b (bytearray): The mutable object to populate.
+        bytearray targets use a size-based hybrid strategy: small reads assign
+        through a plain bytearray slice (CPython builds a tiny temporary, but
+        object overhead is minimal), while large reads assign into
+        ``memoryview(b)`` for a single direct ``memcpy`` (a plain bytearray
+        slice assignment from a memoryview would first build a temporary
+        bytearray, i.e. copy twice). Non-bytearray writable buffers (memoryview
+        slices, ``array('I', ...)``, ...) always take the memoryview path and
+        are measured in bytes like ``io.BytesIO.readinto``.
 
         Returns:
-            int: The number of bytes successfully read.
+            int: The number of bytes copied (0 at EOF or past-end positions).
 
         Raises:
             ValueError: If the stream is closed.
@@ -548,13 +538,34 @@ class JBytesIO(RawIOBase):
         if self.closed:
             raise ValueError('I/O operation on closed file.')
 
-        mv_buf = memoryview(self.buf)
+        buf = self.buf
         idx = self.idx
-        rest_size = len(mv_buf) - idx
-        rd_size = min(len(b), rest_size)
+        rest_size = len(buf) - idx
+        if rest_size <= 0:
+            return 0
+
+        if type(b) is bytearray: # pylint: disable=unidiomatic-typecheck
+            rd_size = min(len(b), rest_size)
+            if rd_size <= 0:
+                return 0
+
+            next_idx = idx+rd_size
+            if rd_size < 8192:
+                b[:rd_size] = memoryview(buf)[idx:next_idx]
+            else:
+                memoryview(b)[:rd_size] = memoryview(buf)[idx:next_idx]
+
+            self.idx = next_idx
+            return rd_size
+
+        mv_b = memoryview(b)
+        if mv_b.itemsize != 1: # e.g. array('I', ...): count in bytes, like BytesIO
+            mv_b = mv_b.cast('B')
+
+        rd_size = min(len(mv_b), rest_size)
         if rd_size > 0:
             next_idx = idx+rd_size
-            b[:rd_size] = mv_buf[idx:next_idx]
+            mv_b[:rd_size] = memoryview(buf)[idx:next_idx]
             self.idx = next_idx
 
         return max(rd_size, 0)
@@ -562,17 +573,21 @@ class JBytesIO(RawIOBase):
     def write(self, b) -> int:
         """Write the given bytes-like object to the stream.
 
-        Args:
-            b (bytes | bytearray): The raw binary data to write.
-
         Returns:
-            int: The number of bytes successfully written.
+            int: The number of *bytes* written (multi-byte-itemsize inputs such
+            as ``array('I', ...)`` are measured in bytes, like ``io.BytesIO``).
 
         Raises:
             ValueError: If the stream is closed.
         """
         if self.closed:
             raise ValueError('I/O operation on closed file.')
+
+        if not isinstance(b, (bytes, bytearray)):
+            # normalize exotic buffers (memoryview slices, array('I'), ...)
+            # so len() below counts bytes and slice-assignment stays aligned
+            with memoryview(b) as mv:
+                return self.write(mv.tobytes())
 
         n_byte = len(b)
         if n_byte <= 0:
@@ -582,20 +597,22 @@ class JBytesIO(RawIOBase):
         idx = self.idx
         max_size = len(buf)
         if idx > max_size:
-            fill_size = idx - max_size
-            buf.extend(b'\x00' * fill_size)
-            max_size = len(buf)
+            buf.extend(bytes(idx - max_size)) # zero-fill the seek gap
+            max_size = idx
 
         if idx >= max_size:
             buf.extend(b)
             self.idx = len(buf)
-
         else:
             next_idx = idx + n_byte
             buf[idx:next_idx] = b
             self.idx = next_idx
 
         return n_byte
+
+    def getvalue(self) -> bytes: # pragma: no cover
+        """Return the entire buffer contents as bytes (``io.BytesIO`` parity helper)."""
+        return bytes(self.buf)
 
     def fileno(self) -> int:
         return -1

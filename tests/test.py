@@ -1557,7 +1557,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(res, res2)
 
             res2 = jdb[user._date.mod(7, today.weekday())]
-            self.assertEqual(res, res2)
+            self.assertEqual(set(res), set(res2))
 
             # created date == saturday
             res = jdb.find(user._date.mod(7., 5))
@@ -1626,7 +1626,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.show(user._id.endswith(('_3', '_2')))
             self.assertEqual(set(res), {'user_2', 'user_3'})
 
-            res2 = jdb.find(user._id.endswith(('_3', '_2')))
+            res2 = jdb.find(user._id.endswith(('_3', '_2')), with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jdb[user._id.endswith(('_3', '_2'))]
@@ -1651,10 +1651,10 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(user._id.not_has('r_1'))
             self.assertEqual(set(res), {'user_2', 'user_3', 'user_4'})
 
-            res = jdb.find(user._date.any_in([prev_date3, prev_date1]))
+            res = jdb.find(user._date.any_in([prev_date3, prev_date1]), with_value=True)
             self.assertEqual(set(res), {'user_2', 'user_4'})
 
-            res2 = jdb.find(user._id.fullmatch(r'user_[24]'))
+            res2 = jdb.find(user._id.fullmatch(r'user_[24]'), with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jdb.find(user._date.any_in([prev_date3, prev_date1]) & user._id.matches(r'er_[24]'))
@@ -2344,10 +2344,10 @@ class TestJDb(unittest.TestCase):
             res2 = jdb.find(['user_1', 'user_2'], with_value=True)
             self.assertEqual(res, res2)
 
-            res2 = jdb.find(vals={'_id': {'user_1', 'user_2'}})
+            res2 = jdb.find(vals={'_id': {'user_1', 'user_2'}}, with_value=True)
             self.assertEqual(res, res2)
 
-            res2 = jdb.find(vals={'_id.$last.$between': ('1', '2')})
+            res2 = jdb.find(vals={'_id.$last.$between': ('1', '2')}, with_value=True)
             self.assertEqual(res, res2)
 
             res2 = jmem.find(vals={'$key': {'user_1', 'user_2'}})

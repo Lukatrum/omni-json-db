@@ -29,16 +29,24 @@ try:
         return dumper.represent_set(set(data))
 
     yaml.SafeDumper.add_representer(frozenset, frozenset_representer)
+    # bytes is natively dumped as !!binary by SafeRepresenter; register the same
+    # representer for bytearray so dumps_with_zip() fully supports bytearray payloads.
+    yaml.SafeDumper.add_representer(bytearray, yaml.SafeDumper.represent_binary)
 
 except ImportError:
     yaml = None
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
-    br_compress = lambda _bytes : brotli_compress(_bytes, quality=6)
-    br_decompress = brotli_decompress
+    # Some brotli bindings (e.g. brotlipy / brotlicffi, "brotli/brotli.py") only
+    # accept bytes and raise ``TypeError: expected new array length or
+    # list/tuple/str, not bytearray`` on bytearray/memoryview inputs, so convert
+    # bytes-like inputs here (brotli is the only codec that needs this copy).
+    br_compress = lambda _bytes : brotli_compress(_bytes if isinstance(_bytes, bytes) else bytes(_bytes), quality=6)
+    br_decompress = lambda _bytes : brotli_decompress(_bytes if isinstance(_bytes, bytes) else bytes(_bytes))
 except ModuleNotFoundError:
     br_compress = br_decompress = None
+    BR_Error = OSError  # keep except-clauses in zip()/unzip() resolvable
 
 try:
     from lz4.frame import compress as _lz4_compress, decompress as _lz4_decompress, COMPRESSIONLEVEL_MIN, BLOCKSIZE_MAX256KB
@@ -175,6 +183,7 @@ try:
 
 except ModuleNotFoundError:
     zstd_compress = zs1_compress = zs2_compress = zstd_decompress = None
+    ZS_Error = OSError  # keep except-clauses in zip()/unzip() resolvable
 
 except ImportError:
     # Python 3.7 does not support compress() and decompress()
@@ -292,6 +301,7 @@ UNZIP_lut = (
     lambda pad,data : zstd_decompress(data.rstrip(pad) + b'\0\0\0\0'),
     lambda pad,data : lz4_decompress(data.rstrip(pad) + b'\0\0\0\0'),
 )
+
 
 UNZIP_lut0 = (
     lambda data: data,
@@ -1438,6 +1448,11 @@ class JIoVAL_Y(JIoVAL):
         if yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
+        if isinstance(data, (bytearray, memoryview)):
+            # PyYAML only accepts str/bytes; any other object is treated as a
+            # file-like stream (and fails with AttributeError: no 'read').
+            data = bytes(data)
+
         for _ in range(9):
             try:
                 return yaml.safe_load(data)
@@ -1797,7 +1812,7 @@ class JIo(JIoBase):
         try:
             fp = files_obj.KEY_open('rb')
             header = bytearray(HEADER_SIZE)
-            _len = fp.readinto(header)
+            _len = fp.readinto(header) or 0
             if _len == HEADER_SIZE:
                 if header[0] == 91: # = '['
                     info = json_loads(header)
@@ -2332,7 +2347,7 @@ class JIo(JIoBase):
             for row in sorted(lut): # pragma: no cover
                 yield lut.pop(row, ''), row
 
-    def zip(self, data:bytes, zip_type:Optional[int]=None) -> bytes:
+    def zip(self, data:Union[bytes,bytearray], zip_type:Optional[int]=None) -> bytes:
         """Compress raw binary block sequence elements utilizing active chosen format algorithms drivers factories.
 
         Args:
@@ -2357,7 +2372,7 @@ class JIo(JIoBase):
             print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!zip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type_i})\nexception:{e}', red=1))
             raise ValueError from e
 
-    def unzip(self, data:bytes, zip_type:Optional[int]=None) -> bytes:
+    def unzip(self, data:Union[bytes,bytearray], zip_type:Optional[int]=None) -> Union[bytes,bytearray]:
         """Decompress data blocks sequences backward returning baseline raw serialization strings contents arrays.
 
         Args:
@@ -2546,8 +2561,8 @@ class JIo(JIoBase):
             fp.seek(pos)
 
         buf = bytearray(index_size)
-        rd_size = fp.readinto(buf)
-        info = self.KEY_loads(buf if rd_size > 0 else b'')
+        n_read = fp.readinto(buf) or 0
+        info = self.KEY_loads(buf if n_read > 0 else b'')
         if row_id < self.n_records:
             _KEY_rows[row_id] = info
             while len(_KEY_rows) > TOTAL_KEY_ROWS:
@@ -2805,17 +2820,27 @@ class JIo(JIoBase):
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!dumps_with_zip(data={type(data)}, zip_type={zip_type})\nexception:{e}', red=1))
             raise ValueError from e
 
-    def loads_with_unzip(self, val_bytes:bytes, zip_type:Optional[int]=None) -> Any:
+    def loads_with_unzip(self, val_bytes:Union[bytes,bytearray,memoryview], zip_type:Optional[int]=None) -> Any:
         """Unpack and decompress values blocks sequences backward reconstructing original Python structures layout instances profiles models parameters data fields fields.
 
+        Fully supports ``bytearray`` inputs (e.g. buffers filled by
+        ``read_bytes()``/``readinto()``): the payload is forwarded to the
+        decompressors and decoders as-is, without converting to ``bytes``
+        first, preserving the zero-copy read path. ``memoryview`` inputs are
+        promoted to ``bytearray`` only because padded decoding requires
+        ``rstrip()`` support.
+
         Args:
-            val_bytes (bytes): Source compressed binary data chunk payload array block sequence input.
+            val_bytes (Union[bytes,bytearray,memoryview]): Source compressed binary data chunk payload array block sequence input.
             zip_type (Optional[int], optional): Overriding algorithmic category reference number identifier selection indicator value. Defaults to None.
 
         Returns:
             Any: Deserialized Python data payload mapping output.
         """
         try:
+            if isinstance(val_bytes, memoryview): # pragma: no cover
+                val_bytes = bytearray(val_bytes)
+
             unzip_bytes = self.unzip(val_bytes, zip_type=zip_type)
             return self.VAL_loads(unzip_bytes)
 
@@ -3078,8 +3103,8 @@ class JIo(JIoBase):
         else: # M, S
             line = bytearray(index_size)
             while lines < n_lines:
-                rd_size = fp.readinto(line)
-                if rd_size != index_size: # pragma: no cover
+                n_read = fp.readinto(line) or 0
+                if n_read != index_size: # pragma: no cover
                     break
 
                 try:
