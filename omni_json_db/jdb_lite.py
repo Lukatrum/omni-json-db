@@ -122,7 +122,7 @@ class JDbKey:
 
                 - Condition
 
-                    - val = jdb.keys[Query().name.startswith('A'')]
+                    - val = jdb.keys[Query().name.startswith('A')]
 
                 - slice | date | datetime | float | int
 
@@ -133,8 +133,6 @@ class JDbKey:
                     >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
                     >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
                     >>> matches = jdb.keys[:]        # get all key info
-                    >>> matches = jdb.keys[0]        # get 1st key info
-                    >>> matches = jdb.keys[-1]       # get last key info
                     >>> matches = jdb.keys[0]        # get 1st key info
                     >>> matches = jdb.keys[-1]       # get last key info
                     >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
@@ -722,7 +720,7 @@ class JDbKey:
             is_matched = key
             k_arg_cnt = is_matched.__code__.co_argcount
             if not 2 >= k_arg_cnt >= 1:
-                raise TypeError('invalid function {k_arg_cnt}')
+                raise TypeError(f'invalid function {k_arg_cnt}')
 
         else:
             is_matched = None
@@ -778,8 +776,8 @@ class JDbKey:
                 if not (sync_id >= io.sync_id or sync_id < 0):
                     io_read_key = io.read_key
                     io_conv_date = io.z_conv_date
-                    n_records = io.n_records
-                    for row_id in range(io.n_records):                        
+                    for row_id in range(io.n_records):
+                        key_fp = fp[-1]
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         if ver == sync_id:
                             old_date, new_date = io_conv_date(days)
@@ -796,6 +794,7 @@ class JDbKey:
                 io_conv_date = io.z_conv_date
                 if k_arg_cnt == 2:
                     for row_id in range(io.n_records):
+                        key_fp = fp[-1]
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         old_date, new_date = io_conv_date(days)
                         val = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -805,6 +804,7 @@ class JDbKey:
                 elif k_arg_cnt == 1:
                     for _key,row_id in io.key_table.items():
                         if io.n_records > row_id >= 0 and is_matched(_key):
+                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -831,6 +831,7 @@ class JDbKey:
                             row_id = io.n_records + row_id
 
                         if io.n_records > row_id >= 0:
+                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -1037,7 +1038,7 @@ class JDbReader(JDbBase):
             elif re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', KEY_file): # pragma: no cover
                 server_ip, server_port = KEY_file.split(':')
                 server_port = int(server_port)
-                if not 65535 >= server_port > 0 or not all(255 > int(vv) >= 0 for vv in server_ip.split('.')): # pragma: no cover
+                if not 65535 >= server_port > 0 or not all(255 >= int(vv) >= 0 for vv in server_ip.split('.')): # pragma: no cover
                     raise TypeError
                 files_obj = JNetFiles((server_ip, server_port))
             else:
@@ -1061,7 +1062,7 @@ class JDbReader(JDbBase):
                 raise TypeError('write_hook must be function')
 
             if write_hook.__code__.co_argcount != 2:
-                raise TypeError('write_hook(key,val) must have 2 args')
+                raise TypeError('write_hook must have 2 args (key, val)')
 
             write_hook('key', 'val')
 
@@ -2920,7 +2921,7 @@ class JDbReader(JDbBase):
                         data_size = f' k:{size/1024:,.1f}KB |'
 
                 if io.file_table: # pragma: no cover
-                    size = sum(list(io.file_table.values()))
+                    size = sum(io.file_table.values())
                     if size > 0:
                         if size >= (2**30):
                             data_size += f' v:{size/(2**30):,.1f}GB/{len(io.file_table)} |'
@@ -3036,7 +3037,7 @@ class JDbReader(JDbBase):
             is_matched = key
             k_arg_cnt = is_matched.__code__.co_argcount
             if not 2 >= k_arg_cnt >= 1:
-                raise TypeError('invalid function {k_arg_cnt}')
+                raise TypeError(f'invalid function {k_arg_cnt}')
 
         else:
             is_matched = None
@@ -3080,7 +3081,7 @@ class JDbReader(JDbBase):
             if isinstance(key, int) and not isinstance(key, bool):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
-                if n_records > row_id > 0:
+                if n_records > row_id >= 0:
                     _key, _file_id, _offset, _size, _vsize, _ver, _days = io.read_key(key_fp, row_id)
                     yield _key, self.f_read(fp, _key, row=row_id, copy=False)
 
@@ -3093,6 +3094,7 @@ class JDbReader(JDbBase):
                     io_read_key = io.read_key
                     n_records = io.n_records
                     for row_id in range(n_records):
+                        key_fp = fp[-1]
                         _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
                         if _ver == sync_id:
                             yield _key, self.f_read(fp, _key, row=row_id, copy=False)
@@ -3111,7 +3113,7 @@ class JDbReader(JDbBase):
                 f_get_val_fp = self.f_get_val_fp
                 n_records = io.n_records
                 io_read_value = io.read_value
-                for _key, (row_id, file_id, offset, size, vsize, _ver, _days, _cdate, _mdate) in self.f_key_iter(fp, key):
+                for _key, (row_id, file_id, offset, size, vsize, _ver, _days, _mdate, _cdate) in self.f_key_iter(fp, key):
                     if not n_records > row_id >= 0: continue
                     if _cache and _key in _cache:
                         val = _cache.get(_key, None)
@@ -3242,7 +3244,7 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'$in': ["value1", "value2"]})
             >>> jdb.find_iter(IN=["value1", "value2"])
             >>> jdb.find_iter(NIN=["value1", "value2"])
-            >>> jdb.find_iter(vals={'$func': lamdba value:value == "any"})
+            >>> jdb.find_iter(vals={'$func': lambda value:value == "any"})
             >>> jdb.find_iter(FUNC=lambda value:value == "any")
             >>> jdb.find_iter(FUNC=lambda key,val:val == "any")
             >>> jdb.find_iter(r'^[Rr].*[Nn]$', IN=[8,27])
@@ -3329,7 +3331,7 @@ class JDbReader(JDbBase):
                         if not (key_rule and not key_rule.search(child_name)):
                             child = f_get_child(fp, child_name)
                             if isinstance(child, JDbReader):
-                                for _key,_val in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse, **kwargs):
+                                for _key,_val in child.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse):
                                     yield f'{child_name}{SEP_SYM}{_key}', _val
                 return
             keys = {'$re': re_compile(keys)}
@@ -3410,6 +3412,7 @@ class JDbReader(JDbBase):
                     k_filter += 1
                     continue
 
+                key_fp = fp[-1]
                 if date:
                     _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
                     cdate, mdate = io_conv_date(_days)
@@ -3437,16 +3440,16 @@ class JDbReader(JDbBase):
                     continue
 
                 if key not in cache:
-                    move_to_end = False
+                    move_to_end = 0
                     value, value_b = self.f_read_with_bytes(fp, key)
                 else:
-                    move_to_end = True
+                    move_to_end = 1
                     value_b = None
                     value = cache.get(key, _MISSING)
                     if value is _MISSING: # pragma: no cover
                         value, value_b = self.f_read_with_bytes(fp, key)
                     else:
-                        value = deepcopy(value)
+                        move_to_end += 1
 
                 if vals and isinstance(value, JDbReader):
                     child = value
@@ -3500,6 +3503,8 @@ class JDbReader(JDbBase):
 
                     if move_to_end: # pragma: no cover
                         cache.move_to_end(key)
+                        if move_to_end > 1:
+                            value = deepcopy(value)
 
                     if with_date:
                         yield key, (value, cdate, mdate, mod_id)
@@ -3857,7 +3862,7 @@ class JDbReader(JDbBase):
         _used_s = stats.get('used_s', 0.)
         n_loops = stats.get('loops', 0)
         n_records = stats.get('records', 0)
-        ops = n_loops / _used_s
+        ops = n_loops / max(_used_s, 1e-9)
         ops, o_unit = (ops / 1_000_000, 'M') if ops >= 1_000_000 else \
                         (ops / 1_000, 'K') if ops >= 1_000 else (ops, '')
         progress = 100. if n_loops >= n_records else (n_loops / n_records)
@@ -4613,7 +4618,7 @@ class JDbReader(JDbBase):
             fp_dict (Dict[int, IO]): Active file handler matrix registration array mappings table.
             file_id (Optional[int], optional): Target segment classification index code identifier. Defaults to None.
             req_size (Optional[int], optional): request new file size
-            max_fp (int, optional): System density boundary constraining total allocated storage streams descriptors. Defaults to 64.
+            max_fp (int, optional): System density boundary constraining total allocated storage streams descriptors. Defaults to 32.
 
         Returns:
             Tuple[IO, int, int]: Target segment file stream controller instance, active section block index, and current capacity offset tracker.
@@ -4687,7 +4692,7 @@ class JDbReader(JDbBase):
             slice_obj (Union[slice, dt_date, datetime, Condition]]): slice object
 
         Returns:
-            (str, tuple): key, (row_id, file_id, offset, row_size, val_size, version, days, created_date, modified_date)
+            (str, tuple): key, (row_id, file_id, offset, row_size, val_size, version, days, modified_date, created_date)
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
@@ -4700,6 +4705,7 @@ class JDbReader(JDbBase):
                 if not match_KEY_rules(_key, key_rules):
                     continue
 
+                key_fp = fp_dict[-1]
                 __key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4714,6 +4720,7 @@ class JDbReader(JDbBase):
 
         else:
             for row_id in range(start, stop, step):
+                key_fp = fp_dict[-1]
                 _key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4739,15 +4746,14 @@ class JDbReader(JDbBase):
         Yields:
             (str, Any): A structural tuple pair associating key name strings with content values.
         """
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-        n_records = io.n_records
-        index_size = io.index_size
-        n_rows = min(8192, n_records)
-        n_blks = (n_records + n_rows - 1) // n_rows
-        if n_blks > 0:
+        n_records = self.io.n_records
+        n_rows = min(4, n_records)
+        if n_rows > 0:
+            io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             _cache = self._cache
             _decode_row = self._decode_row
             f_get_val_fp = self.f_get_val_fp
+            index_size = io.index_size
             io_read_value = io.read_value
             io_KEY_loads = io.KEY_loads
             buf = bytearray(io.index_size * n_rows)
@@ -4757,6 +4763,10 @@ class JDbReader(JDbBase):
             cnt = 0
             while cnt < n_records:
                 _rows = min(n_records - cnt, n_rows)
+                if key_fp != fp_dict[-1]: # pragma: no cover
+                    key_fp = fp_dict[-1]
+                    io.seek(key_fp, row_id)
+
                 rd_bytes = key_fp.readinto(mv_buf[:_rows*index_size] if _rows != n_rows else buf)
                 if not reverse:
                     _range = range(0, rd_bytes, index_size)
@@ -4787,7 +4797,7 @@ class JDbReader(JDbBase):
                 if not reverse:
                     row_id += _rows
                 else:
-                    row_id -= _rows
+                    row_id = max(row_id - _rows, 0)
                     if row_id >= 0: io.seek(key_fp, row_id)
 
     def _init_KEY(self) -> Tuple[JIo,IO]:
@@ -4908,7 +4918,7 @@ class JDbReader(JDbBase):
         +===========================+==================================+
         | 0x0001                    | bool                             |  [0x01]
         +===========================+==================================+
-        |                           | int  (sign+63bit)                |  [0x02] -2**63 <= i <= 2*63-1
+        |                           | int  (sign+63bit)                |  [0x02] -2**63 <= i <= 2**63-1
         | 0x0002 ~ 0x0003  (1)      +----------------------------------+
         |                           | uint (64bit)                     |  [0x03] 2**64-1
         +===========================+==================================+
