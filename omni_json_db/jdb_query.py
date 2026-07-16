@@ -2,8 +2,9 @@
 from __future__ import annotations
 from functools import lru_cache
 from math import ceil, floor
+from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
-from typing import Any, List, Generator, Union, Callable, Tuple
+from typing import Any, List, Generator, Union, Callable, Tuple, Optional
 from re import compile as re_compile, Pattern, S as re_S
 #-----------------------------------------------------------------------------
 from .jdb_io import json_dumps
@@ -352,6 +353,12 @@ class Query:
 
     def __repr__(self) -> str:
         return f"Query('{self._path}')"
+
+    # ``__eq__`` is overloaded to build a :class:`Condition`, which implicitly
+    # sets ``__hash__ = None`` and makes Query unhashable; restore identity
+    # hashing so a Query can be used as a dict key or set member, e.g.
+    # ``find(group_by={Query().role: [Query().age.avg(), '_id']})``.
+    __hash__ = object.__hash__
 
     def has(self, val:Union[str,tuple]) -> Condition:
         """Check if the target string or collection contains the value. Maps to ``$has``."""
@@ -802,6 +809,294 @@ def resolve_sort_value(parts:List[str], key:str, val:Any, cdate:dt_date, mdate:d
 
     return False, None
 
+#-----------------------------------------------------------------------------
+GROUP_LIST_OP = '$list' # pseudo aggregation op: keep grouped values as a list (the default)
+
+def _split_group_spec(spec:Union[str,'Query']) -> List[str]:
+    """Split a group spec (``str`` dot-path or :class:`Query`) into path segments.
+
+    Args:
+        spec (str | Query): The field-path spec, e.g. ``'price.$max'`` or
+            ``Query().price.max()``.
+
+    Returns:
+        List[str]: The dot-separated path segments.
+
+    Raises:
+        TypeError: If *spec* is neither ``str`` nor :class:`Query`.
+    """
+    if isinstance(spec, Query):
+        return spec.path.split('.')
+
+    if isinstance(spec, str):
+        return spec.split('.')
+
+    raise TypeError(f'invalid group_by spec: {spec!r}')
+
+def _resolve_group_path(parts:List[str], key:str, val:Any, cdate:Optional[dt_date]=None, mdate:Optional[dt_date]=None) -> Tuple[bool,Any]:
+    """Resolve a dot-notation path against one record for grouping purposes.
+
+    Unlike :func:`resolve_sort_value` this may return *any* python
+    object (dicts/lists included), because grouped field values are collected
+    into lists rather than compared.
+
+    Args:
+        parts (List[str]): Pre-split path segments. ``'_id'`` as root resolves
+            to the record key; ``'_date'`` resolves to the ``(created,
+            modified)`` date tuple; ``''`` resolves to the whole value.
+            Segments in ``TRANSFORM_OPS`` are applied via
+            :func:`_apply_transform`.
+        key (str): The record's key.
+        val (Any): The record's value.
+        cdate (datetime.date, optional): The record's created date.
+        mdate (datetime.date, optional): The record's modified date.
+
+    Returns:
+        Tuple[bool, Any]: ``(True, value)`` on success, ``(False, None)`` when
+        the path cannot be resolved (missing key, bad index, or a transform
+        returned ``None``).
+    """
+    if not parts:
+        return True, val
+
+    root, rest = parts[0], parts[1:]
+    if root == '_id':
+        cur = key
+    elif root == '_date':
+        cur = (cdate, mdate)
+    elif root == '':
+        cur = val
+    elif root in TRANSFORM_OPS:
+        cur = _apply_transform(root, val)
+        if cur is None:
+            return False, None
+    elif isinstance(val, dict) and root in val:
+        cur = val[root]
+    else:
+        return False, None
+
+    for part in rest:
+        if part in TRANSFORM_OPS:
+            cur = _apply_transform(part, cur)
+            if cur is None:
+                return False, None
+        elif isinstance(cur, dict):
+            if part not in cur:
+                return False, None
+            cur = cur[part]
+        elif isinstance(cur, (list, tuple)):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return False, None
+        else:
+            return False, None
+
+    return True, cur
+
+def parse_group_by(group_by:Any) -> Tuple[List[List[str]],Optional[str],Optional[List[Tuple[List[str],Optional[str],str]]]]:
+    """Normalize any accepted ``group_by`` spec into its three components.
+
+    Accepted forms (see :meth:`JDbReader.find` for full semantics):
+
+    * ``str`` / :class:`Query` — a single group-key path; a **trailing**
+      ``TRANSFORM_OPS`` segment is the value-aggregation operator
+      (``'category.$avg'``), any earlier ops transform the group key
+      (``'name.$lower.$avg'``).
+    * ``list`` / ``tuple`` — composite group key; ops inside elements
+      (including trailing ones) transform **that key component**
+      (``['name.$lower']``); a standalone op element sets the aggregation
+      operator for all fields (``['category', 'role', '$avg']``).
+    * ``dict`` — exactly one ``{key_spec: field_specs}`` pair; *key_spec* is a
+      ``str``/:class:`Query` (ops transform the key) or a ``tuple`` of such
+      for a composite key; *field_specs* is a spec or list of specs, each with
+      an optional trailing aggregation op (``'price.$max'``); only listed
+      fields appear in the output; ``'_id'`` yields the original record keys.
+
+    Args:
+        group_by (Any): The raw ``group_by`` argument.
+
+    Returns:
+        Tuple[List[List[str]], Optional[str], Optional[List[Tuple[List[str], Optional[str], str]]]]:
+        ``(key_parts_list, default_op, field_specs)`` where *key_parts_list*
+        holds one pre-split path per group-key component, *default_op* is the
+        aggregation operator applied to every auto-collected field (``None``
+        = list), and *field_specs* is ``None`` (collect all top-level fields)
+        or a list of ``(parts, op, out_name)`` explicit output fields.
+
+    Raises:
+        ValueError: If the spec is empty or a dict spec doesn't contain exactly one pair.
+        TypeError: If the spec (or a nested element) has an unsupported type.
+    """
+    if isinstance(group_by, dict):
+        if len(group_by) != 1:
+            raise ValueError(f'group_by dict must contain exactly one {{key: fields}} pair, got {len(group_by)}')
+
+        (kspec, fspecs), = group_by.items()
+        if isinstance(kspec, tuple):
+            key_parts_list = [_split_group_spec(ss) for ss in kspec]
+        else:
+            key_parts_list = [_split_group_spec(kspec)]
+
+        if isinstance(fspecs, (str, Query)):
+            fspecs = [fspecs]
+
+        field_specs = []
+        used_names = set()
+        for fs in fspecs:
+            parts = _split_group_spec(fs)
+            last = parts[-1]
+            parts,op = (parts[:-1], None) if last == GROUP_LIST_OP else \
+                    (parts[:-1], last) if last in TRANSFORM_OPS else (parts, None)
+            name = '.'.join(pp for pp in parts if pp not in TRANSFORM_OPS) or '_val'
+            if name in used_names: # e.g. both 'price.$max' and 'price.$min'
+                name = f'{name}.{op or GROUP_LIST_OP}'
+
+            used_names.add(name)
+            field_specs.append((parts, op, name))
+
+        if not key_parts_list:
+            raise ValueError(f'group_by has no group-key field: {group_by!r}')
+
+        return key_parts_list, None, field_specs
+
+    if isinstance(group_by, (list, tuple)):
+        key_parts_list = []
+        default_op = None
+        for spec in group_by:
+            parts = _split_group_spec(spec)
+            if len(parts) == 1 and (parts[0] in TRANSFORM_OPS or parts[0] == GROUP_LIST_OP):
+                # standalone op element => aggregation method for all fields
+                default_op = None if parts[0] == GROUP_LIST_OP else parts[0]
+                continue
+
+            # ops inside a list element (incl. trailing) transform the key component
+            key_parts_list.append(parts)
+
+        if not key_parts_list:
+            raise ValueError(f'group_by has no group-key field: {group_by!r}')
+
+        return key_parts_list, default_op, None
+
+    # str / Query — trailing op = aggregation method
+    default_op = None
+    parts = _split_group_spec(group_by)
+    if parts:
+        last = parts[-1]
+        parts,default_op = (parts[:-1], None) if last == GROUP_LIST_OP else \
+                    (parts[:-1], last) if last in TRANSFORM_OPS else (parts, None)
+
+    if not parts or parts == ['']:
+        raise ValueError(f'group_by has no group-key field: {group_by!r}')
+
+    return [parts], default_op, None
+
+def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[List[str]]], default_op:Optional[str], field_specs:Optional[List[Tuple[List[str],Optional[str],str]]]) -> List[Tuple[str,tuple]]:
+    """Group ``(key, (value, cdate, mdate, mod_id))`` rows by parsed group specs.
+
+    Each output row represents one group: the row key is the resolved group
+    value (the new ``_id``; a ``tuple`` for composite keys, ``None`` when the
+    group-key path can't be resolved), the value is a dict of aggregated
+    fields (or a bare list/aggregate when the source values weren't dicts),
+    and the dates are folded as ``(min(cdate), max(mdate), max(mod_id))`` so
+    downstream sorting by ``'_date'`` keeps working.
+
+    Aggregation of each collected list is delegated to
+    :func:`_apply_transform`, so every ``TRANSFORM_OPS`` operator is
+    supported; when an operator can't process a group's collected list the
+    field becomes ``None``.
+
+    Args:
+        rows (List[Tuple[str, tuple]]): Rows as produced by
+            ``JDbReader.find_iter`` with ``with_date=True``.
+        key_parts_list (Optional[List[List[str]]]): One pre-split path per
+            group-key component, as returned by :func:`parse_group_by`;
+            ``None`` (or empty) is a no-op and returns *rows* unchanged.
+        default_op (Optional[str]): Aggregation operator applied to every
+            auto-collected field; ``None`` collects lists.
+        field_specs (Optional[List[Tuple[List[str], Optional[str], str]]]):
+            ``None`` to auto-collect all top-level fields, or explicit
+            ``(parts, op, out_name)`` output fields.
+
+    Returns:
+        List[Tuple[str, tuple]]: One row per group, in first-seen order,
+        shaped like the input rows.
+    """
+    if not key_parts_list or not rows:
+        return rows
+
+    single_key = len(key_parts_list) == 1
+
+    # plain single-segment group keys are redundant inside the group value
+    excluded_roots = {parts[0] for parts in key_parts_list \
+                        if len(parts) == 1 \
+                            and parts[0] not in ('', '_id', '_date') \
+                            and parts[0] not in TRANSFORM_OPS}
+
+    groups = OrderedDict()
+    for key,(val,cdate,mdate,mod_id) in rows:
+        gkey = []
+        for parts in key_parts_list:
+            ok, gv = _resolve_group_path(parts, key, val, cdate, mdate)
+            gkey.append(gv if ok else None)
+
+        gval = gkey[0] if single_key else tuple(gkey)
+        try:
+            hash(gval)
+        except TypeError: # unhashable group value (dict/list/...) -> stringify
+            gval = str(gval)
+
+        grp = groups.get(gval)
+        if grp is None:
+            groups[gval] = grp = [[], cdate, mdate, mod_id]
+        else:
+            if cdate < grp[1]: grp[1] = cdate
+            if mdate > grp[2]: grp[2] = mdate
+            if mod_id > grp[3]: grp[3] = mod_id
+
+        grp[0].append((key, val, cdate, mdate))
+
+    ret_rows = []
+    for gval, (g_rows, cdate, mdate, mod_id) in groups.items():
+        if field_specs is None:
+            # auto mode: collect every top-level field of dict values,
+            # non-dict values under the pseudo field '_val'
+            fields = OrderedDict()
+            for _kk, vv, _cc, _mm in g_rows:
+                if isinstance(vv, dict):
+                    for fk, fv in vv.items():
+                        if fk in excluded_roots:
+                            continue
+
+                        fields.setdefault(fk, []).append(fv)
+                else:
+                    fields.setdefault('_val', []).append(vv)
+
+            if default_op is not None:
+                gout = {fk: _apply_transform(default_op, fv) for fk, fv in fields.items()}
+            else:
+                gout = dict(fields)
+
+            if tuple(gout) == ('_val',): # only scalars matched -> unwrap
+                gout = gout['_val']
+            elif not gout:
+                gout = None
+        else:
+            # explicit mode: only requested fields, per-field operator
+            gout = {}
+            for parts, op, name in field_specs:
+                items = []
+                for kk, vv, cc, mm in g_rows:
+                    ok, rv = _resolve_group_path(parts, kk, vv, cc, mm)
+                    if ok:
+                        items.append(rv)
+
+                gout[name] = _apply_transform(op, items) if op is not None else items
+
+        ret_rows.append((gval, (gout, cdate, mdate, mod_id)))
+
+    return ret_rows
+#-----------------------------------------------------------------------------
 def _apply_transform(op: str, val: Any) -> Any:
     """Apply a single in-path value-transform operator.
 

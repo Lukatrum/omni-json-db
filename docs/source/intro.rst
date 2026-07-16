@@ -6,8 +6,6 @@ Introduction
 
 Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
 
-Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to use native Python syntax (slicing, Lambdas, Regex, Set operations) to query and manipulate data. It also features built-in "Time-Travel", state rollbacks (Undo/Redo).
-
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 
 * **Server-LESS**: Direct disk access without the overhead of a database server.
@@ -15,8 +13,40 @@ Unlike traditional *SQLite* or *NoSQL* databases, **omni-json-db** allows you to
 * **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
 
 
+🤔 Why omni-json-db?
+********************
+
+Unlike traditional SQL or NoSQL databases, **omni-json-db** lets you use native
+Python syntax — slicing, lambdas, regex, and ``set`` operations — to query and
+manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
+engine, and pluggable serialization/compression.
+
++-----------------------------------+-------------------+-----------+-----------+-----------+
+|                                   | **omni-json-db**  | TinyDB    | SQLite    | DuckDB    |
++===================================+===================+===========+===========+===========+
+| No schema (Schema-less)           | ✅                | ✅        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Pythonic queries                  | ✅                | ✅        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Deep nested search                | ✅                | ❌        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Graph database engine             | ✅                | ❌        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Undo / Redo (Time-Travel)         | ✅                | ❌        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Network mode                      | ✅                | ❌        | ❌        | ❌        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Compression built-in              | ✅ (6 algorithms) | ❌        | ❌        | ✅ (Auto) |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+| Thread-safe concurrency           | ✅ (MR/SW)        | ❌        | ✅        | ✅        |
++-----------------------------------+-------------------+-----------+-----------+-----------+
+
+ **omni-json-db** has been tested with Python 3.7+ and PyPy3.
+
+
 Features
 --------
+* **Native Graph Database Engine**: Transform your Key-Value store into a powerful Property Graph! The new ``GraphDb`` layer provides seamless node and edge management, O(1) adjacency indexing, and built-in classic graph algorithms (BFS/Dijkstra shortest paths, DFS traversal, cycle detection, topological sorting, and connected components) without compromising the extreme speed of the underlying engine.
 
 * **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. 
 
@@ -41,4 +71,6 @@ Features
 * **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``.
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism.
+
+* **~100% test coverage**
 

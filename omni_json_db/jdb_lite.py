@@ -16,9 +16,9 @@ from typing import Any, Union, Optional, Tuple, Set, List, Dict, \
 from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE # THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
-from .jdb_query import QUERY_OPS, Condition, sorted_by_rules, \
-                match_KEY_rules, match_DATE_rules, match_VAL_rules
-
+from .jdb_query import QUERY_OPS, Condition, \
+            sorted_by_rules, parse_group_by, grouped_by_rules, \
+            match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, \
                 JTypeError, JDbBase, deepcopy
 #-----------------------------------------------------------------------------
@@ -3544,7 +3544,7 @@ class JDbReader(JDbBase):
 
         return matched_list
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -3585,18 +3585,90 @@ class JDbReader(JDbBase):
             reverse (bool, optional): Reverse the sort order. Defaults to
                 ``False`` for the new spec-based modes; for the legacy ``int``
                 mode, defaults to ``sort < 0`` when not explicitly given.
+            group_by (Any, optional): Group the matched records; the resolved
+                group value becomes the new ``_id`` (record key) and every
+                grouped field is aggregated. Defaults to ``None`` (no
+                grouping). Grouping happens **after** ``limit``/``skip``
+                (which act on raw records) and **before** ``sort`` (which
+                acts on the grouped rows). All ``TRANSFORM_OPS`` are accepted
+                as aggregation operators; when an operator cannot process a
+                group's collected list, that field becomes ``None``.
+                Supported spec forms:
+
+                * ``str`` / :class:`Query` — group by this field, collect all
+                  other top-level fields as **lists**. A *trailing*
+                  ``TRANSFORM_OPS`` segment is the aggregation operator
+                  applied to every collected list; earlier ops transform the
+                  group key itself.
+
+                  >>> jdb.find(group_by='category')             # fields -> lists
+                  >>> jdb.find(group_by='category.$avg')        # fields -> averages
+                  >>> jdb.find(group_by='name.$lower.$avg')     # key=lower(name), fields -> averages
+                  >>> jdb.find(group_by='category.$list')       # explicit list mode (== 'category')
+
+                * ``list`` / ``tuple`` — composite key; the new ``_id`` is a
+                  ``tuple`` of the resolved components. Ops inside an element
+                  (including trailing ones) transform *that key component*;
+                  a standalone op element sets the aggregation operator.
+
+                  >>> jdb.find(group_by=['category', 'role'])           # _id=(category, role)
+                  >>> jdb.find(group_by=['category', 'role', '$sum'])   # + fields -> sums
+                  >>> jdb.find(group_by=['name.$lower'])                # key=lower(name), fields -> lists
+
+                * ``dict`` — exactly one ``{key_spec: field_specs}`` pair;
+                  only the listed fields appear in the output, each with its
+                  own optional trailing aggregation op (default: list).
+                  ``'_id'`` yields the original record keys; a ``tuple``
+                  key_spec builds a composite key.
+
+                  >>> jdb.find(group_by={'category': ['price.$max', 'qty.$sum', '_id']})
+                  >>> jdb.find(group_by={('category','role'): ['qty.$avg', '_id.$len']})
+
+                A spec without any group-key field (e.g. ``'$avg'`` or
+                ``['$sum']``) raises ``ValueError``; an unsupported spec type
+                raises ``TypeError``. Records whose group-key path cannot be
+                resolved fall into the ``None`` group; unhashable group
+                values are stringified.
+                Non-``dict`` record values are collected under the pseudo
+                field ``'_val'`` (unwrapped to a bare list/aggregate when the
+                whole group is non-``dict``). Besides value fields, the
+                special roots ``'_id'`` (record key) and ``'_date'`` (the
+                ``(created, modified)`` date tuple) can be used anywhere a
+                path is accepted — as group key, key component, or output
+                field:
+
+                >>> jdb.find(group_by='_date')                 # _id=(cdate, mdate)
+                >>> jdb.find(group_by=['_date.$first'])        # _id=created date only
+                >>> jdb.find(group_by=['category', '_date.$last']) # _id=(category, modified)
+                >>> jdb.find(group_by={'_date': ['_id', 'qty.$sum']})
 
         Returns:
-            Dict[str, Any]: The subset of matched data.
+            Dict[str, Any]: The subset of matched data, or — when *group_by*
+            is given — ``{group_value: aggregated_fields}``.
 
+        Example:
+            >>> jdb += {'apple':  {'category':'fruit', 'price':10, 'qty':10},
+            ...         'banana': {'category':'fruit', 'price':20, 'qty':20},
+            ...         'carrot': {'category':'veg',   'price':30, 'qty':30}}
+            >>> jdb.find(group_by='category')
+            {'fruit': {'price': [10, 20], 'qty': [10, 20]}, 'veg': {'price': [30], 'qty': [30]}}
+            >>> jdb.find(group_by='category.$avg')
+            {'fruit': {'price': 15.0, 'qty': 15.0}, 'veg': {'price': 30.0, 'qty': 30.0}}
+            >>> jdb.find(group_by={'category': ['price.$max', 'qty.$sum', '_id']})
+            {'fruit': {'price': 20, 'qty': 30, '_id': ['apple', 'banana']}, 'veg': {'price': 30, 'qty': 30, '_id': ['carrot']}}
         """
-        if with_value is None:
-            with_value = not (not vals and not kwargs and sort is None)
+        if group_by is not None:
+            with_value = True
+            key_parts_list, default_op, field_specs = parse_group_by(group_by)
+        else:
+            with_value = not (not vals and not kwargs and sort is None) if with_value is None else with_value
+            key_parts_list = default_op = field_specs = None
 
         data_rows = []
         for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=True, stats=stats, **kwargs):
             data_rows.append((key, val))
 
+        data_rows = grouped_by_rules(data_rows, key_parts_list, default_op, field_specs)
         data_rows = sorted_by_rules(data_rows, sort, reverse)
 
         return {k:v[0] for k,v in data_rows}
@@ -3610,6 +3682,7 @@ class JDbReader(JDbBase):
             with_date:bool=False,\
             sort:Optional[Any]=None,\
             reverse:Optional[bool]=None,\
+            group_by:Optional[Any]=None,\
             **kwargs) -> Dict[str,Any]:
         """
         show matched key+value in table.
@@ -3631,9 +3704,18 @@ class JDbReader(JDbBase):
                 the full ``int`` / ``str`` / ``Query`` / ``list`` spec format.
             reverse (bool, optional): Reverse the sort order. Defaults to
                 ``False``.
+            group_by (Any, optional): Group the matched records before
+                display — see :meth:`find` for the full ``str`` / ``list`` /
+                ``dict`` spec format. The group value is shown in the ``_id``
+                column; when the spec requests the original record keys via
+                ``'_id'`` (dict form), they are displayed in an ``_ids``
+                column to avoid clashing with the group ``_id``. With
+                ``with_date=True`` the ``_date`` column shows each group's
+                ``min(created)``/``max(modified)`` dates. Defaults to ``None``.
 
         Returns:
-            Dict[str, Any]: The subset of matched data.
+            Dict[str, Any]: The subset of matched data, or — when *group_by*
+            is given — ``{group_value: aggregated_fields}``.
 
         Example:
             >>> jdb = JDb()
@@ -3658,12 +3740,15 @@ class JDbReader(JDbBase):
                 | banana | yellow | 100 | Japan |
                 +--------+--------+-----+-------+
         """
+        key_parts_list, default_op, field_specs = parse_group_by(group_by) if group_by is not None else (None, None, None)
         stats = {}
         data_rows = []
         for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=True, stats=stats, **kwargs):
             data_rows.append((key,val))
 
+        data_rows = grouped_by_rules(data_rows, key_parts_list, default_op, field_specs)
         data_rows = sorted_by_rules(data_rows, sort, reverse)
+        grouped = group_by is not None
         fields = ['_id']
         patterns = {'_id'}
         if with_date:
@@ -3676,6 +3761,8 @@ class JDbReader(JDbBase):
                 if kk not in patterns:
                     patterns.add(kk)
                     for kk in val:
+                        if grouped and kk == '_id':
+                            kk = '_ids' # keep the group value in the _id column
                         if kk not in fields:
                             fields.append(kk)
 
@@ -3710,6 +3797,12 @@ class JDbReader(JDbBase):
                 # with yellow color
                 return f"\x1b[93m{val}\x1b[0m"
 
+            if grouped and isinstance(val, (list, tuple)):
+                # grouped lists are usually the payload -> show contents when short
+                vv_s = str(val)
+                if len(vv_s) <= 48:
+                    return vv_s
+
             try:
                 # with underscore
                 return f"\x1b[4m<{type(val).__name__}:{len(val)}>\x1b[0m"
@@ -3732,10 +3825,12 @@ class JDbReader(JDbBase):
                 row_data['_date'] = _date = f'{cdate} {mdate}'
                 col_widths['_date'] = max(col_widths['_date'], _get_display_width(_date))
 
-            row_data['_id'] = key
-            col_widths['_id'] = max(col_widths['_id'], _get_display_width(key))
+            row_data['_id'] = key_s = key if isinstance(key, str) else str(key)
+            col_widths['_id'] = max(col_widths['_id'], _get_display_width(key_s))
             if isinstance(val, dict):
                 for field,vv in val.items():
+                    if grouped and field == '_id':
+                        field = '_ids' # keep the group value in the _id column
                     row_data[field] = vv_s = _format_cell(vv)
                     col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
 

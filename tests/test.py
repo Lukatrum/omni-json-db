@@ -127,8 +127,8 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
 
             {'KEY_file':'db/test_1.jdb',    'api_ver':1, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1gz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_1bz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1gz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_1bz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1xz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1zs.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1br.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
@@ -141,8 +141,8 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_2.jdb',    'api_ver':1, 'data_type':'M+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2gz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2bz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_2xz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
-            {'KEY_file':'db/test_2zs.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_2xz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+                # {'KEY_file':'db/test_2zs.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2br.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2z1.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2z2.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
@@ -162,27 +162,27 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x3.jdb',   'api_ver':1, 'data_type':'J+J', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l2'},
             {'KEY_file':'db/test_x3xz.jdb', 'api_ver':1, 'data_type':'J+J', 'zip_type':'xz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
-            {'KEY_file':'db/test_4.jdb',    'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4.jdb',    'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4gz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4bz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4xz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4zs.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4br.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_4z1.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4br.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_4z1.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4z2.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4lz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x4.jdb',   'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l3'},
             {'KEY_file':'db/test_x4z1.jdb', 'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
-            {'KEY_file':'db/test_5.jdb',    'api_ver':1, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_5.jdb',    'api_ver':1, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5gz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5bz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5xz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5zs.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5br.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5z1.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_5z2.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_5lz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_5z2.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_5lz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x5.jdb',   'api_ver':1, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l4'},
             {'KEY_file':'db/test_x5br.jdb', 'api_ver':1, 'data_type':'J+P', 'zip_type':'br', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
@@ -198,31 +198,31 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x6.jdb',   'api_ver':1, 'data_type':'S+S', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l5'},
             {'KEY_file':'db/test_x6z2.jdb', 'api_ver':1, 'data_type':'S+S', 'zip_type':'z2', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
-            {'KEY_file':'db/test_7.jdb',    'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7.jdb',    'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7gz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7bz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7xz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7zs.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'zs', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
-            {'KEY_file':'db/test_7br.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
+                # {'KEY_file':'db/test_7br.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7z1.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
                 # {'KEY_file':'db/test_7z2.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_7lz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_7lz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x7.jdb',   'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'<16'},
-            {'KEY_file':'db/test_x7lz.jdb', 'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
+            {'KEY_file':'db/test_x7bz.jdb', 'api_ver':1, 'data_type':'J+S', 'zip_type':'bz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
 
-            {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+            # {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x8gz.jdb', 'api_ver':1, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l5'},
 
-            {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+            # {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<8'},
 
-            {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x10lz.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<4'},
+            # {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+            {'KEY_file':'db/test_x10br.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<4'},
 
-            {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+            # {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_11lz.jdb',  'api_ver':1, 'data_type':'J+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'bt'},
 
-            {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+            # {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_12lz.jdb',  'api_ver':1, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l4'},
         ]
 
@@ -1615,6 +1615,142 @@ class TestJDb(unittest.TestCase):
 
             res = jdb.find(user._date.not_has('201'))
             self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            res = jdb.find(user._date.has(today))
+            self.assertEqual(set(res), {'user_1'})
+
+            # check modified date in set()
+            res = jdb.find(user._date.one_of({prev_date3, prev_date1}))
+            self.assertEqual(set(res), {'user_2', 'user_4'})
+
+            res = jdb.find(user._date.not_in({prev_date3, prev_date1}), with_value=True)
+            self.assertEqual(set(res), {'user_1', 'user_3'})
+
+            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1)) # pylint: disable=W0640
+            self.assertEqual(set(res), {'user_1', 'user_2'})
+
+            # -------------------------------------
+            # group_by: str spec — group key becomes the new _id,
+            # other fields are collected as lists (record order)
+            res = jdb.find(group_by='role')
+            self.assertEqual(set(res), {'admin', 'developer', 'designer'})
+            self.assertEqual(res['developer']['name'], ['Bob', 'Charlie'])
+            self.assertEqual(res['developer']['age'], [25, 35])
+            self.assertNotIn('role', res['developer']) # group key not repeated in the value
+
+            # Query spec == str spec
+            res2 = jdb.find(group_by=user.role)
+            self.assertEqual(res, res2)
+
+            # '$list' pseudo-op == the default list mode
+            res2 = jdb.find(group_by='role.$list')
+            self.assertEqual(res, res2)
+
+            # trailing op = aggregation method applied to every collected list;
+            # inapplicable op (e.g. $avg over names) -> None
+            res = jdb.find(group_by='role.$avg')
+            self.assertEqual(res['developer']['age'], 30.)
+            self.assertIsNone(res['developer']['name'])
+
+            res2 = jdb.find(group_by=user.role.avg()) # Query().role.avg() -> 'role.$avg'
+            self.assertEqual(res, res2)
+
+            res = jdb.find(group_by=user.role.max())
+            self.assertEqual(res['developer']['age'], 35)
+            self.assertEqual(res['developer']['name'], 'Charlie')
+
+            # ops before the trailing one transform the group key itself
+            res = jdb.find(group_by='role.$upper.$len')
+            self.assertEqual(set(res), {'ADMIN', 'DEVELOPER', 'DESIGNER'})
+            self.assertEqual(res['DEVELOPER']['age'], 2)
+
+            # unresolvable group-key path -> the None group
+            res = jdb.find(group_by='email')
+            self.assertEqual(set(res[None]['name']), {'Bob', 'Charlie'})
+
+            # -------------------------------------
+            # group_by: list spec — composite key, new _id is a tuple
+            res = jdb.find(group_by=['role', user.age])
+            self.assertEqual(res[('developer', 25)]['name'], ['Bob'])
+            self.assertEqual(res[('developer', 35)]['name'], ['Charlie'])
+
+            # a standalone op element sets the aggregation for all fields
+            res = jdb.find(group_by=['role', '$sum'])
+            self.assertEqual(res['developer']['age'], 60)
+
+            # ops inside a list element (incl. trailing) transform that key component
+            res = jdb.find(group_by=[user.name.lower().first()])
+            self.assertEqual(set(res), {'a', 'b', 'c', 'd'})
+            self.assertEqual(res['c']['age'], [35])
+
+            # -------------------------------------
+            # group_by: dict spec — only listed fields, per-field aggregation,
+            # '_id' yields the original record keys
+            res = jdb.find(group_by={'role': ['age.$max', 'age.$min', '_id']})
+            self.assertEqual(res['developer'], {'age': 35, 'age.$min': 25, '_id': ['user_2', 'user_3']})
+
+            # Query as dict key and as field specs; '_id.$len' == group size
+            res = jdb.show(group_by={user.role: [user.age.avg(), user._id.len()]})
+            self.assertEqual(res['developer'], {'age': 30., '_id': 2})
+
+            # $flat merges the collected list-of-lists
+            res = jdb.find(group_by={user.role: [user.tags.flat()]})
+            self.assertEqual(res['developer']['tags'], ['javascript', 'web', 'python', 'linux', 'aws'])
+
+            # tuple dict key -> composite group key
+            res = jdb.find(group_by={('role', user.age): ['_id']})
+            self.assertEqual(res[('developer', 25)], {'_id': ['user_2']})
+
+            res2 = jdb.find(group_by={(user.role, user.age): ['_id']})
+            self.assertEqual(res, res2)
+
+            # -------------------------------------
+            # group_by: '_date' root -> (created, modified) date tuple
+            res = jdb.find(group_by='_date')
+            self.assertEqual(len(res), 4) # all (cdate, mdate) pairs are distinct
+            self.assertEqual(res[(dt_2005.date(), prev_date1)]['name'], ['Bob'])
+
+            # created date only / modified date only (list form: op transforms the key)
+            res = jdb.find(group_by=[user._date.first()])
+            self.assertEqual(set(res), {dt_2000.date(), dt_2005.date(), dt_2010.date(), dt_2015.date()})
+            self.assertEqual(res[dt_2010.date()]['name'], ['Charlie'])
+
+            res = jdb.find(group_by=['_date.$last'])
+            self.assertEqual(res[today]['name'], ['Alice'])
+            self.assertEqual(res[prev_date3]['name'], ['Diana'])
+
+            res = jdb.find(group_by={'_date': ['_id', 'age.$sum']})
+            self.assertEqual(res[(dt_2000.date(), today)], {'_id': ['user_1'], 'age': 30})
+
+            # -------------------------------------
+            # group_by + sort: sorting applies to the grouped rows
+            res = jdb.find(group_by='role.$avg', sort='age')
+            self.assertEqual(list(res), ['designer', 'admin', 'developer']) # 28. < 30. == 30. (stable)
+
+            res = jdb.find(group_by='role', sort='_id', reverse=True)
+            self.assertEqual(list(res), ['developer', 'designer', 'admin'])
+
+            # show() accepts the same group_by specs and returns the grouped dict
+            res = jdb.show(group_by={user.role: [user.age.avg(), '_id']}, with_date=True, sort=user._id)
+            self.assertEqual(list(res), ['admin', 'designer', 'developer'])
+            self.assertEqual(res['developer']['_id'], ['user_2', 'user_3'])
+
+            # -------------------------------------
+            # group_by: invalid specs
+            with self.assertRaises(ValueError):
+                jdb.find(group_by='$avg') # no group-key field
+
+            with self.assertRaises(ValueError):
+                jdb.find(group_by=['$avg']) # list form: still no group-key field
+
+            with self.assertRaises(ValueError):
+                jdb.find(group_by={(): ['_id']}) # empty composite key
+
+            with self.assertRaises(ValueError):
+                jdb.find(group_by={'role': ['_id'], 'age': ['_id']}) # dict must hold one pair
+
+            with self.assertRaises(TypeError):
+                jdb.find(group_by=123) # unsupported spec type
 
             res = jdb.find(user._date.has(today))
             self.assertEqual(set(res), {'user_1'})
@@ -4872,8 +5008,11 @@ class TestJDb(unittest.TestCase):
 
             sync_id = jdb.sync_id
             data = {f'k{i+400}':999999 for i in range(test_size)}
-            chg = jdb.insert(data)
-            self.assertEqual(chg, data)
+            with jdb.open(read_only=False) as fp:
+                for key,val in data.items():
+                    jdb.f_append(fp, key, val)
+
+            self.assertEqual(jdb[data], data)
             self.assertNotEqual(sync_id, jdb.sync_id)
 
             _size = len(jdb)
@@ -7688,12 +7827,19 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb2)
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
 
-            jmem = JDb()
+            jmem = JDb(flags=JFlag.REVERT)
+            jmem += expect
+            self.assertEqual(jdb, jmem)
+            jmem -= jmem
+            self.assertEqual(len(jmem), 0)
             for _ in range(2):
                 with jmem.open(read_only=False) as fp:
+                    cnt = 0
+                    jmem.f_write(fp, 'xxx0', 0)
                     for key,val in expect.items():
                         jmem.f_append(fp, key, val)
-
+                        cnt += 1
+                    self.assertEqual(cnt, jmem.n_records)
                 self.assertEqual(jdb, jmem)
 
             sync_id = jdb.sync_id

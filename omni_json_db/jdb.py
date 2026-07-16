@@ -1,4 +1,5 @@
-from __future__ import annotations # pylint: disable=too-many-lines
+# pylint: disable=import-outside-toplevel, disable=too-many-lines
+from __future__ import annotations
 from datetime import date as dt_date, datetime
 from re import match as re_match, Pattern
 from os.path import exists as path_exists
@@ -6,18 +7,7 @@ from os import stat as os_stat
 from time import time, sleep
 from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, IO
 from random import randint, randrange
-from csv import DictReader, DictWriter
 from collections import OrderedDict
-from configparser import ConfigParser
-from sqlite3 import connect as sql_connect, Row as sql_Row, Connection
-#-----------------------------------------------------------------------------
-try:
-    from tomllib import loads as toml_loads
-except ImportError: # pragma: no cover
-    try:
-        from tomli import loads as toml_loads
-    except ImportError:
-        toml_loads = None
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE,\
             MAX_KEY_SIZE, API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK,\
@@ -2534,6 +2524,7 @@ class JDb(JDbReader):
         Returns:
             bool: True if extraction workflows finish completely without errors metrics profiles, False fallback otherwise.
         """
+        from csv import DictWriter
         fields = []
         with self.open(read_only=True) as fp:
             csv_fp,owns_it = (open(csv_file, 'w', newline='', encoding='utf-8'), True) \
@@ -2646,6 +2637,7 @@ class JDb(JDbReader):
         Returns:
             JDb: Current context modified active database environment workspace proxy handle.
         """
+        from csv import DictReader
         csv_fp,owns_it = (open(csv_file, 'r', newline='', encoding='utf-8'), True) \
                 if isinstance(csv_file, str) else (csv_file, False) # pylint: disable=consider-using-with
 
@@ -2679,7 +2671,7 @@ class JDb(JDbReader):
 
         return self
 
-    def from_sqlite(self, src:Union[str,Connection], batch_size:int=-1) -> JDb:
+    def from_sqlite(self, src:Union[str,Any], batch_size:int=-1) -> JDb:
         """Migrate SQLite transaction tables models matrices records mapping columns profiles straight into isolated nested database groups spaces partitions layers.
 
         Args:
@@ -2692,6 +2684,8 @@ class JDb(JDbReader):
         Raises:
             TypeError: If input sources violate target standard database connection configurations criteria parameters properties fields.
         """
+        from sqlite3 import connect as sql_connect, Row as sql_Row, Connection
+
         owns_conn = False
         if isinstance(src, str):
             conn = sql_connect(src)
@@ -2747,6 +2741,7 @@ class JDb(JDbReader):
         Returns:
             JDb: Updated relational configuration workspace context handle.
         """
+        from configparser import ConfigParser
         parser = ConfigParser()
         if isinstance(src, str): # pragma: no cover
             parser.read(src)
@@ -2772,8 +2767,13 @@ class JDb(JDbReader):
         Raises:
             ModuleNotFoundError: If the host runtime environment misses required third party parsing extensions framework dependencies libraries wrapper hooks.
         """
-        if not toml_loads:
-            raise ModuleNotFoundError("tomli is not installed. Please pip install tomli.")
+        try:
+            from tomllib import loads as toml_loads
+        except ImportError: # pragma: no cover
+            try:
+                from tomli import loads as toml_loads
+            except ImportError as e:
+                raise ModuleNotFoundError("It requires the 'tomli' package (pip install tomli)") from e
 
         if isinstance(src, str): # pragma: no cover
             with open(src, 'rt', encoding='utf-8') as fp:
@@ -3792,24 +3792,21 @@ class JDb(JDbReader):
         io = self.io
         n_lines = io.n_lines
         n_records = io.n_records
-
-        max_wsize = self.max_wsize if max_wsize is None else max_wsize
-        can_revert = JFlag.REVERT in flags
-        can_split = JFlag.SPLIT in flags
-
-        start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
-        if can_revert:
+        if JFlag.REVERT in flags:
+            start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
             chg_keys = self.chg_keys
             if key not in chg_keys:
                 chg_keys.add(key)
                 self.safe_line = safe_line + 1
+        else:
+            start_line = safe_line = n_records
 
         extra_rows = n_lines - safe_line
         if extra_rows > 0 and req_size >= 0:
             row, file_id, offset, row_size = io.get_dead_row(safe_line, req_size)
             if n_lines > row >= safe_line:
                 if row_size >= req_size > 0:
-                    if can_split:
+                    if JFlag.SPLIT in flags:
                         min_value_size = io.min_value_size
                         split_size = max(min_value_size, int(req_size * (1 + io.reserved_rate)))
                         if row_size >= (split_size + max(64, min_value_size)):
@@ -3822,6 +3819,7 @@ class JDb(JDbReader):
 
                 return start_line, row, file_id, offset, row_size
 
+            max_wsize = self.max_wsize if max_wsize is None else max_wsize
             if max_wsize <= 0:
                 return start_line, -1, 0, 0, 0
 
@@ -3851,7 +3849,7 @@ class JDb(JDbReader):
                             return start_line, row, file_id, offset, row_size
 
                     elif row_size >= req_size:
-                        if can_split:
+                        if JFlag.SPLIT in flags:
                             min_value_size = io.min_value_size
                             split_size = max(min_value_size, int(req_size * (1 + io.reserved_rate)))
                             if row_size >= (split_size + max(64, min_value_size)):
@@ -4071,6 +4069,8 @@ class JDb(JDbReader):
         io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG)
         _cache.pop(key, None)
         io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
+        if not can_revert: # pragma: no cover
+            self.safe_line += 1
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
@@ -4452,6 +4452,8 @@ class JDb(JDbReader):
         if cache_limit != 0:
             self._update_cache(key, val, copy=True)
 
+        if not can_revert:
+            self.safe_line += 1
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
@@ -4459,6 +4461,20 @@ class JDb(JDbReader):
         return True
 
     def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any) -> bool:
+        """ Low-level internal function to insert new record.
+
+        Args:
+            fp_dict (Dict[int, IO]): Open file handles tracking collections metrics maps.
+            key (str): Destination dictionary descriptor reference character token text string layout context.
+            val (Any): Payload instance content python object structure to serialize.
+            
+        Returns:
+            bool: True if serialization persistence completes smoothly, False if transaction logic drops inputs.
+
+        Raises:
+            JTypeError: If interceptor write hooks reject incoming inputs configuration candidate attributes.
+            JKeyError: If key length too long
+        """
         io = self.io
         if self.write_hook and not self.write_hook(key, val):
             raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
@@ -4488,7 +4504,7 @@ class JDb(JDbReader):
             # [Not Exist, ADD + Header] -> new row
             # new key -> DEAD[h] (=REC[t+1])
             io.write_key(key_fp, n_records, key, _type_id, data, 0, _type_size)
-            if _type_id == 0x10 and isinstance(val, JDbReader):
+            if _type_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
                 self._set_child(key, val)
         else:
             # [Not Exist, ADD + Value] -> new row
@@ -4503,8 +4519,10 @@ class JDb(JDbReader):
             io.write_key(key_fp, n_records, key, new_file_id, new_offset, new_row_size, new_val_size)
             io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
 
+        self.safe_line += 1
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+        key_fp.flush() # before key_table
         io.key_table[key] = n_records
         return True
 
