@@ -7612,9 +7612,11 @@ class TestJDb(unittest.TestCase):
             for val in jdb.values():
                 self.assertEqual(expect[f'xxx{val-10000}'], val)
 
-            for key,val in jdb.items():
-                jdb.f_write(None, key, val + 1)
-                self.assertEqual(val + 1, jdb.f_read(None, key))
+            with jdb.open():
+                for key in jdb.key_table:
+                    val = jdb.f_read(None, key)
+                    jdb.f_write(None, key, val + 1)
+                    self.assertEqual(val+1, jdb.f_read(None, key))
 
             keys = list(jdb)
             with jdb.open(read_only=False) as fp:

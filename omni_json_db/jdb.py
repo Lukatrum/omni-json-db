@@ -459,13 +459,14 @@ class JDb(JDbReader):
                     key = str(key)
 
             elif isinstance(key, (slice, dt_date, datetime, Condition)):
-                matched_keys = self.find_iter(key) if isinstance(key, Condition) else \
-                                self.f_key_iter(fp, key)
+                matched_keys = [_key for _key,_val in self.find_iter(key)] if isinstance(key, Condition) else \
+                                [_key for _key,_val in self.f_key_iter(fp, key)]
+
                 has_SIGINT = self.file_lock.has_SIGINT
                 f_write = self.f_write
                 f_read = self.f_read
                 key_table = io.key_table
-                for _key,_val in matched_keys:
+                for _key in matched_keys:
                     if has_SIGINT(): break
                     if func:
                         row_id = key_table[_key]
@@ -2416,12 +2417,11 @@ class JDb(JDbReader):
 
         count = 0
         del_keys = []
+        chg_keys = []
         with self.open(read_only=True) as fp:
             key_table = self.io.key_table
             has_SIGINT = self.file_lock.has_SIGINT
-            f_write = self.f_write
             for key,val in self.find_iter(vals=condition, with_value=True, with_date=False, reverse=True):
-                if has_SIGINT(): break
                 if not isinstance(val, dict): continue
                 _patch = patch_func(key, val) if callable(patch_func) else patch
                 if _patch != val:
@@ -2438,14 +2438,21 @@ class JDb(JDbReader):
                             new_val[kk] = vv
 
                     if new_val != val:
-                        f_write(fp, key, new_val, overwrite=True)
-                        count += 1
+                        chg_keys.append((key, new_val))
+
+            if chg_keys:
+                f_write = self.f_write
+                for key,val in chg_keys:
+                    if has_SIGINT(): break
+                    f_write(fp, key, val, overwrite=True)
+                    count += 1
 
             if del_keys:
                 f_delete = self.f_delete
                 del_keys = [(key_table[key],key) for key in del_keys]
                 del_keys.sort(reverse=True)
                 for _row,key in del_keys:
+                    if has_SIGINT(): break
                     if _row >= 0:
                         f_delete(fp, key, read_value=False)
                         count += 1

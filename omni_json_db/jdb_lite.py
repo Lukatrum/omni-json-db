@@ -779,8 +779,7 @@ class JDbKey:
                     io_read_key = io.read_key
                     io_conv_date = io.z_conv_date
                     n_records = io.n_records
-                    for row_id in range(io.n_records):
-                        key_fp = fp[-1]
+                    for row_id in range(io.n_records):                        
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         if ver == sync_id:
                             old_date, new_date = io_conv_date(days)
@@ -797,7 +796,6 @@ class JDbKey:
                 io_conv_date = io.z_conv_date
                 if k_arg_cnt == 2:
                     for row_id in range(io.n_records):
-                        key_fp = fp[-1]
                         _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                         old_date, new_date = io_conv_date(days)
                         val = (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -807,7 +805,6 @@ class JDbKey:
                 elif k_arg_cnt == 1:
                     for _key,row_id in io.key_table.items():
                         if io.n_records > row_id >= 0 and is_matched(_key):
-                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io_read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -834,7 +831,6 @@ class JDbKey:
                             row_id = io.n_records + row_id
 
                         if io.n_records > row_id >= 0:
-                            key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days = io.read_key(key_fp, row_id)
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, str(new_date), str(old_date))
@@ -3097,7 +3093,6 @@ class JDbReader(JDbBase):
                     io_read_key = io.read_key
                     n_records = io.n_records
                     for row_id in range(n_records):
-                        key_fp = fp[-1]
                         _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
                         if _ver == sync_id:
                             yield _key, self.f_read(fp, _key, row=row_id, copy=False)
@@ -3415,7 +3410,6 @@ class JDbReader(JDbBase):
                     k_filter += 1
                     continue
 
-                key_fp = fp[-1]
                 if date:
                     _k, _fi, _of, _rs, _vs, mod_id, _days = io_read_key(key_fp, row_id)
                     cdate, mdate = io_conv_date(_days)
@@ -4706,7 +4700,6 @@ class JDbReader(JDbBase):
                 if not match_KEY_rules(_key, key_rules):
                     continue
 
-                key_fp = fp_dict[-1]
                 __key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4721,7 +4714,6 @@ class JDbReader(JDbBase):
 
         else:
             for row_id in range(start, stop, step):
-                key_fp = fp_dict[-1]
                 _key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4750,7 +4742,7 @@ class JDbReader(JDbBase):
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
         index_size = io.index_size
-        n_rows = min(2000, n_records)
+        n_rows = min(8192, n_records)
         n_blks = (n_records + n_rows - 1) // n_rows
         if n_blks > 0:
             _cache = self._cache
