@@ -25,7 +25,7 @@ from .utils import FileLock, Style, JError, JKeyError, JValueError, \
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-_Float64_pack = Struct("<d").pack   # sizeof() == 8 thread-safe  | <d = little-ending
+_Float64_pack = Struct("<d").pack   # sizeof() == 8 thread-safe  | <d = little-endian
 _Float64_unpack = Struct("<d").unpack
 _Int64_pack = Struct("q").pack      # sizeof() == 8 thread-safe
 _Int64_unpack = Struct("q").unpack
@@ -1063,8 +1063,6 @@ class JDbReader(JDbBase):
 
             if write_hook.__code__.co_argcount != 2:
                 raise TypeError('write_hook must have 2 args (key, val)')
-
-            write_hook('key', 'val')
 
         if max_wsize is not None:
             if not isinstance(max_wsize, int):
@@ -3501,10 +3499,9 @@ class JDbReader(JDbBase):
                         skipped += 1
                         continue
 
-                    if move_to_end: # pragma: no cover
+                    if move_to_end > 1:
                         cache.move_to_end(key)
-                        if move_to_end > 1:
-                            value = deepcopy(value)
+                        value = deepcopy(value)
 
                     if with_date:
                         yield key, (value, cdate, mdate, mod_id)
@@ -3865,7 +3862,7 @@ class JDbReader(JDbBase):
         ops = n_loops / max(_used_s, 1e-9)
         ops, o_unit = (ops / 1_000_000, 'M') if ops >= 1_000_000 else \
                         (ops / 1_000, 'K') if ops >= 1_000 else (ops, '')
-        progress = 100. if n_loops >= n_records else (n_loops / n_records)
+        progress = 100. if n_loops >= n_records else (n_loops / n_records) * 100.
         used_s, unit = (_used_s, 's') if _used_s * 10 > 1. else \
                         (_used_s * 1_000, 'ms') if _used_s * 10_000 > 1. else \
                         (_used_s * 1_000_000, 'us')
@@ -4747,7 +4744,7 @@ class JDbReader(JDbBase):
             (str, Any): A structural tuple pair associating key name strings with content values.
         """
         n_records = self.io.n_records
-        n_rows = min(4, n_records)
+        n_rows = min(8192, n_records)
         if n_rows > 0:
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             _cache = self._cache
