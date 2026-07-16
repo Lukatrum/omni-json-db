@@ -7,11 +7,11 @@ exclude = ["artwork", "tests", "benchmark"]
 
 [project]
 name = "omni_json_db"
-version = "2.14.01"
+version = "2.14.04"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
-description = "A high-performance KV JSON DB for Python with Time-Travel, concurrency and compression. The perfect NoSQL alternative to SQLite/TinyDB for effortlessly managing GB-scale data."
+description = "A powerful KV JSON DB + Graph DB with Time-Travel, concurrency and compression. The NoSQL alternative to TinyDB for effortlessly managing GB-scale data."
 readme = "README.rst"
 requires-python = ">=3.7,<4"
 keywords = [
@@ -29,9 +29,9 @@ keywords = [
 	"date-lookup",
 	"db",
 	"dict",
-	"file-based",
+	"file",
 	"filelock",
-	"graphdb",
+	"graph-db",
 	"locking",
 	"ini",
 	"in-memory",
@@ -41,7 +41,7 @@ keywords = [
 	"marshal",
 	"messagepack",
 	"mongodb",
-	"mrsw-lock",	
+	"mrsw",
 	"msgpack",
 	"multiprocessing",
 	"multithreading",
@@ -60,6 +60,7 @@ keywords = [
 	"storage",
 	"sync",
 	"time-series",
+	"time-travel",
 	"toml",
 	"query",
 	"yaml",

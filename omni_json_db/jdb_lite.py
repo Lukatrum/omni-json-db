@@ -44,6 +44,7 @@ class JFlag(IntFlag):
 
     REVERT  = 0x01  # allow to revert after write/delete operation
     SPLIT   = 0x02  # allow to split large row into two
+    FSYNC   = 0x04  # fsync after updating
 
     @classmethod
     def _missing_(cls, value):
@@ -62,6 +63,8 @@ class JFlag(IntFlag):
                     _value |= JFlag.REVERT
                 elif ch == 's':
                     _value |= JFlag.SPLIT
+                elif ch == 'f':
+                    _value |= JFlag.FSYNC
 
             value = _value
 
@@ -1823,11 +1826,12 @@ class JDbReader(JDbBase):
 
             finally:
                 if th_cnt <= 0:
+                    flags = self.flags
                     chg_keys.clear()
                     is_dirty = file_lock.mode == 'w'
                     for fp in fp_dict.values():
                         if fp is not None:
-                            if is_dirty: # pragma: no cover
+                            if is_dirty and JFlag.FSYNC in flags: # pragma: no cover
                                 files_obj.fsync(fp.fileno())
                             fp.close()
 
@@ -2010,11 +2014,12 @@ class JDbReader(JDbBase):
                 finally:
                     th_cnt -= 1
                     if th_cnt <= 0:
+                        flags = self.flags
                         chg_keys.clear()
                         is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
                         for fp in fp_dict.values():
                             if fp is not None:
-                                if is_dirty:
+                                if is_dirty and JFlag.FSYNC in flags:
                                     files_obj.fsync(fp.fileno())
                                 fp.close()
 

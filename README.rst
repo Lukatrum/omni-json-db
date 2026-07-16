@@ -770,14 +770,14 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 
    # converts values into JSON string format for searching.
    # Find any record that has the string 'designer' inside it
-   res = jdb.find(RE=r'designer')
+   res = jdb.find(RE=r'designer') # vals={'$re':r'designer'}
    assert list(res) == ['user_4']
 
    # RE2 removes JSON symbols (,[]{}") before searching
    res = jdb.find(RE2=r'role:designer')
    assert list(res) == ['user_4']
 
-   res2 = jdb.show(vals={'role.$re': r'd.+ner'})
+   res2 = jdb.show(vals={'role.$re': r'd.+ner'}) # {'role': re.compile(r'd.+ner')}
    assert res == res2
    
    # 2. Relational & Conditional Operators (vals)
@@ -800,7 +800,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(vals={'role': {'$in': ['admin', 'designer']}})
    assert list(res) == ['user_1', 'user_4']
 
-   res2 = jdb.find(vals={'role': ['admin', 'designer']})
+   res2 = jdb.find(vals={'role': ['admin', 'designer']}) # {'role.$in': ['admin', 'designer']}
    assert res == res2
 
    # tags contains 'python'
@@ -814,7 +814,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    res = jdb.find(vals={'age': {'$ne': 30}}) # find(ANY={'$ne': 30})
    assert list(res) == ['user_2', 'user_3', 'user_4']
 
-   res2 = jdb.find(vals={'!age': 30})
+   res2 = jdb.find(vals={'!age': 30}) # {'age.$ne': 30}
    assert res == res2
 
    # Age is 28
@@ -825,7 +825,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    assert res == res2
 
    # 40 >= Age > 25
-   res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}})
+   res = jdb.find(vals={'age': {'$gt': 25, '$lte': 40}}) # {'age.$gt':25, 'age.$lte':40}
    assert list(res) == ['user_1', 'user_3', 'user_4']
 
    res2 = jdb.show(vals={'age.$between': (26, 40)})
@@ -848,7 +848,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
    assert res == res2
 
    # Role is not 'admin' AND Age <= 30
-   res = jdb.find(NOR=[{'role': 'admin'}, {'age': {'$gt': 30}}])
+   res = jdb.find(NOR=[{'role': 'admin'}, {'age.$gt': 30}])
    assert list(res) == ['user_2', 'user_4']
 
    # User is NOT a developer
@@ -934,7 +934,7 @@ Below are examples of how to utilize the various parameters and NoSQL syntax.
 
    # For primitive stored values (non-nested), you can use quick keyword arguments:
    jdb['simple_counter'] = 50
-   res = jdb.find(EQ=50)       # Equals 50
+   res = jdb.find(EQ=50)
    assert list(res) == ['simple_counter']
 
    res = jdb.show(IN=[40, 50]) # Value in list

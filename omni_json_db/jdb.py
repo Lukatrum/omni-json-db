@@ -443,6 +443,9 @@ class JDb(JDbReader):
                 raise TypeError('invalid function {k_arg_cnt}')
         else:
             k_arg_cnt = 0
+            if func is None and isinstance(key, str):
+                if self.write_hook and not self.write_hook(key, val):
+                    raise TypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
         with self.open(read_only=True) as fp:
             io = self.io
@@ -3794,15 +3797,12 @@ class JDb(JDbReader):
         can_revert = JFlag.REVERT in flags
         can_split = JFlag.SPLIT in flags
 
+        start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
         if can_revert:
-            start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
             chg_keys = self.chg_keys
             if key not in chg_keys:
                 chg_keys.add(key)
                 self.safe_line = safe_line + 1
-
-        else:
-            start_line = safe_line = self.safe_line = n_records
 
         extra_rows = n_lines - safe_line
         if extra_rows > 0 and req_size >= 0:
@@ -4456,6 +4456,56 @@ class JDb(JDbReader):
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         key_fp.flush() # before key_table
         io.key_table[key] = safe_h
+        return True
+
+    def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any) -> bool:
+        io = self.io
+        if self.write_hook and not self.write_hook(key, val):
+            raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
+
+        if len(key) > MAX_KEY_SIZE:
+            raise JKeyError(f'key[{key}] too long (max={MAX_KEY_SIZE})')
+
+        if key in io.key_table:
+            return self.f_write(fp_dict, key, val, flags=0, max_wsize=0, overwrite=True)
+
+        key_fp = fp_dict[-1]
+        n_lines = io.n_lines
+        n_records = io.n_records
+        safe_row = min(max(self.safe_line, n_records), n_lines)
+        dead_row = n_lines
+        io.n_lines = n_lines + 1
+        if dead_row > safe_row:
+            # DEAD[h] -> DEAD[t+1]
+            _dead_bytes = io.copy_key(key_fp, safe_row, dead_row)
+
+        if safe_row > n_records:
+            # SAFE[h] -> DEAD[h]
+            _safe_bytes = io.copy_key(key_fp, n_records, safe_row)
+
+        _type_id, data, _type_size = self._encode_row(key, val)
+        if _type_id >= 0:
+            # [Not Exist, ADD + Header] -> new row
+            # new key -> DEAD[h] (=REC[t+1])
+            io.write_key(key_fp, n_records, key, _type_id, data, 0, _type_size)
+            if _type_id == 0x10 and isinstance(val, JDbReader):
+                self._set_child(key, val)
+        else:
+            # [Not Exist, ADD + Value] -> new row
+            new_val_size = len(data)
+            data = io.pad(data, max_size=0)
+            new_row_size = len(data)
+            val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size)
+            val_fp.seek(new_offset)
+            _write_size = val_fp.write(data)
+
+            # new_key -> DEAD[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
+            io.write_key(key_fp, n_records, key, new_file_id, new_offset, new_row_size, new_val_size)
+            io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
+
+        io.n_records += 1
+        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+        io.key_table[key] = n_records
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):

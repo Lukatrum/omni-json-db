@@ -6898,18 +6898,18 @@ class TestJDb(unittest.TestCase):
             jdb = self.jdbs[filename]
             self.assertIsNotNone(jdb)
             jdb.clear(agree='yes', wait_sec=0, **config)
-            jdb = JDb(jdb)
-            self.assertFalse(jdb.is_latest())
-            self.assertEqual(jdb.fsize, 0)
-            self.assertEqual(len(jdb), 0)
-
-            jdb.sync()
-            self.assertTrue(jdb.is_latest())
-            self.assertGreaterEqual(jdb.fsize, 128)
-
+            jdb.flags = JFlag.REVERT|JFlag.SPLIT|JFlag.FSYNC
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
+            self.assertFalse(jdb1.is_latest())
+            self.assertEqual(jdb1.fsize, 0)
+            self.assertEqual(len(jdb1), 0)
+
+            jdb1.sync()
+            self.assertTrue(jdb1.is_latest())
+            self.assertGreaterEqual(jdb1.fsize, 128)
+
             test_size = 100
             expect = {f'kkk{i}' : list(range(i)) for i in range(test_size)}
             chg = jdb.insert(expect)
@@ -7687,6 +7687,14 @@ class TestJDb(unittest.TestCase):
             self.assertGreater(jdb.sync_id, sync_id)
             self.assertEqual(jdb, jdb2)
             self.assertEqual(jdb.sync_id, jdb2.sync_id)
+
+            jmem = JDb()
+            for _ in range(2):
+                with jmem.open(read_only=False) as fp:
+                    for key,val in expect.items():
+                        jmem.f_append(fp, key, val)
+
+                self.assertEqual(jdb, jmem)
 
             sync_id = jdb.sync_id
             with jdb.open() as fp:
@@ -8579,6 +8587,10 @@ class TestJDb(unittest.TestCase):
             old_val = jdb['key0']
             with self.assertRaises(TypeError):
                 jdb1['key0'] = 0
+
+            with self.assertRaises(TypeError):
+                jdb1[Query()._id == 'key0'] = 0
+
             self.assertEqual(jdb1['key0'], old_val)
             old_data_type = jdb.data_type
             old_api_ver = jdb.api_ver
