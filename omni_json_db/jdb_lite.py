@@ -2996,9 +2996,8 @@ class JDbReader(JDbBase):
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
-            f_read = self.f_read
-            for row in range(self.io.n_records):
-                yield f_read(fp, None, row=row, copy=False)
+            for _key,val in self.f_items(fp):
+                yield val
 
     def items(self, reverse:bool=False) -> Generator[Tuple[str,Any], None, None]:
         """Generate structured key-value maps pairs extracted from indices tables.
@@ -3011,9 +3010,8 @@ class JDbReader(JDbBase):
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
-            f_read = self.f_read
-            for key,row in self.io.sorted_key_table_items(reverse=reverse):
-                yield key, f_read(fp, key, row=row, copy=False)
+            for key,val in self.f_items(fp, reverse=reverse):
+                yield key, val
 
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,Any]]:
         """Iterate entities across datasets utilizing customizable indexing, criteria lambdas or slices parameters.
@@ -4483,7 +4481,7 @@ class JDbReader(JDbBase):
                 val = io.read_value(val_fp, offset, row_size, val_size)
 
             except Exception as e: # pragma: no cover
-                raise ValueError from e
+                raise JValueError from e
 
         if self._cache_limit == 0:
             return val
@@ -4686,7 +4684,7 @@ class JDbReader(JDbBase):
 
         return val_fp, file_id, offset
 
-    def f_key_iter(self, fp:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[Tuple[str,tuple], None, None]:
+    def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over keys and their corresponding information.
 
@@ -4697,18 +4695,18 @@ class JDbReader(JDbBase):
         Returns:
             (str, tuple): key, (row_id, file_id, offset, row_size, val_size, version, days, created_date, modified_date)
         """
-        io, fp, key_fp = self.f_get_fp(fp)
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
         io_conv_date = io.z_conv_date
         io_read_key = io.read_key
-        new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp, slice_obj)
+        new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp_dict, slice_obj)
         start, stop, step = new_slice.start, new_slice.stop, new_slice.step
         if key_rules:
             for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop):
                 if not match_KEY_rules(_key, key_rules):
                     continue
 
-                key_fp = fp[-1]
+                key_fp = fp_dict[-1]
                 __key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4723,7 +4721,7 @@ class JDbReader(JDbBase):
 
         else:
             for row_id in range(start, stop, step):
-                key_fp = fp[-1]
+                key_fp = fp_dict[-1]
                 _key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if not max_ver > ver >= min_ver:
                     continue
@@ -4738,6 +4736,67 @@ class JDbReader(JDbBase):
                     _key = f'|{_key}|~~{ver}~\t\t'
 
                 yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
+
+    def f_items(self, fp_dict:Dict[int,IO], with_value:bool=True, reverse:bool=False) -> Generator[Tuple[str,Any], None, None]:
+        """Generate structured key-value maps pairs extracted from indices tables.
+        
+        Args:
+            with_value (bool, optional): Whether to also extract the true value into the returned array. Defaults to True.
+            reverse (bool, optional): Reverse the sort order. Defaults to ``False``
+
+        Yields:
+            (str, Any): A structural tuple pair associating key name strings with content values.
+        """
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        n_records = io.n_records
+        index_size = io.index_size
+        n_rows = min(2000, n_records)
+        n_blks = (n_records + n_rows - 1) // n_rows
+        if n_blks > 0:
+            _cache = self._cache
+            _decode_row = self._decode_row
+            f_get_val_fp = self.f_get_val_fp
+            io_read_value = io.read_value
+            io_KEY_loads = io.KEY_loads
+            buf = bytearray(io.index_size * n_rows)
+            mv_buf = memoryview(buf)
+            row_id = 0 if not reverse else max(n_records - n_rows, 0)
+            io.seek(key_fp, row_id)
+            cnt = 0
+            while cnt < n_records:
+                _rows = min(n_records - cnt, n_rows)
+                rd_bytes = key_fp.readinto(mv_buf[:_rows*index_size] if _rows != n_rows else buf)
+                if not reverse:
+                    _range = range(0, rd_bytes, index_size)
+                else:
+                    _range = range(rd_bytes-index_size, -index_size, -index_size)
+
+                for idx in _range:
+                    cnt += 1
+                    key, file_id, offset, row_size, val_size, _ver, _days = io_KEY_loads(mv_buf[idx:idx+index_size])
+                    if not with_value:
+                        yield key, None
+                        continue
+
+                    val = _cache.get(key, _MISSING)
+                    if val is not _MISSING:
+                        _cache.move_to_end(key, last=True)
+                        yield key, val
+                    else:
+                        if row_size == 0:
+                            yield key, _decode_row(file_id, offset, key, val_size)
+                        else:
+                            val_fp, __i, __o  = f_get_val_fp(fp_dict, file_id)
+                            try:
+                                yield key, io_read_value(val_fp, offset, row_size, val_size)
+                            except Exception as e: # pragma: no cover
+                                raise JValueError from e
+
+                if not reverse:
+                    row_id += _rows
+                else:
+                    row_id -= _rows
+                    if row_id >= 0: io.seek(key_fp, row_id)
 
     def _init_KEY(self) -> Tuple[JIo,IO]:
         """Wipe tracking maps writing fresh primary configuration sheets records blueprints templates.

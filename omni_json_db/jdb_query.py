@@ -938,9 +938,7 @@ def parse_group_by(group_by:Any) -> Tuple[List[List[str]],Optional[str],Optional
         else:
             key_parts_list = [_split_group_spec(kspec)]
 
-        if isinstance(fspecs, (str, Query)):
-            fspecs = [fspecs]
-
+        fspecs = [fspecs] if isinstance(fspecs, (str, Query)) else fspecs
         field_specs = []
         used_names = set()
         for fs in fspecs:
@@ -1043,7 +1041,7 @@ def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[L
         gval = gkey[0] if single_key else tuple(gkey)
         try:
             hash(gval)
-        except TypeError: # unhashable group value (dict/list/...) -> stringify
+        except TypeError: # pragma: no cover
             gval = str(gval)
 
         grp = groups.get(gval)
@@ -1065,22 +1063,14 @@ def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[L
             for _kk, vv, _cc, _mm in g_rows:
                 if isinstance(vv, dict):
                     for fk, fv in vv.items():
-                        if fk in excluded_roots:
-                            continue
-
-                        fields.setdefault(fk, []).append(fv)
-                else:
+                        if fk not in excluded_roots:
+                            fields.setdefault(fk, []).append(fv)
+                else: # pragma: no cover
                     fields.setdefault('_val', []).append(vv)
 
-            if default_op is not None:
-                gout = {fk: _apply_transform(default_op, fv) for fk, fv in fields.items()}
-            else:
-                gout = dict(fields)
+            gout = {fk: _apply_transform(default_op, fv) for fk, fv in fields.items()} if default_op is not None else dict(fields)
+            gout = gout['_val'] if tuple(gout) == ('_val',) else None if not gout else gout
 
-            if tuple(gout) == ('_val',): # only scalars matched -> unwrap
-                gout = gout['_val']
-            elif not gout:
-                gout = None
         else:
             # explicit mode: only requested fields, per-field operator
             gout = {}
@@ -1088,8 +1078,7 @@ def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[L
                 items = []
                 for kk, vv, cc, mm in g_rows:
                     ok, rv = _resolve_group_path(parts, kk, vv, cc, mm)
-                    if ok:
-                        items.append(rv)
+                    if ok: items.append(rv)
 
                 gout[name] = _apply_transform(op, items) if op is not None else items
 

@@ -1577,7 +1577,7 @@ class GraphDb(JDb):
 
         return result
 
-    def _compute_clustering(self, fp, target_ids:List[str], all_ids:List[str], weight:Optional[str]) -> Dict[str,float]:
+    def _compute_clustering(self, fp_dict:Dict[int,IO], target_ids:List[str], all_ids:List[str], weight:Optional[str]) -> Dict[str,float]:
         """Internal: compute clustering coefficient for ``target_ids``.
 
         ``all_ids`` (every node in the graph) is needed regardless of
@@ -1596,7 +1596,7 @@ class GraphDb(JDb):
         has_directed = False
         for nid in all_ids:
             o = set(); i = set()
-            for entry in f_get_adj(fp, nid):
+            for entry in f_get_adj(fp_dict, nid):
                 d, other = entry[0], entry[1:]
                 if d == '>':
                     o.add(other); has_directed = True
@@ -1617,13 +1617,13 @@ class GraphDb(JDb):
                 for nid in all_ids:
                     for other in out_set[nid]:
                         if other <= nid: continue  # each undirected edge has 2 entries; visit once
-                        props = f_read(fp, _generate_edge_key(nid, other, False), copy=False)
+                        props = f_read(fp_dict, _generate_edge_key(nid, other, False), copy=False)
                         w = props.get(weight, 1) if isinstance(props, dict) else 1
                         seen_max = w if w > seen_max else seen_max
                 if seen_max > 0: max_w = seen_max
 
             def edge_w(u, v):
-                props = f_read(fp, _generate_edge_key(u, v, False), copy=False)
+                props = f_read(fp_dict, _generate_edge_key(u, v, False), copy=False)
                 w = props.get(weight, 1) if isinstance(props, dict) else 1
                 return w / max_w
 
@@ -2397,46 +2397,46 @@ class GraphDb(JDb):
 
         return {'removed': len(old_keys), 'rebuilt': len(new_adj)}
 
-    def f_iter_edges(self, fp:Dict[int,IO]) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
+    def f_iter_edges(self, fp_dict:Dict[int,IO]) -> Generator[Tuple[Tuple[str,str,str],int],None,None]:
         """Iterate over all edges from the key table.
  
         Low-level helper; must be called inside an ``open()`` context.
  
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
  
         Yields:
             (str,str,str), int: ``(src_id, edge_type, dst_id), row_id`` for
                 each edge.
         """
         edge_match = self.EDGE_RE.match
-        io, fp, _key_fp = self.f_get_fp(fp)
+        io, fp_dict, _key_fp = self.f_get_fp(fp_dict)
         for key,row_id in io.key_table.items():
             matched = edge_match(key)
             if matched:
                 src, edge_type, dst = matched.groups()
                 yield (src, edge_type, dst), row_id
 
-    def f_iter_nodes(self, fp:Dict[int,IO]) -> Generator[Tuple[str,int],None,None]:
+    def f_iter_nodes(self, fp_dict:Dict[int,IO]) -> Generator[Tuple[str,int],None,None]:
         """Iterate over all nodes from the key table.
  
         Low-level helper; must be called inside an ``open()`` context.
  
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
  
         Yields:
             str, int: ``node_id, row_id`` for each node.
         """
         node_match = self.NODE_RE.match
-        io, fp, _key_fp = self.f_get_fp(fp)
+        io, fp_dict, _key_fp = self.f_get_fp(fp_dict)
         for key,row_id in io.key_table.items():
             matched = node_match(key)
             if matched:
                 node_id, = matched.groups()
                 yield node_id, row_id
 
-    def f_iter_adjs(self, fp:Dict[int,IO]) -> Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
+    def f_iter_adjs(self, fp_dict:Dict[int,IO]) -> Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
         """Iterate over all adjacencies (persisted per-node adjacency lists).
  
         Each node with at least one edge has an adjacency stored under
@@ -2449,7 +2449,7 @@ class GraphDb(JDb):
         Low-level helper; must be called inside an ``open()`` context.
  
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
  
         Yields:
             str, (int, [str]): ``adj_id, (row_id, adj)`` where ``adj``
@@ -2461,10 +2461,10 @@ class GraphDb(JDb):
             matched = adj_match(key)
             if matched:
                 adj_id, = matched.groups()
-                adj = f_read_row(fp, row_id, with_value=True)[-1] or []
+                adj = f_read_row(fp_dict, row_id, with_value=True)[-1] or []
                 yield adj_id, (row_id, adj)
 
-    def f_iter_successors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
+    def f_iter_successors(self, fp_dict:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
         """Iterate over one-hop successors of a node, respecting direction.
 
         Follows outgoing directed edges (adjacency ``'>'``) and undirected
@@ -2474,7 +2474,7 @@ class GraphDb(JDb):
         inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Node identifier.
 
         Yields:
@@ -2483,13 +2483,13 @@ class GraphDb(JDb):
         """
         key_table = self.io.key_table
         _generate_edge_key = self._generate_edge_key
-        for entry in self.f_get_adj(fp, node_id):
+        for entry in self.f_get_adj(fp_dict, node_id):
             direction, successor = entry[0], entry[1:]
             if direction != '<':
                 edge_key = _generate_edge_key(node_id, successor, direction == '>')
                 yield successor, edge_key, key_table.get(edge_key, -1)
 
-    def f_iter_predecessors(self, fp:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
+    def f_iter_predecessors(self, fp_dict:Dict[int,IO], node_id:str) -> Generator[Tuple[str,str,int],None,None]:
         """Iterate over one-hop predecessors of a node, respecting direction.
 
         Follows incoming directed edges (adjacency ``'<'``) and undirected
@@ -2499,7 +2499,7 @@ class GraphDb(JDb):
         inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Node identifier.
 
         Yields:
@@ -2508,7 +2508,7 @@ class GraphDb(JDb):
         """
         key_table = self.io.key_table
         _generate_edge_key = self._generate_edge_key
-        for entry in self.f_get_adj(fp, node_id):
+        for entry in self.f_get_adj(fp_dict, node_id):
             direction, predecessor = entry[0], entry[1:]
             if direction != '>':
                 edge_key = _generate_edge_key(predecessor, node_id, True) if direction == '<' else \
@@ -2516,13 +2516,13 @@ class GraphDb(JDb):
 
                 yield predecessor, edge_key, key_table.get(edge_key, -1)
 
-    def f_has_node(self, _fp:Dict[int,IO], node_id:str) -> bool:
+    def f_has_node(self, _fp_dict:Dict[int,IO], node_id:str) -> bool:
         """Check whether a node exists.
 
         Low-level helper; must be called inside an ``open()`` context.
 
         Args:
-            _fp (Dict[int, IO]): File-pointer dict from ``open()`` (unused).
+            _fp_dict (Dict[int, IO]): File-pointer dict from ``open()`` (unused).
             node_id (str): Node identifier.
 
         Returns:
@@ -2531,22 +2531,22 @@ class GraphDb(JDb):
         node_key = f'N:{node_id}:'
         return node_key in self.io.key_table
 
-    def f_get_node(self, fp:Dict[int,IO], node_id:str) -> Dict[str,Any]:
+    def f_get_node(self, fp_dict:Dict[int,IO], node_id:str) -> Dict[str,Any]:
         """Get the properties of a node.
 
         Low-level helper; must be called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Node identifier.
 
         Returns:
             Dict[str, Any]: Node properties, or None if the node does not exist.
         """
         node_key = f'N:{node_id}:'
-        return self.f_read(fp, node_key, default_val=None)
+        return self.f_read(fp_dict, node_key, default_val=None)
 
-    def f_add_node(self, fp:Dict[int,IO], node_id:str, **properties) -> bool:
+    def f_add_node(self, fp_dict:Dict[int,IO], node_id:str, **properties) -> bool:
         """Add a node, or merge new properties into an existing node.
 
         If the node already exists, ``properties`` are merged over the stored
@@ -2556,7 +2556,7 @@ class GraphDb(JDb):
         helper; must be called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Unique node identifier.
             **properties: Arbitrary node properties to store.
 
@@ -2570,23 +2570,23 @@ class GraphDb(JDb):
         f_read = self.f_read
         node_key = f'N:{node_id}:'
         if node_key not in self.io.key_table:
-            if f_write(fp, node_key, properties):
+            if f_write(fp_dict, node_key, properties):
                 n_nid = self.N_NODES
-                f_write(fp, n_nid, max(f_read(fp, n_nid, 0),0)+1)
+                f_write(fp_dict, n_nid, max(f_read(fp_dict, n_nid, 0),0)+1)
                 return True
             return False
 
-        old_props = f_read(fp, node_key, copy=False)
+        old_props = f_read(fp_dict, node_key, copy=False)
         if isinstance(old_props, dict):
             new_props = {**old_props, **properties}
             if new_props != old_props:
-                return f_write(fp, node_key, new_props)
+                return f_write(fp_dict, node_key, new_props)
             else:
                 return False
 
-        return f_write(fp, node_key, properties)
+        return f_write(fp_dict, node_key, properties)
 
-    def f_remove_node(self, fp:Dict[int,IO], node_id:str) -> Dict[str,Any]:
+    def f_remove_node(self, fp_dict:Dict[int,IO], node_id:str) -> Dict[str,Any]:
         """Remove a node together with all edges connected to it.
 
         Reads the node's adjacency (``X:{node_id}:``) to find every incident
@@ -2598,7 +2598,7 @@ class GraphDb(JDb):
         helper; must be called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Node identifier.
 
         Returns:
@@ -2608,7 +2608,7 @@ class GraphDb(JDb):
         node_key = f'N:{node_id}:'
         ret = {}
         matched_keys = []
-        io, fp, _key_fp = self.f_get_fp(fp)
+        io, fp_dict, _key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
         row_id = key_table.get(node_key, -1)
         if row_id >= 0:
@@ -2622,7 +2622,7 @@ class GraphDb(JDb):
             matched_keys.append((row_id, adj_key))
             _generate_edge_key = self._generate_edge_key
             cleaned_adjs = set()
-            for adj_id in self.f_get_adj(fp, node_id):
+            for adj_id in self.f_get_adj(fp_dict, node_id):
                 neighbor = adj_id[1:]
                 edge_type = adj_id[0]
                 # every adjacency entry maps to a distinct incident edge:
@@ -2643,7 +2643,7 @@ class GraphDb(JDb):
                         and (adj_row, adj_key) not in matched_keys:
                     cleaned_adjs.add(adj_key)
                     new_adj = []
-                    old_adj = f_read(fp, adj_key, default_val=[], copy=False)
+                    old_adj = f_read(fp_dict, adj_key, default_val=[], copy=False)
                     for _adj_id in old_adj:
                         if _adj_id[1:] != node_id:
                             new_adj.append(_adj_id)
@@ -2652,20 +2652,20 @@ class GraphDb(JDb):
                         matched_keys.append((adj_row, adj_key))
 
                     elif new_adj != old_adj:
-                        f_write(fp, adj_key, new_adj, overwrite=True, max_wsize=0)
+                        f_write(fp_dict, adj_key, new_adj, overwrite=True, max_wsize=0)
 
         if matched_keys:
-            io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
+            io, fp_dict, _key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
             n_nid = self.N_NODES
             n_eid = self.N_EDGES
             n_did = self.N_DIRECTED
-            n_nodes = f_read(fp, n_nid, 0)
-            n_edges = f_read(fp, n_eid, 0)
-            n_di_edges = f_read(fp, n_did, 0)
+            n_nodes = f_read(fp_dict, n_nid, 0)
+            n_edges = f_read(fp_dict, n_eid, 0)
+            n_di_edges = f_read(fp_dict, n_did, 0)
             f_delete = self.f_delete
             matched_keys.sort(reverse=True)
             for row_id,key in matched_keys:
-                val = f_delete(fp, key, row=row_id)
+                val = f_delete(fp_dict, key, row=row_id)
                 ret[key] = val
                 if key.startswith('N:'):
                     n_nodes -= 1
@@ -2674,19 +2674,19 @@ class GraphDb(JDb):
                     if key.find(':>:') >= 3:
                         n_di_edges -= 1
 
-            f_write(fp, n_nid, max(0, n_nodes))
-            f_write(fp, n_eid, max(0, n_edges))
-            f_write(fp, n_did, max(0, n_di_edges))
+            f_write(fp_dict, n_nid, max(0, n_nodes))
+            f_write(fp_dict, n_eid, max(0, n_edges))
+            f_write(fp_dict, n_did, max(0, n_di_edges))
 
         return ret
 
-    def f_has_edge(self, _fp:Dict[int,IO], u:str, v:str, directed:bool=True) -> bool:
+    def f_has_edge(self, _fp_dict:Dict[int,IO], u:str, v:str, directed:bool=True) -> bool:
         """Check whether an edge exists.
 
         Low-level helper; must be called inside an ``open()`` context.
 
         Args:
-            _fp (Dict[int, IO]): File-pointer dict from ``open()`` (unused).
+            _fp_dict (Dict[int, IO]): File-pointer dict from ``open()`` (unused).
             u (str): Source node identifier.
             v (str): Target node identifier.
             directed (bool, optional): Edge direction flag matching how the
@@ -2698,13 +2698,13 @@ class GraphDb(JDb):
         edge_key = self._generate_edge_key(u, v, directed)
         return edge_key in self.io.key_table
 
-    def f_get_edge(self, fp:Dict[int,IO], u:str, v:str, directed:bool=True) -> Dict[str,Any]:
+    def f_get_edge(self, fp_dict:Dict[int,IO], u:str, v:str, directed:bool=True) -> Dict[str,Any]:
         """Get the properties of an edge.
 
         Low-level helper; must be called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             u (str): Source node identifier.
             v (str): Target node identifier.
             directed (bool, optional): Edge direction flag matching how the
@@ -2714,9 +2714,9 @@ class GraphDb(JDb):
             Dict[str, Any]: Edge properties, or None if the edge does not exist.
         """
         edge_key = self._generate_edge_key(u, v, directed)
-        return self.f_read(fp, edge_key, default_val=None)
+        return self.f_read(fp_dict, edge_key, default_val=None)
 
-    def f_add_edge(self, fp:Dict[int,IO], u:str, v:str, directed:bool=True, **properties) -> bool:
+    def f_add_edge(self, fp_dict:Dict[int,IO], u:str, v:str, directed:bool=True, **properties) -> bool:
         """Add an edge, creating missing endpoint nodes and adjacency entries.
 
         Writes the edge record plus the two adjacency entries (one on each
@@ -2729,7 +2729,7 @@ class GraphDb(JDb):
         called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             u (str): Source node identifier.
             v (str): Target node identifier.
             directed (bool, optional): True for a directed edge ``u -> v``,
@@ -2748,55 +2748,55 @@ class GraphDb(JDb):
         edge_key = self._generate_edge_key(u, v, directed)
         key_table = self.io.key_table
         if edge_key not in key_table:
-            _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
+            _io, fp_dict, _key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
             f_read = self.f_read
             f_write = self.f_write
             n_nid = self.N_NODES
-            n_nodes = f_read(fp, n_nid, 0)
+            n_nodes = f_read(fp_dict, n_nid, 0)
             u_key = f'N:{u}:'
             if u_key not in key_table:
-                if f_write(fp, u_key, {}, overwrite=True, max_wsize=0):
+                if f_write(fp_dict, u_key, {}, overwrite=True, max_wsize=0):
                     n_nodes += 1
 
             v_key = f'N:{v}:'
             if v_key not in key_table:
-                if f_write(fp, v_key, {}, overwrite=True, max_wsize=0):
+                if f_write(fp_dict, v_key, {}, overwrite=True, max_wsize=0):
                     n_nodes += 1
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'
-            adj = f_read(fp, xu_key, copy=False) if xu_key in key_table else []
+            adj = f_read(fp_dict, xu_key, copy=False) if xu_key in key_table else []
             if xu_val not in adj:
                 adj.append(xu_val)
-                f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
-            adj = f_read(fp, xv_key, copy=False) if xv_key in key_table else []
+            adj = f_read(fp_dict, xv_key, copy=False) if xv_key in key_table else []
             if xv_val not in adj:
                 adj.append(xv_val)
-                f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0)
 
-            f_write(fp, n_nid, max(0, n_nodes))
-            if f_write(fp, edge_key, properties):
+            f_write(fp_dict, n_nid, max(0, n_nodes))
+            if f_write(fp_dict, edge_key, properties):
                 n_eid = self.N_EDGES
-                f_write(fp, n_eid, max(f_read(fp, n_eid, 0), 0) + 1)
+                f_write(fp_dict, n_eid, max(f_read(fp_dict, n_eid, 0), 0) + 1)
                 if directed:
                     n_did = self.N_DIRECTED
-                    f_write(fp, n_did, max(f_read(fp, n_did, 0), 0) + 1)
+                    f_write(fp_dict, n_did, max(f_read(fp_dict, n_did, 0), 0) + 1)
 
                 return True
 
             return False
 
-        old_props = self.f_read(fp, edge_key, copy=False)
+        old_props = self.f_read(fp_dict, edge_key, copy=False)
         if not isinstance(old_props, dict): # pragma: no cover
-            return self.f_write(fp, edge_key, properties)
+            return self.f_write(fp_dict, edge_key, properties)
 
         new_props = {**old_props, **properties}
-        return self.f_write(fp, edge_key, new_props) if new_props != old_props else False
+        return self.f_write(fp_dict, edge_key, new_props) if new_props != old_props else False
 
-    def f_remove_edge(self, fp:Dict[int,IO], u:str, v:str, directed:bool=True) -> Dict[str,Any]:
+    def f_remove_edge(self, fp_dict:Dict[int,IO], u:str, v:str, directed:bool=True) -> Dict[str,Any]:
         """Remove an edge and clean both endpoints' adjacency entries.
 
         Also maintains the ``N_EDGES`` and (when ``directed``) ``N_DIRECTED``
@@ -2804,7 +2804,7 @@ class GraphDb(JDb):
         context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             u (str): Source node identifier.
             v (str): Target node identifier.
             directed (bool, optional): Edge direction flag matching how the
@@ -2820,38 +2820,38 @@ class GraphDb(JDb):
         if edge_key in key_table:
             f_write = self.f_write
             f_read = self.f_read
-            _io, fp, _key_fp, _sync_chg = self.f_get_write_fp(fp)
-            props = self.f_delete(fp, edge_key)
+            _io, fp_dict, _key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
+            props = self.f_delete(fp_dict, edge_key)
             ret[edge_key] = props
             n_eid = self.N_EDGES
-            f_write(fp, n_eid, max(0, f_read(fp, n_eid, 0) - 1))
+            f_write(fp_dict, n_eid, max(0, f_read(fp_dict, n_eid, 0) - 1))
             if directed:
                 n_did = self.N_DIRECTED
-                f_write(fp, n_did, max(0, f_read(fp, n_did, 0) - 1))
+                f_write(fp_dict, n_did, max(0, f_read(fp_dict, n_did, 0) - 1))
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'
-            adj = f_read(fp, xu_key, copy=False) if xu_key in key_table else []
+            adj = f_read(fp_dict, xu_key, copy=False) if xu_key in key_table else []
             if xu_val in adj:
                 adj.remove(xu_val)
-                f_write(fp, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
-            adj = f_read(fp, xv_key, copy=False) if xv_key in key_table else []
+            adj = f_read(fp_dict, xv_key, copy=False) if xv_key in key_table else []
             if xv_val in adj:
                 adj.remove(xv_val)
-                f_write(fp, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0)
 
         return ret
 
-    def f_get_adj(self, fp:Dict[int,IO], node_id:str) -> List[str]:
+    def f_get_adj(self, fp_dict:Dict[int,IO], node_id:str) -> List[str]:
         """Read a node's persisted adjacency list.
 
         Low-level helper; must be called inside an ``open()`` context.
 
         Args:
-            fp (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
+            fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
             node_id (str): Node identifier.
 
         Returns:
@@ -2860,7 +2860,7 @@ class GraphDb(JDb):
                 or an empty list if the node has no adjacency entry.
         """
         adj_key = f'X:{node_id}:'
-        return self.f_read(fp, adj_key, default_val=[], copy=False)
+        return self.f_read(fp_dict, adj_key, default_val=[], copy=False)
 
     def _generate_edge_key(self, u:str, v:str, directed:bool) -> str:
         """Build the canonical storage key for an edge.

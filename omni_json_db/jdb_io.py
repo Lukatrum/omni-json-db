@@ -1287,6 +1287,9 @@ class JIoKEY_L(JIoKEY):
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
+            if isinstance(data, memoryview):
+                data = bytes(data)
+
             data_s = data.decode('utf8').rstrip()
             fields = data_s.split(',')
             file_id = int(fields[-3])
@@ -1324,6 +1327,9 @@ class JIoKEY_L(JIoKEY):
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
+            if isinstance(data, memoryview):
+                data = bytes(data)
+
             data_s = data.decode('utf8').rstrip()
             fields = data_s.split(',')
             n_fields = len(fields)
