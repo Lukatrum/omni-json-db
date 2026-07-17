@@ -13,7 +13,7 @@
 
 ..
 
-   If you find **omni-json-db** useful, please consider giving it a **⭐️**! It helps the project grow and reach more developers.
+   If you find **omni-json-db** useful, please consider giving it a **⭐️**!
 
 
 👉 Quick Links
@@ -32,29 +32,26 @@
 
 ✨ Introduction
 ****************
-**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store, the powerful querying capabilities of a document database, and the relationships of a graph database.
+**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It combines the raw speed of a Key-Value store with the flexible querying of a document database and the associative power of a graph database.
 
-Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer. Whether you are building a local cache, a log aggregator, a distributed microservice, or a complex knowledge graph, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
+Built for high throughput and thread safety, **omni-json-db** utilizes modern serialization (e.g., *JSON*, *MsgPack*, *Pickle*) and efficient compression to provide a compact storage layer. Whether you are building a local cache, a log aggregator, or a complex knowledge graph, **omni-json-db** offers "Zero-Config" simplicity at scale.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
-* **Server-LESS**: Direct disk access without the overhead of a database server.
-* **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
+* **Server-LESS**: Access data directly on disk without a database server overhead.
+* **SQL-LESS**: Manipulate data using standard Python syntax, Regex, and Lambdas.
 
 
 🤔 Why omni-json-db?
 ********************
 
-Unlike traditional SQL or NoSQL databases, **omni-json-db** lets you use native
-Python syntax — slicing, lambdas, regex, and ``set`` operations — to query and
-manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
-engine, and pluggable serialization/compression.
+Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query and manipulate data using native Python syntax—including slicing, lambdas, regex, and set operations. It also features built-in "Time-Travel" (undo/redo), a property-graph engine, and pluggable serialization.
 
 +-----------------------------------+-------------------+-----------+-----------+-----------+
 |                                   | **omni-json-db**  | TinyDB    | SQLite    | DuckDB    |
 +===================================+===================+===========+===========+===========+
 | No schema (Schema-less)           | ✅                | ✅        | ❌        | ❌        |
 +-----------------------------------+-------------------+-----------+-----------+-----------+
-| Pythonic queries                  | ✅                | ✅        | ❌        | ❌        |
+| Pythonic queries (Lambda/Regex)   | ✅                | ✅        | ❌        | ❌        |
 +-----------------------------------+-------------------+-----------+-----------+-----------+
 | Deep nested search                | ✅                | ❌        | ❌        | ❌        |
 +-----------------------------------+-------------------+-----------+-----------+-----------+
@@ -69,37 +66,32 @@ engine, and pluggable serialization/compression.
 | Thread-safe concurrency           | ✅ (MR/SW)        | ❌        | ✅        | ✅        |
 +-----------------------------------+-------------------+-----------+-----------+-----------+
 
- **omni-json-db** has been tested with Python 3.7+ and PyPy3.
-
+ **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
+ 
 🚀 Features
 ***********
-* **Native Graph Database Engine**: Transform your Key-Value store into a powerful Property Graph! The new ``GraphDb`` layer provides seamless node and edge management, O(1) adjacency indexing, and built-in classic graph algorithms (BFS/Dijkstra shortest paths, DFS traversal, cycle detection, topological sorting, and connected components) without compromising the extreme speed of the underlying engine. [refer to `Graph Database`_]
+* **Native Graph Engine**: Transform your Key-Value store into a Property Graph. The ``GraphDb`` layer supports O(1) adjacency indexing and classic algorithms (BFS, Dijkstra, DFS, cycle detection) without sacrificing performance. [refer to `Graph Database`_]
 
-* **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. [refer to `Basic`_ + `Operator`_]
+* **Pythonic Interaction**: Interact with data using familiar Python ``dict`` methods, list slicing, and set operations, avoiding complex SQL queries. [refer to `Basic`_ + `Operator`_]
 
-* **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
+* **Advanced Serialization & Compression**: Combine formats (JSON, MsgPack, Pickle, YAML) with algorithms like LZ4, Zstandard, or Brotli to optimize your I/O and disk usage. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
 
-* **Powerful Query Engine**: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
+* **Powerful Query Engine**: Execute searches via Regex, Lambda filters, and rich operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``, ...). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
+
+* **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network. [refer to `In-memory Mode`_ + `Network Mode`_ ]
+
+*  **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
+
+* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, INI, and TOML with simple commands. [refer to `CSV Import / Export`_ + `SQLite Import`_ + `INI / TOML Import`_]
+
+* **Time-Series Ready**: Native timestamping allows for efficient date-based slicing (e.g., ``jdb[yesterday:now]``). [refer to `Time-Series`_]
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed. [refer to `Supported Key Table Formats`_]
 
-* **Network Mode** (``JNetFiles``): Transform a local **omni-json-db** instance into a networked service with a single command using ``run_files_server()``. [refer to `Network Mode`_]
-
-* **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for high performance (ideal for real-time caches or volatile session storage). [refer to `In-memory Mode`_]
-
-* **"Time-Travel" & Rollbacks**: The database tracks internal states, allowing you to undo modifications (``unmodify()``) or recover deleted data (``unremove()``). Accidentally deleted a record? One line of code brings it back. [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
-
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Groups Mode`_]
-
-* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from *CSV* files or export your **omni-json-db** collections for analysis in *Excel* or *Pandas*. [refer to `CSV Import / Export`_]
-
-* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (*SQLite*) into *NoSQL* grouped structures. It also natively supports parsing structured configuration files (*INI*, *TOML*) and handling complex *CSV* datasets, making data migration and integration a breeze. [refer to `SQLite Import`_ + `INI / TOML Import`_]
-
-* **Time-Series Support**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``. [refer to `Time-Series`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
-* **~100% test coverage**
 
 🛠️ Quick Start
 **************
@@ -1220,14 +1212,23 @@ For developers who prefer a Pythonic and object-oriented syntax for filtering da
    assert set(res) == {'user_2', 'user_3'}
 
    # Lambda Test: Find users whose age is an even number
-   res = jdb.find(User.age.test(lambda age: age % 2 == 0))
+   res = jdb.find(User.age.test(lambda age: age % 2 == 0), sort=User.name, reverse=True)
    assert set(res) == {'user_1', 'user_4'}
 
    # rename admin to Administrator
    res = jdb.update_if(User.role == 'admin', {'role': 'Administrator'})
    assert res == 1 and (User.role == 'Administrator') in jdb
-   
-   jdb.show()
+
+   # sorted by user name
+   res = jdb.show(sort=User.name, reverse=True)
+   assert res == jdb
+
+   # grouped by user role
+   res = jdb.show(group_by=User.role) # jdb.show(group_by='role')
+   assert 'developer' in res
+
+   res = jdb.show(group_by={'role':['name', 'age.$avg']})
+   assert 'developer' in res
 
 Methods & Operators Reference
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1639,21 +1640,19 @@ Results
 👥 Contributing
 ***************
  
-Whether reporting bugs, discussing improvements and new ideas, or writing
-extensions — contributions to **omni-json-db** are welcome! Here's how to get started:
- 
-1. Check for open issues or open a fresh issue to start a discussion around a feature idea or a bug. Issues labeled ``good first issue`` are a great entry point.
-2. Fork `the repository <https://github.com/lukatrum/omni-json-db/>`_ on GitHub, create a new branch off **main**, and start making your changes (known as `GitHub Flow <https://docs.github.com/en/get-started/using-github/github-flow>`_).
-3. Write a test which shows that the bug was fixed or that the feature works as expected.
-4. Send a pull request and bug the maintainer until it gets merged and published ☺
+Contributions to **omni-json-db** are highly welcome! Whether you are reporting bugs, proposing new features, or improving documentation:
+
+1. Check the existing issues for open tasks or start a discussion.
+2. Fork the repository and create a new branch.
+3. Include tests for any new features or bug fixes.
+4. Open a Pull Request and reach out to the maintainers for review.
  
  
 📄 License
 **********
  
-**omni-json-db** is released under the terms described in the
-`LICENSE <https://github.com/lukatrum/omni-json-db/blob/main/LICENSE>`_ file.
- 
+**omni-json-db** is released under the terms of the `LICENSE <https://github.com/lukatrum/omni-json-db/blob/main/LICENSE>`_ file.
+
 
 .. |Logo| image:: https://raw.githubusercontent.com/lukatrum/omni-json-db/master/artwork/logo.png
       :height: 400px

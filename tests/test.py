@@ -13,6 +13,7 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
         globals()['_g_basetime'] = time.perf_counter()
 
     code = ''
+    now = dt.datetime.now().strftime(format="%H%M%S")
     tt = time.perf_counter() - _g_basetime
     fm = inspect.currentframe().f_back
     for ii,vv in enumerate([bold, dim, smso, underscore, blink, reverse, hidden]):
@@ -57,7 +58,7 @@ def Style(msg, bold=None, dim=None, smso=None, underscore=None, blink=None, reve
 
         code += f'\033[4{vv}m'
 
-    msg = f'{tt:08.3f}|{fm.f_code.co_name}:{fm.f_lineno}|{msg}'
+    msg = f'{tt:08.3f}|{now}|{fm.f_code.co_name}:{fm.f_lineno}|{msg}'
     if not code:
         return msg
 
@@ -210,19 +211,19 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x7.jdb',   'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'<16'},
             {'KEY_file':'db/test_x7bz.jdb', 'api_ver':1, 'data_type':'J+S', 'zip_type':'bz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
 
-               # {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x8gz.jdb', 'api_ver':1, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l5'},
 
-              # {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+                # {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
             {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<8'},
 
-              # {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x10br.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'<4'},
 
-              # {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_11lz.jdb',  'api_ver':1, 'data_type':'J+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'bt'},
 
-              # {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+                # {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_12lz.jdb',  'api_ver':1, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' :     None, 'reserved_rate': 0.2, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'l4'},
         ]
 
@@ -5221,6 +5222,12 @@ class TestJDb(unittest.TestCase):
             chg = jdb.insert(expect)
             self.assertEqual(chg, expect)
             self.assertEqual(len(jdb), len(chg))
+            self.assertEqual(expect, dict(jdb.items()))
+            self.assertEqual(expect, dict(jdb.items(reverse=True)))
+
+            with jdb.open() as fp:
+                res = {key for key,val in jdb.f_items(fp, with_value=False)}
+            self.assertEqual(set(res), set(expect))
 
             keys = jdb.keys[dt.date.today()]
             self.assertEqual(set(keys), set(expect))

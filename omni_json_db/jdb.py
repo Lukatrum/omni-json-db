@@ -547,7 +547,10 @@ class JDb(JDbReader):
                 self.f_write(fp, key, val)
 
     def __delitem__(self, key:Union[str,Any]):
-        """Physically drop or unlink selected record entries spaces from database index tracking registries.
+        """Delete records from the database (must be committed with ``sync()``).
+        
+        Similar to ``__setitem__``, ``key`` can be a key name, filter, Condition, regex, callable, slice, or date range to delete multiple records at once.
+        Deletion is recorded in the index and can be undone with :meth:`unremove`.
 
         Args:
             key (Union[str, Any]): Unique entry character label token text descriptor, query filter conditional lambda function, regex sequence pattern, or subset iterable sequence.
@@ -730,7 +733,9 @@ class JDb(JDbReader):
         return
 
     def __isub__(self, keys:Set[str]) -> JDb:
-        """Batch remove outstanding entries index references using LIFO strategy blocks optimization.
+        """Remove a collection of keys (``-=`` operator).
+        
+        Equivalent to deleting each key; see :meth:`__delitem__` for details.
 
         Args:
             keys (Set[str]): Target dataset collection maps array or sibling JDbReader source instance candidate.
@@ -819,7 +824,9 @@ class JDb(JDbReader):
         return self
 
     def __iadd__(self, records:Dict[str,Any]) -> JDb:
-        """Batch load elements dictionaries mapping records directly in-place rewriting overlapping values lines.
+        """Add/overwrite records (``+=`` operator).
+        
+        Equivalent to ``jdb[key] = val`` for each item; calls :meth:`add`.
 
         Args:
             records (Dict[str, Any]): Collection mapping identifiers to target value instances or iterable primitives arrays.
@@ -862,7 +869,9 @@ class JDb(JDbReader):
         return self
 
     def __ior__(self, records:Dict[str,Any]) -> JDb:
-        """Batch insert unallocated entities matrices structures arrays in-place strictly bypassing existing nodes bounds.
+        """Merge new records without overwriting existing ones (``|=`` operator).
+        
+        Equivalent to calling :meth:`insert` (adds only missing keys).
 
         Args:
             records (Dict[str, Any]): Target context source map entries.
@@ -904,7 +913,9 @@ class JDb(JDbReader):
         return self
 
     def __iand__(self, records:Dict[str,Any]) -> JDb:
-        """Batch update or override known elements row values data rows avoiding adding unknown outliers into index layers maps.
+        """Update existing records, keeping only keys present in both (``&=`` operator).
+        
+        Calls :meth:`update` to modify matched keys.
 
         Args:
             records (Dict[str, Any]): Translation adjustments dictionary mapping context models fields.
@@ -948,8 +959,8 @@ class JDb(JDbReader):
         return self
 
     def __ixor__(self, keys:Set[str]) -> JDb:
-        """Revert or roll back transaction shifts processing selected node indicators parameters history blocks fields.
-
+        """Revert records to their original values (undo all changes since creation).
+        
         Args:
             keys (Set[str]): Target indicator strings mapping historical recovery boundaries paths.
 
@@ -1074,7 +1085,9 @@ class JDb(JDbReader):
         return self
 
     def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDb:
-        """Spawn a child read-write companion database instance mimicking host properties models parameters grids.
+        """Create a new :class:`JDb` instance reusing this database's configuration.
+        
+        See :meth:`JDbReader.create_jdb` for details.
 
         Args:
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): File path or core buffer source stream.
@@ -1094,7 +1107,9 @@ class JDb(JDbReader):
                     index_size=jio.index_size)
 
     def pop(self, key:str, default_val:Optional[Any]=None) -> Any:
-        """Isolate, pop, and erase an individual item record from indices returning previous python object contents.
+        """Retrieve a record and delete it from the database atomically.
+        
+        Returns the value, or ``default_val`` if the key is missing.
 
         Args:
             key (str): Target dictionary lookup query choice token text string descriptor criteria.
@@ -1119,7 +1134,9 @@ class JDb(JDbReader):
                 return default_val
 
     def unmodify(self, *records:str) -> Dict[str,Any]:
-        """Undo dynamic value row mutations rolling records states back onto prior chronological signatures logs on file layer.
+        """Undo modifications to records (revert to version before last write).
+        
+        Returns a dict of the records restored. Calls :meth:`f_unwrite`.
 
         Args:
             *records (str): Variadic sequence choosing target keys or groups tracking indicators strings to restore.
@@ -1172,7 +1189,9 @@ class JDb(JDbReader):
             return results
 
     def unremove(self, *records:str) -> Dict[str,Any]:
-        """Resurrect dropped index tracking references pulling deleted outlier components back into live databases index pools blocks.
+        """Undo deletions (bring deleted records back).
+
+        Returns a dict of the records restored. Calls :meth:`f_undelete`.
 
         Args:
             *records (str): Unique identifier token strings matching targeted deleted records candidates tracking keys data.
@@ -1224,7 +1243,9 @@ class JDb(JDbReader):
             return results
 
     def revert(self, *records:str) -> Dict[str,Any]:
-        """Symmetrically execute recovery pipelines rolling back either variable values updates or item omissions based on history bounds logs.
+        """Revert records to their original values (undo all changes since creation).
+
+        Returns a dict of the records reverted. Calls :meth:`f_unwrite` repeatedly.
 
         Args:
             *records (str): Target text identifiers tracking variables contexts fields.
@@ -1298,7 +1319,10 @@ class JDb(JDbReader):
             return results
 
     def recycle(self, parent:str='', level:int=0, merge:bool=False, fill_zero:bool=False, verbose:bool=True):
-        """Purge unlinked dead storage slots rewriting physical indexes sheets to reclaim unallocated disk space footprints metrics.
+        """Compact the database by removing dead/history rows and defragmenting VAL files.
+        
+        Recursively processes child/group databases. When ``merge=True``, merges
+        VAL file fragments. When ``fill_zero=True``, overwrites deleted data with zeros.
 
         Args:
             parent (str, optional): Hierarchy prefix namespace path denoting partition trees boundaries. Defaults to ''.
@@ -1604,7 +1628,9 @@ class JDb(JDbReader):
         return True
 
     def resize_index_size(self, index_size:int=0, extra_size:int=8, min_ver:bool=True) -> int:
-        """Modify fixed tracking structural allocation padding bounding database row dimensions headers fields permanently.
+        """Rebuild the KEY file with a different index row size.
+        
+        Set ``index_size`` to the desired byte size, or let the method choose based on ``extra_size``
 
         Args:
             index_size (int, optional): Targeted byte allocation width constraint indicator. 0 forces dynamic scan configuration. Defaults to 0.
@@ -1639,7 +1665,9 @@ class JDb(JDbReader):
             return io.index_size
 
     def change_KEY(self, KEY_type:str, api_ver:Optional[int]=None) -> bool:
-        """Transcode indexing layouts formats blueprint rules rewriting master entry trackers parameters configurations.
+        """Rebuild the KEY file with a different serialization format.
+        
+        ``KEY_type`` is a code like ``'J'`` (JSON), ``'S'`` (msgpack), ``'M'`` (MessagePack), ``'P'`` (pickle), or ``'Y'`` (YAML).
 
         Args:
             KEY_type (str): Format encoding specification classification string token text ('J', 'L', 'M', 'S').
@@ -1732,7 +1760,9 @@ class JDb(JDbReader):
         return True
 
     def upgrade(self, folder:str='bak', data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, fast_mode:bool=True, **kwargs) -> JDb:
-        """Migrate database models records maps layouts transforming internal formats properties fields seamlessly via proxy nodes staging tracks.
+        """Upgrade the database to a newer format and/or change serialization/compression.
+        
+        Creates a backup in ``folder``, then rebuilds the database with the new settings.
 
         Args:
             folder (str, optional): Target temporary folder location token. Defaults to 'bak'.
@@ -1860,7 +1890,9 @@ class JDb(JDbReader):
             return self
 
     def restore(self, folder:str='bak', fast_mode:bool=True, **kwargs) -> JDb:
-        """Overwrite current repository layers tracking matrices components structures using elements matching chosen backup files templates.
+        """Restore from a backup created by :meth:`backup` or :meth:`upgrade`.
+        
+        Replaces the current database with the backup files from ``folder``.
 
         Args:
             folder (Union[str, JDb]): File directory absolute lookup address string parameter or active source driver reader object workspace. Defaults to 'bak'.
@@ -1897,7 +1929,9 @@ class JDb(JDbReader):
         return jdb.clone_to(self, signal='r', fast_mode=fast_mode, **kwargs)
 
     def backup(self, folder:Optional[str]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, fast_mode:bool=True, **kwargs) -> JDb:
-        """Clone structural matrix database state tracking sheets records fields exporting backups profiles to targeted destination folders clusters.
+        """Create a backup copy of the database (optionally with different format).
+        
+        If ``data_type`` or ``zip_type`` is specified, the backup uses the new format.
 
         Args:
             folder (Optional[str], optional): Target system descriptor path code string identifier template context. Defaults to None.
@@ -1955,7 +1989,9 @@ class JDb(JDbReader):
         return self.clone_to(target_jdb, data_type=data_type,  zip_type=zip_type, fast_mode=fast_mode, **kwargs)
 
     def clone_to(self, target:Union[JDb,JFilesBase,str], signal:str='.', fast_mode:bool=True, max_file_size:Optional[int]=None, min_value_size:Optional[int]=None, index_size:Optional[int]=None, reserved_rate:Optional[float]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, cache_limit:int=0, api_ver:Optional[int]=None, **kwargs) -> JDb:
-        """Clone data mapping layouts structures templates from self source environment into target destination storage configurations drivers arrays frames.
+        """Copy the entire database to a new target with optional format/config changes.
+        
+        ``target`` can be a file path, a :class:`JFilesBase` object, or an existing :class:`JDb` to overwrite.
 
         Args:
             target (Union[JDb, JFilesBase, str]): Target storage manager engine wrapper, location token path text format layout selector string, or absolute instance proxy context.
@@ -2473,7 +2509,9 @@ class JDb(JDbReader):
         return self.add(records, default_val=default_val, replace=True, insert=False, is_list=False, **kwargs)
 
     def append(self, records:List[Any], **kwargs) -> Dict[str, Any]:
-        """Batch append continuous sequence datasets mapping rows values content segments parts blocks anonymously utilizing sequence numbers as descriptors labels markers arrays sheets.
+        """Append list items as auto-keyed records.
+        
+        Each list item becomes a record with an auto-generated key (like ``'0'``, ``'1'``, etc.).
 
         Args:
             records (List[Any]): Array container processing distinct values entries configurations records fields metrics.
@@ -2509,7 +2547,9 @@ class JDb(JDbReader):
         return self.add(records, default_val=None, replace=True, insert=True, is_list=True, **kwargs)
 
     def replace_vals(self, records:List[Any], **kwargs) -> Dict[str,Any]:
-        """Batch rewrite anonymous value elements sequences arrays avoiding appending unknown new index records lines.
+        """Replace auto-keyed records from a list.
+        
+        Like :meth:`append` but overwrites existing auto-keyed records instead of inserting new ones.
 
         Args:
             records (List[Any]): Input sequences collection mapping variables targets logs properties.
@@ -2521,7 +2561,9 @@ class JDb(JDbReader):
         return self.add(records, default_val=None, replace=True, insert=False, is_list=True, **kwargs)
 
     def to_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, **kwargs) -> bool:
-        """Export internal data frames records fields matrices structures logs straight into tabular structured CSV data formats sheets files documents models.
+        """export the database (or a nested record) as CSV.
+
+        When ``key`` is given, exports that record; otherwise exports the whole database.
 
         Args:
             csv_file (Union[str, IO]): Target filename string locator path or open streaming file-like interface stream descriptor handle context.
@@ -2632,7 +2674,9 @@ class JDb(JDbReader):
         return True
 
     def from_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> JDb:
-        """Import structured CSV text streams context sheets fields records translating tabular elements rows matrices back onto native database maps datasets collections.
+        """Import records from a CSV file.
+        
+        If ``key`` is given, the CSV columns become a nested dict under that key;\\notherwise each CSV row becomes a top-level record.
 
         Args:
             csv_file (Union[str, IO]): Source filesystem node address string path notation text or open stream descriptor channel container proxy.
@@ -2679,7 +2723,9 @@ class JDb(JDbReader):
         return self
 
     def from_sqlite(self, src:Union[str,Any], batch_size:int=-1) -> JDb:
-        """Migrate SQLite transaction tables models matrices records mapping columns profiles straight into isolated nested database groups spaces partitions layers.
+        """Import all tables from a SQLite database.
+
+        Each SQLite table becomes a top-level key in the JDb; ``batch_size`` controls commit frequency.
 
         Args:
             src (Union[str, Connection]): Full database file system address string text path context layout parameters maps or active connection instance handle proxy.
@@ -2740,7 +2786,9 @@ class JDb(JDbReader):
                 conn.close()
 
     def from_ini(self, src:Union[str,IO]) -> JDb:
-        """Parse configuration template sheets fields context records extracting variables settings structures from classic text INI files layout templates blocks rules.
+        """Import data from a INI file.
+
+        The INI structure is loaded into the database with its hierarchy preserved.
 
         Args:
             src (Union[str, IO]): Full target system text string path context layout parameters maps or active open file object stream interface pointer locator.
@@ -2763,7 +2811,9 @@ class JDb(JDbReader):
             return self
 
     def from_toml(self, src:Union[str,IO]) -> JDb:
-        """Parse TOML specification sheets structures arrays data profiles converting unified hierarchical trees structures documents models directly into record metrics paths context.
+        """Import data from a TOML file.
+
+        The TOML structure is loaded into the database with its hierarchy preserved.
 
         Args:
             src (Union[str, IO]): Target localization filename string path context blueprint text or open streaming object channel handle wrapper proxy.
@@ -2801,7 +2851,9 @@ class JDb(JDbReader):
             return self
 
     def reinit(self, records:Dict[str,Any], default_val:Optional[Any]=None, is_list:bool=False, agree:str='no', wait_sec:int=10, **kwargs) -> bool:
-        """Purge tracking maps drop active registers systematically rebuilding complete datasets layout configurations from scratch matching incoming records fields.
+        """Clear the database and repopulate it with new records (destructive operation).
+        
+        Requires confirmation (``agree='yes'``). Useful for replacing all data at once.
 
         Args:
             records (Dict[str, Any]): Incoming context source matrix data candidates.
@@ -3192,7 +3244,7 @@ class JDb(JDbReader):
 
                 try:
                     jdb = _val = f_delete(fp, key, row=row, read_value=False)
-                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
+                    if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
                         jdb.remove_fast(jdb) # NEVER
 
                     ret.add(key)
@@ -3208,7 +3260,9 @@ class JDb(JDbReader):
         return ret
 
     def rename(self, keys:Dict[str,str]) -> Dict[str,str]:
-        """Batch re-label items mapping old text identifier codes tokens parameters straight into new destination unique name strings indices.
+        """Rename records in the database.
+
+        ``keys`` is a dict mapping old names to new names (e.g. ``{'user_1': 'alice', 'user_2': 'bob'}``).
 
         Args:
             keys (Dict[str, str]): Translation target dictionary pairing former tags descriptors keys with freshly requested identifiers text.
@@ -3671,7 +3725,9 @@ class JDb(JDbReader):
             return jdb
 
     def del_group(self, key:str) -> Optional[JDb]:
-        """Exterminate a nested sub-database cluster namespace dropping structural tracking indicators permanently.
+        """Delete a group (nested database).
+
+        Returns the deleted group, or ``None`` if it doesn't exist.
 
         Args:
             key (str): Sub-space lookup target selector token text string.
@@ -3690,7 +3746,7 @@ class JDb(JDbReader):
         return None
 
     def f_get_child(self, fp_dict:Dict[int,IO], name:str) -> Optional[JDb]:
-        """Low level routing factory resolving child detached storage pipelines inside current streams boundaries maps trackers.
+        """Internal :meth:`JDbReader.get_child` — resolve a child database using open file pointers.
 
         Args:
             fp_dict (Dict[int, IO]): Active file pointers registration collection maps table.
@@ -4502,7 +4558,7 @@ class JDb(JDbReader):
             # DEAD[h] -> DEAD[t+1]
             _dead_bytes = io.copy_key(key_fp, safe_row, dead_row)
 
-        if safe_row > n_records:
+        if safe_row > n_records: # pragma: no cover
             # SAFE[h] -> DEAD[h]
             _safe_bytes = io.copy_key(key_fp, n_records, safe_row)
 
@@ -4534,7 +4590,9 @@ class JDb(JDbReader):
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):
-        """ Low-level pipeline method: physically unlink a specified entity, compact index arrays, and manage transaction rollbacks.
+        """ Internal write-level deletion: mark a record as deleted and optionally compact the index.
+
+        When ``read_value=True``, the deleted value is read and returned; ``row`` can specify the row id to skip lookup.
 
         Args:
             fp_dict (Dict[int, IO]): Open file pointers maps repository.
@@ -4643,7 +4701,7 @@ class JDb(JDbReader):
         return val
 
     def f_undelete(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
-        """ Low-level pipeline method: resurrect dropped or unlinked indices descriptors variables from dead logs sectors.
+        """ Internal :meth:`unremove` — restore a deleted record by marking it active again.
 
         Args:
             fp_dict (Dict[int, IO]): Persistent active handles arrays tables registers.
@@ -4810,7 +4868,7 @@ class JDb(JDbReader):
         return old_row, file_id, offset, row_size, val_size
 
     def f_rename(self, fp_dict:Dict[int,IO], key:str, new_key:str) -> bool:
-        """ Low-level pipeline method: alter unique index reference tokens text strings mapping keys metadata blocks layout configurations.
+        """ Internal :meth:`rename` — atomically update a record's key name in the index.
 
         Args:
             fp_dict (Dict[int, IO]): Active file handler matrix registration array mapping pools handles.
@@ -4856,13 +4914,13 @@ class JDb(JDbReader):
         return False
 
     def f_get_write_fp(self, fp_dict:Dict[int,IO]) -> Tuple[JIo,Dict[int,IO],IO,bool]:
-        """ Acquire and configure exclusive writing streams access permissions channels context maps matrices metrics.
-
+        """ Get write-mode file pointers, creating/truncating the KEY file if needed.
+        
         Args:
             fp_dict (Dict[int, IO]): Active file handler dictionary tracking metrics variables configuration parameters.
 
         Returns:
-            Tuple[JIo, Dict[int, IO], IO, bool]: Consolidated processing context payload group returning core matrix, file map registers, main descriptor pointer, and timeline shift synchronization flag state.
+            Tuple[JIo, Dict[int, IO], IO, bool]: ``(io, fp_dict, key_fp, created_new)``.
 
         Raises:
             RuntimeError: If multi-threaded file locks context cannot initialize isolation guards blocks parameters thresholds numbers.
@@ -4927,9 +4985,8 @@ class JDb(JDbReader):
 
     @staticmethod
     def z_upgrade_API(KEY_path:Union[str,JDb]) -> JDb: # pragma: no cover
-        """
-        Upgrade an older version of the database to the latest API structural format.
-
+        """Convert an older database format to the latest API version.
+        
         This method reads the existing database schema, resizes the index structure if necessary,
         migrates all tracking properties and physical indices to match the specifications of `API_LATEST`,
         and overwrites the legacy header. It ensures backward compatibility for older `.jdb` files by 

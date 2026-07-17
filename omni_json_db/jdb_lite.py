@@ -48,10 +48,12 @@ class JFlag(IntFlag):
 
     @classmethod
     def _missing_(cls, value):
-        """Handle missing values by parsing string combinations into valid IntFlags.
+        """Allow constructing flags from a letter string: ``'r'`` = REVERT,
+        ``'s'`` = SPLIT, ``'f'`` = FSYNC (e.g. ``JFlag('rs')``). Unknown
+        letters are ignored.
 
         Args:
-            value (Any): The string representation of flags (e.g., ``'rs'``).
+            value (Any): The letter string (case-insensitive).
 
         Returns:
             JFlag: The combined flag instance.
@@ -71,11 +73,13 @@ class JFlag(IntFlag):
         return super()._missing_(value)
 
     def __str__(self):
-        """Return a string representation of the currently active flags.
+        """Return a compact string showing which flags are active.
+
+        Each position holds the flag's uppercase initial when set, or ``'_'``
+        when not — e.g. ``'RS_'`` for REVERT+SPLIT, ``'___'`` for no flags.
 
         Returns:
-            str: A string where each character represents an active flag's initial 
-            (e.g., ``'rs'``), or ``'_'`` if inactive.
+            str: The flag summary string.
         """
         ret = ''
         for flag in JFlag:
@@ -131,7 +135,7 @@ class JDbKey:
                     >>> matches = jdb.keys[date.today()]     # get today modified/new keys
                     >>> matches = jdb.keys[datetime.now()]   # get today new keys
                     >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
-                    >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
+                    >>> matches = jdb.keys[-10.:]    # keys written in the last 10 write sessions
                     >>> matches = jdb.keys[:]        # get all key info
                     >>> matches = jdb.keys[0]        # get 1st key info
                     >>> matches = jdb.keys[-1]       # get last key info
@@ -295,19 +299,22 @@ class JDbKey:
         return self.is_superset(keys)
 
     def __eq__(self, keys:Union[set,dict,JDbReader,JDbKey]) -> bool:
-        """Compare the current keys with another collection or database.
-        
+        """Compare with another collection or database (delegates to the
+        parent database's ``==``).
+
         Args:
-            keys (set | dict | JDbReader | JDbKey): The target to compare against.
+            keys (set | dict | JDbReader | JDbKey): The target to compare
+                against. A ``set`` or :class:`JDbKey` compares keys only;
+                a ``dict`` or :class:`JDbReader` compares keys AND values.
 
         Returns:
-            bool: ``True`` if the keys are identical, ``False`` otherwise.
-        
+            bool: ``True`` if equal, ``False`` otherwise.
+
         Example:
             >>> jdb = JDb()
             >>> jdb['user_1', 'user_2'] = 0
             >>> jdb.keys == {'user_1', 'user_2'}
-            True            
+            True
         """
         return self.jdb == keys
 
@@ -493,13 +500,22 @@ class JDbKey:
 
     def non_joint(self, keys:Set[str]) -> Set[str]:
         """
-        Find keys that are strictly in this database but not in the provided set.
+        Return the keys from the provided set that do NOT exist in the database.
+
+        Note: this is the reverse of :meth:`difference` — ``non_joint(x)`` is
+        ``x - db.keys`` while ``difference(x)`` is ``db.keys - x``.
 
         Args:
-            keys (Set[str]): The set of keys to exclude.
+            keys (Set[str]): The keys to check.
 
         Returns:
-            Set[str]: The set of non-joint keys.
+            Set[str]: Keys from ``keys`` that are not present in the database.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.keys.non_joint({'user_1', 'new_user'})
+            {'new_user'}
         """
         return self.jdb.non_joint(keys)
 
@@ -656,23 +672,24 @@ class JDbKey:
 
                 - str | bool | bytes
                     >>> matches = jdb.keys['name']
-                    >>> matches = jdb.key['child:::name']
-                    >>> matches = jdb.key[':::name']
+                    >>> matches = jdb.keys['child:::name']   # key 'name' inside child DB 'child'
+                    >>> matches = jdb.keys[':::name']        # key 'name' inside any child DB
 
-                - int
-                    >>> matches = jdb.keys[1]             # get 2nd line row key info
-                    >>> matches = jdb.keys[-1]            # get last line row key info
+                - int (row index)
+                    >>> matches = jdb.keys[1]        # 2nd row's key info
+                    >>> matches = jdb.keys[-1]       # last row's key info
 
-                - float
-                    >>> matches = jdb.keys[-1.]      # get all key info which sync_id is matched
+                - float (sync_id / version)
+                    >>> matches = jdb.keys[-1.]      # keys written in the latest write session
+                    >>> matches = jdb.keys[5.]       # keys whose version == 5
 
-                - slice | date | datetime | Conditon
+                - slice | date | datetime | Condition
                     >>> matches = jdb.keys[date(2020,1,1)::r'key[0-9]'] # get date from 2020-1-1 to now key and match r'key[0-9]'
                     >>> matches = jdb.keys[:100:r'key[0-9]'] # get 1-100th row keys and match r'key[0-9]'
                     >>> matches = jdb.keys[date.today()]     # get today modified/new keys
                     >>> matches = jdb.keys[datetime.now()]   # get today new keys
                     >>> matches = jdb.keys[1:10:2]   # get 2nd - 9th and step=2 key info
-                    >>> matches = jdb.keys[-10.:]    # get key info and match sync_id
+                    >>> matches = jdb.keys[-10.:]    # keys written in the last 10 write sessions
                     >>> matches = jdb.keys[:]        # get all key info
                     >>> matches = jdb.keys[Query().name.endswith('e')]
 
@@ -1127,10 +1144,11 @@ class JDbReader(JDbBase):
 
     def __len__(self) -> int:
         """
-        Get the current number of valid records in the database.
+        Get the current number of active records by re-reading the KEY
+        file header from storage (in-memory counters are left untouched).
 
         Returns:
-            int: Total record count.
+            int: Total active record count.
         """
         with self.KEY_fopen() as key_fp:
             io = self.io
@@ -1183,7 +1201,7 @@ class JDbReader(JDbBase):
                 - function(k)
                     >>> data = jdb[lambda k: k[0] == 'k']
 
-                - tuple | se | list | dict
+                - tuple | set | list | dict
                     >>> data = jdb[1, 2, 3, 'a']
                     >>> data = jdb[(1, 2, 3, 'a')]
                     >>> data = jdb[{1, 2, 3, 'a'}]
@@ -1193,7 +1211,7 @@ class JDbReader(JDbBase):
         Returns:
             Union[Dict[str, Any], Any]: The target value, or a dictionary of matched keys and values.
                 
-                - dict: mutliple keys with value
+                - dict: multiple keys with values
                 - Any: target key's value        
         """
         if isinstance(key, str):
@@ -1239,8 +1257,11 @@ class JDbReader(JDbBase):
             >>> jdb = JDb()
             >>> jdb['user_1', 'user_2', 'user_3'] = 0
             >>> {'user_1', 'user_2'} in jdb
-            >>> 'user_1 in jdb
-            >>> Query().age > 999 in jdb
+            True
+            >>> 'user_1' in jdb
+            True
+            >>> (Query().age > 999) in jdb
+            False
         """
         if isinstance(keys, Condition):
             return next(self.find_iter(keys, limit=1), None) is not None
@@ -1524,15 +1545,26 @@ class JDbReader(JDbBase):
         return self.symmetric_difference(keys)
 
     def f_slice(self, fp_dict:dict, key:Union[dt_date,datetime,Condition,slice]) -> tuple:
-        """
-        Compute row and version iteration boundaries for a given slice or datetime constraint.
+        """Normalize a slice / date / datetime / Condition filter into row and
+        version iteration bounds for :meth:`f_key_iter`.
+
+        A ``date`` becomes a one-day range on the modified date; a
+        ``datetime`` becomes a one-day range on the created date; a
+        ``Condition`` becomes a full-range slice with the condition as the
+        key rule. Slice ``start``/``stop`` may be ints (row ids), floats or
+        strs (version bounds), or dates; a str/Condition ``step`` becomes a
+        key-matching rule.
 
         Args:
-            fp_dict (dict): Active file pointer dictionary.
-            key (Union[dt_date, datetime, Condition, slice]): The time or slice specification for filtering.
+            fp_dict (dict): The thread's open file-pointer table.
+            key (Union[dt_date, datetime, Condition, slice]): The filter.
 
         Returns:
-            tuple: A tuple containing (slice_obj, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date).
+            tuple: ``(row_slice, max_ver, min_ver, max_date, min_date,
+            key_rules, chk_new_date)`` — the row range to scan, version
+            bounds, date bounds, an optional key rule, and whether the date
+            bounds apply to the modified (``True``) or created (``False``)
+            date.
         """
         chk_new_date = True
         if isinstance(key, datetime): # before dt_date
@@ -1683,14 +1715,21 @@ class JDbReader(JDbBase):
         return slice(_start, _stop, _step), max_ver, min_ver, max_days, min_days, key_rules, chk_new_date
 
     def f_open(self, read_only:bool=True) -> Dict[int,IO]:
-        """Explicitly initialize and acquire transaction streams allocated to internal pools.
+        """Manually acquire the file lock and open the KEY file for the current thread.
+
+        This is the non-context-manager counterpart of :meth:`open`; every
+        ``f_open()`` call must be paired with a matching :meth:`f_close`.
+        Re-entrant calls from the same thread are counted and only the last
+        :meth:`f_close` actually closes the files. The key table is reloaded
+        from disk if it is out of date.
 
         Args:
-            read_only (bool, optional): If True, grabs shared reading channels. 
-                Otherwise requests exclusive system control flags. Defaults to True.
+            read_only (bool, optional): If ``True``, acquire a shared read lock;
+                otherwise acquire an exclusive write lock. Defaults to ``True``.
 
         Returns:
-            Dict[int, IO]: Table tracking open IO objects bound to current thread session.
+            Dict[int, IO]: The thread's file-pointer table. Index ``-1`` maps to
+            the KEY file pointer; VAL file pointers are added on demand.
         """
         with self.lock:
             file_lock = self.file_lock
@@ -1772,7 +1811,13 @@ class JDbReader(JDbBase):
         return None
 
     def f_close(self):
-        """Flush pending changes and systematically decouple file streams handles registers."""
+        """Release one :meth:`f_open` acquisition for the current thread.
+
+        In write mode, the KEY file header is flushed to disk. When the
+        thread's last nested acquisition is released, all of its file
+        pointers are closed (with an ``fsync`` first when ``JFlag.FSYNC``
+        is set and data was modified) and the file lock is released.
+        """
         with self.lock:
             ident = get_ident()
             chg_keys = self.chg_keys
@@ -1840,16 +1885,21 @@ class JDbReader(JDbBase):
 
     @contextmanager
     def open(self, read_only:bool=True, no_raise:bool=False) -> Generator[Dict[int,IO], None, None]:
-        """Context manager to acquire thread-safe read/write access to the database files.
+        """Context manager giving thread-safe read/write access to the
+        database files. Nested calls from the same thread are counted; files
+        are closed and the lock released when the outermost call exits.
 
         Args:
-            read_only (bool, optional): Request a shared read lock instead of an exclusive write lock. 
-                Defaults to ``True``.
-            no_raise (bool, optional): If ``True``, suppresses exceptions and attempts to reset 
-                corrupted headers. Defaults to ``False``.
+            read_only (bool, optional): Request a shared read lock instead of
+                an exclusive write lock. Defaults to ``True``.
+            no_raise (bool, optional): If ``True``, errors are suppressed and,
+                on an unexpected error, the KEY file is re-initialized
+                (all records discarded) instead of raising.
+                Defaults to ``False``.
 
         Yields:
-            Dict[int, IO]: A dictionary of open file pointers mapped by their IDs.
+            Dict[int, IO]: The thread's file-pointer table. Index ``-1`` maps
+            to the KEY file pointer; VAL file pointers are added on demand.
         """
         if not self.lock.acquire(): # 70% faster vs with self.lock
             raise RuntimeError
@@ -2032,13 +2082,16 @@ class JDbReader(JDbBase):
     @contextmanager
     def KEY_fopen(self, read_only:bool=True) -> Generator[IO, None, None]:
         """
-        Context manager explicitly for opening and accessing the KEY structure file safely.
+        Context manager that locks the database and opens the raw KEY file,
+        creating a fresh one when it does not exist. Unlike :meth:`open`, it
+        does not load the key table.
 
         Args:
-            read_only (bool, optional): Access mode request. Defaults to True.
+            read_only (bool, optional): Acquire a shared read lock instead of
+                an exclusive write lock. Defaults to ``True``.
 
         Yields:
-            IO: The file pointer for the KEY table storage.
+            IO: The open KEY file pointer.
         """
         if not self.lock.acquire():
             raise RuntimeError
@@ -2096,19 +2149,20 @@ class JDbReader(JDbBase):
     @property
     def key_table(self) -> Dict[str,int]:
         """
-        Access the loaded dictionary mapping keys to their exact line row numbers.
+        Access the in-memory key table mapping each key to its row id in the
+        KEY file (``-1`` for missing keys on tables with a default).
 
         Returns:
-            Dict[str, int]: Key table map.
+            Dict[str, int]: ``{key: row_id}``.
         """
         return self.io.key_table
 
     @property
     def file_table(self) -> Dict[int,int]:
-        """Get the internal file mapping metadata database table.
+        """Get the VAL data file usage table.
 
         Returns:
-            Dict[int, int]: A dictionary mapping file segment IDs to current offsets.
+            Dict[int, int]: ``{val_file_id: used_bytes}``.
         """
         return self.io.file_table
 
@@ -2123,109 +2177,119 @@ class JDbReader(JDbBase):
 
     @property
     def n_lines(self) -> int:
-        """Get the total row line count inside the structural index file.
+        """Get the total number of rows in the KEY file, including
+        dead/history rows kept for revert support.
 
         Returns:
-            int: Total logical index rows, including dead and deleted entries.
+            int: Total row count (active + dead).
         """
         return self.io.n_lines
 
     @property
     def index_size(self) -> int:
-        """Get the allocated storage byte size of an individual index block row.
+        """Get the fixed byte size of one KEY file index row.
 
         Returns:
-            int: Number of fixed allocation bytes per index.
+            int: Bytes per index row.
         """
         return self.io.index_size
 
     @property
-    def reserved_rate(self) -> int:
-        """Get the padding reserve multiplier allocated for runtime object drift expansion.
+    def reserved_rate(self) -> float:
+        """Get the extra space ratio reserved when writing a value row, so the
+        row can grow in place without relocation (e.g. ``0.2`` reserves 20%).
 
         Returns:
-            float: Pre-allocation expansion reservation rate.
+            float: Reserved expansion ratio.
         """
         return self.io.reserved_rate
 
     @property
     def min_value_size(self) -> int:
-        """Get the minimum floor alignment constraint for data segment storage arrays.
+        """Get the minimum number of bytes allocated for a stored value row.
 
         Returns:
-            int: Minimal byte width allocation limit.
+            int: Minimum value row size in bytes.
         """
         return self.io.min_value_size
 
     @property
     def sync_id(self) -> int:
-        """Get the master execution tracking generation version sequence signature.
+        """Get the write-session counter. It is incremented once per write
+        transaction, and each record stores the ``sync_id`` of the session
+        that last modified it (its version).
 
         Returns:
-            int: Current synchronization session sequence value number.
+            int: Current write-session counter.
         """
         return self.io.sync_id
 
     @property
     def swap_id(self) -> int:
-        """Get the compact sequence reference ID utilized during index storage updates.
+        """Get the compaction counter. It is incremented whenever the KEY file
+        is rearranged (rows swapped/compacted), letting readers detect that
+        row positions may have changed.
 
         Returns:
-            int: Garbage collection lifecycle phase index tracker.
+            int: Current compaction counter.
         """
         return self.io.swap_id
 
     @property
     def remv_id(self) -> int:
-        """Get the total deletion count sequence identifier used for data tracking.
+        """Get the deletion counter, incremented whenever records are deleted.
 
         Returns:
-            int: Counter indicating total deleted element lines.
+            int: Current deletion counter.
         """
         return self.io.remv_id
 
     @property
     def api_ver(self) -> int:
-        """Get the physical structural schema iteration version of the engine binary interface.
+        """Get the on-disk format version of the database file.
 
         Returns:
-            int: Underlying logical structural iteration identification value.
+            int: File format (API) version.
         """
         return self.io.api_ver
 
     @property
     def data_type(self) -> str:
-        """Get the format encoding specification string token representing the engine layout.
+        """Get the serialization format code as ``'<KEY>+<VAL>'``
+        (e.g. ``'J+S'`` = JSON keys + msgpack values).
 
         Returns:
-            str: Operational data schema classification code string (e.g., 'J+S').
+            str: Serialization format code.
         """
         return self.io.data_type_str
 
     @property
     def zip_type(self) -> str:
-        """Get the active algorithm code string indicating row-level compression profile rules.
+        """Get the value compression code (e.g. ``'no'``, ``'gz'``, ``'zs'``).
 
         Returns:
-            str: Compression blueprint nomenclature code string (e.g., 'zs', 'no').
+            str: Compression algorithm code.
         """
         return self.io.zip_type_str
 
     @property
     def key_limit(self) -> str:
-        """Get the operational threshold rule limiting active reference cache structures.
+        """Get the key-table implementation code (e.g. ``'no'`` = plain dict,
+        ``'bt'`` = B-tree, ``'l0'``-``'l5'`` = lite table, integer = partial table).
 
         Returns:
-            str: Tracking limits context operational string code.
+            str: Key-table type code.
         """
         return self.io.key_limit_str
 
     @key_limit.setter
     def key_limit(self, value:Union[int,str]):
-        """Set the key indexing boundary parameters dynamically with thread lock boundaries.
+        """Switch the key-table implementation (thread-safe).
 
         Args:
-            value (Union[int, str]): New indexing tracking restriction code string or integer size.
+            value (Union[int, str]): New key-table type — a code string
+                (``'no'``, ``'bt'``, ``'l0'``-``'l5'``) or an integer size
+                for a partial key table.
         """
         with self.lock:
             self.io.key_limit = value
@@ -2261,10 +2325,12 @@ class JDbReader(JDbBase):
                 self._cache_limit = value
 
     def len_(self) -> int:
-        """Extract the exact active record count by checking core filesystem headers directly.
+        """Read the active record count directly from the KEY file header,
+        without acquiring locks or loading the key table. Returns ``0`` when
+        the KEY file does not exist.
 
         Returns:
-            int: Number of live unique records verified on device layer.
+            int: Active record count, or ``0`` if the file is missing.
         """
         key_fp = None
         try:
@@ -2282,13 +2348,17 @@ class JDbReader(JDbBase):
         return 0
 
     def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDbReader: # pragma: no cover
-        """Spawn a relative reader instance sharing configuration models matching local presets.
+        """Create a new instance that reuses this database's configuration
+        (data_type, zip_type, key_limit, cache_limit, sizes, etc.) but points
+        at a different storage target.
 
         Args:
-            KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): Direct target path or source buffer.
+            KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): Target
+                file path, memory buffer, files object, or source database —
+                same forms accepted by :meth:`__init__`.
 
         Returns:
-            JDbReader: A newly spawned reader environment reference.
+            JDbReader: The new instance.
         """
         jio = self.io
         return JDbReader(KEY_file=KEY_file,
@@ -2302,10 +2372,11 @@ class JDbReader(JDbBase):
                     index_size=jio.index_size)
 
     def can_lock(self) -> bool:
-        """Validate if the storage medium filesystem architecture supports isolation parameters control.
+        """Check whether file locking works on the underlying storage
+        (some filesystems, e.g. certain network mounts, do not support it).
 
         Returns:
-            bool: True if locks can be safely managed, False otherwise.
+            bool: ``True`` if file locks can be acquired, ``False`` otherwise.
         """
         if not self.lock.acquire(): # pylint: disable=consider-using-with
             return False
@@ -2320,13 +2391,24 @@ class JDbReader(JDbBase):
             self.lock.release()
 
     def non_joint(self, keys:Set[str]) -> Set[str]:
-        """Compute the relative difference containing items unique to this instance.
+        """Return the keys from the provided collection that do NOT exist in
+        this database.
+
+        Note: this is the reverse of :meth:`difference` — ``non_joint(x)`` is
+        ``x - db.keys`` while ``difference(x)`` is ``db.keys - x``.
 
         Args:
-            keys (Set[str]): Comparison collection base criteria target.
+            keys (Set[str]): Keys to check. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            Set[str]: The resulting asymmetric difference subset array.
+            Set[str]: Keys from ``keys`` that are not present in the database.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.non_joint({'user_1', 'new_user'})
+            {'new_user'}
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2374,24 +2456,32 @@ class JDbReader(JDbBase):
         return keys
 
     def joint(self, keys:Set[str]) -> Set[str]:
-        """Find overlapping keys existing symmetrically between database space and criteria sets.
+        """Alias for :meth:`intersection` — keys present in both the database
+        and the provided collection.
 
         Args:
-            keys (Set[str]): Query tracking indicators set.
+            keys (Set[str]): Keys to intersect with.
 
         Returns:
-            Set[str]: Intersected structural keys slice.
+            Set[str]: The common keys.
         """
         return self.intersection(keys)
 
     def union(self, keys:Set[str]) -> Set[str]:
-        """Aggregate local tracking records together with external target collection frames.
+        """Return all database keys combined with the provided collection.
 
         Args:
-            keys (Set[str]): Collection items to incorporate into query results.
+            keys (Set[str]): Keys to add. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            Set[str]: Complete combination matrix unique elements array.
+            Set[str]: The union of the database keys and ``keys``.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.union({'new_user'})
+            {'user_1', 'user_2', 'new_user'}
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2427,13 +2517,21 @@ class JDbReader(JDbBase):
             return keys.union(key_table)
 
     def intersection(self, keys:Set[str]) -> Set[str]:
-        """Intersect internal active index dictionary indices against query sequences fields.
+        """Return the keys present in both the database and the provided
+        collection.
 
         Args:
-            keys (Set[str]): Cross-reference set to check items matching domain rules.
+            keys (Set[str]): Keys to intersect with. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            Set[str]: Shared element set output.
+            Set[str]: The common keys.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.intersection({'user_1', 'missing'})
+            {'user_1'}
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2472,13 +2570,21 @@ class JDbReader(JDbBase):
             return keys.intersection(key_table)
 
     def non_intersection(self, keys:Set[str]) -> Set[str]:
-        """Isolate nodes that evaluate unique to either target dataset boundaries.
+        """Return the symmetric difference — keys that exist in either the
+        database or the provided collection, but not in both.
 
         Args:
-            keys (Set[str]): Target comparison index space.
+            keys (Set[str]): Keys to compare. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            Set[str]: Computed symmetric difference tracking array.
+            Set[str]: Keys unique to one side.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.non_intersection({'user_1', 'new_user'})
+            {'user_2', 'new_user'}
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2514,24 +2620,32 @@ class JDbReader(JDbBase):
             return keys.symmetric_difference(self.key_table)
 
     def symmetric_difference(self, keys:Set[str]) -> Set[str]:
-        """Standard alias routing directly onto the non_intersection layout method.
+        """Alias for :meth:`non_intersection` (matches the :class:`set` API name).
 
         Args:
-            keys (Set[str]): Target values mapping sets to isolate.
+            keys (Set[str]): Keys to compare.
 
         Returns:
-            Set[str]: Unique divergent components layout map.
+            Set[str]: The symmetric difference.
         """
         return self.non_intersection(keys)
 
     def difference(self, keys:Set[str]) -> Set[str]:
-        """Exclude entries from native collection sets which match entries provided in inputs parameters.
+        """Return the database keys that are NOT in the provided collection
+        (``db.keys - keys``).
 
         Args:
-            keys (Set[str]): Elements to strip away from internal arrays indices.
+            keys (Set[str]): Keys to subtract. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            Set[str]: Filtered difference array output.
+            Set[str]: Database keys not present in ``keys``.
+
+        Example:
+            >>> jdb = JDb()
+            >>> jdb += {'user_1':1, 'user_2':2}
+            >>> jdb.difference({'user_1'})
+            {'user_2'}
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2566,13 +2680,15 @@ class JDbReader(JDbBase):
             return set(self.io.key_table).difference(keys)
 
     def is_superset(self, keys:Set[str]) -> bool:
-        """Determine if every key inside an external collection exists in the local collection.
+        """Check whether every key in the provided collection exists in the
+        database (the database is a superset of ``keys``).
 
         Args:
-            keys (Set[str]): Target slice layout candidates to cross-verify.
+            keys (Set[str]): Keys to check. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            bool: True if local structures envelope all values inside inputs, False otherwise.
+            bool: ``True`` if all of ``keys`` exist in the database.
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2617,13 +2733,15 @@ class JDbReader(JDbBase):
         return True
 
     def is_subset(self, keys:Set[str]) -> bool:
-        """Determine if local elements exist fully nested within a broader external pool space.
+        """Check whether every database key exists in the provided collection
+        (the database is a subset of ``keys``).
 
         Args:
-            keys (Set[str]): Broader parent context set.
+            keys (Set[str]): The larger collection to check against. May also
+                be another :class:`JDbReader`/:class:`JDbKey` or any iterable.
 
         Returns:
-            bool: True if completely nested, False if any unique outlier is found.
+            bool: ``True`` if all database keys exist in ``keys``.
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2678,13 +2796,14 @@ class JDbReader(JDbBase):
         return True
 
     def is_disjoint(self, keys:Set[str]) -> bool:
-        """Confirm if there are zero intersecting items common between tracking layers.
+        """Check whether the database and the provided collection share no keys.
 
         Args:
-            keys (Set[str]): External evaluation frame array.
+            keys (Set[str]): Keys to check. May also be another
+                :class:`JDbReader`/:class:`JDbKey`, a string, or any iterable.
 
         Returns:
-            bool: True if overlap evaluates empty, False if items are shared.
+            bool: ``True`` if no key is shared, ``False`` otherwise.
         """
         if isinstance(keys, str): # pragma: no cover
             keys = {keys}
@@ -2761,13 +2880,16 @@ class JDbReader(JDbBase):
             return key in self.io.key_table
 
     def has_(self, key:str) -> bool:
-        """Check key presence strictly within local fast lookup caches avoiding heavy execution locks.
+        """Fast key-existence check that prefers the in-memory key table and
+        avoids file locks when possible. The result may be slightly stale if
+        another process modified the database; use :meth:`has` for an
+        up-to-date answer.
 
         Args:
-            key (str): Target dictionary lookup query string.
+            key (str): The key to look up.
 
         Returns:
-            bool: True if active memory cache recognizes item reference, False otherwise.
+            bool: ``True`` if the key exists, ``False`` otherwise.
         """
         io = self.io
         if io.key_table:
@@ -2984,10 +3106,13 @@ class JDbReader(JDbBase):
                     jdb.info(prefix + SEP_SYM, key=_key)
 
     def values(self) -> Generator[Any, None, None]:
-        """Generate object values decoded directly from sequential segments records data blocks.
+        """Iterate over all stored values in row order.
+
+        Note: cached values are yielded by reference (no deep copy); do not
+        mutate them in place.
 
         Yields:
-            Any: The unpacked deserialized python object row mapping.
+            Any: Each record's deserialized value.
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
@@ -2995,13 +3120,17 @@ class JDbReader(JDbBase):
                 yield val
 
     def items(self, reverse:bool=False) -> Generator[Tuple[str,Any], None, None]:
-        """Generate structured key-value maps pairs extracted from indices tables.
-        
+        """Iterate over all ``(key, value)`` pairs in row order.
+
+        Note: cached values are yielded by reference (no deep copy); do not
+        mutate them in place.
+
         Args:
-            reverse (bool, optional): Reverse the sort order. Defaults to ``False``
+            reverse (bool, optional): Iterate rows in reverse order.
+                Defaults to ``False``.
 
         Yields:
-            (str, Any): A structural tuple pair associating key name strings with content values.
+            (str, Any): Each record's key and deserialized value.
         """
         # pylint: disable=contextmanager-generator-missing-cleanup
         with self.open(read_only=True) as fp:
@@ -3009,22 +3138,24 @@ class JDbReader(JDbBase):
                 yield key, val
 
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,Any]]:
-        """Iterate entities across datasets utilizing customizable indexing, criteria lambdas or slices parameters.
+        """Iterate over ``(key, value)`` pairs matching the given filter.
 
         Args:
-            key (Optional[Any], optional): Query target constraint layer rule. Defaults to None.
+            key (Optional[Any], optional): Filter criteria. ``None`` iterates
+                all records. Defaults to ``None``. Accepted forms:
 
-                - re.Pattern
-                - function(k) | function(k,v)
-                - str: record name
-                - int: record index                
-                - float: records sync ID
-                - bytes | bytearray | bool
-                - slice | date | datetime
-                - list | tuple | set | dict
+                - re.Pattern: keys matching the pattern
+                - function(k) | function(k,v): keys/pairs the function accepts
+                - str: an exact key (``'child:::key'`` reaches into a child DB)
+                - int: a row index (negative counts from the end)
+                - float: a write-session id (version); negative is relative
+                  to the current ``sync_id``
+                - bytes | bytearray | bool: converted to ``str`` and looked up
+                - slice | date | datetime | Condition: see :meth:`JDbKey.item_iter`
+                - list | tuple | set | dict: multiple keys
 
         Yields:
-            Tuple[str, Any]: (key, Value)
+            Tuple[str, Any]: The matched key and its deserialized value.
         """
 
         if isinstance(key, Pattern):
@@ -3189,7 +3320,7 @@ class JDbReader(JDbBase):
                 
                 >>> jdb.find(re.compile(r'Jo(e|hn)')) == jdb.find(r'Jo(e|hn)')
                 >>> jdb.find(lambda k: k[-1] == 'n')
-                >>> fdb.find({'$sw:': 'Jo'})
+                >>> jdb.find({'$sw': 'Jo'})
 
             vals (Optional[Dict[str, Any]], optional): Dictionary of value constraint operators (e.g., {'$gt': 10}).
                 
@@ -3213,7 +3344,7 @@ class JDbReader(JDbBase):
                 >>> jdb.find(AND=[{'name':'A'}, {'age':{'$gte':20}}]) # value['name'] == 'A' and value['age'] >= 20
                 >>> jdb.find(OR=[{'name':'A'}, {'age':{'$ge':20}}]) # value['name'] == 'A' or value['age'] >= 20
                 >>> jdb.find(NOR=[{'name':'A'}, {'age':{'$gte':20}}]) # value['name'] != 'A' and value['age'] < 20
-                >>> jdb.find(NOT={'name':'A'}}]) # not value['name] == 'A'
+                >>> jdb.find(NOT={'name':'A'}) # not (value['name'] == 'A')
                 >>> jdb.find(ANY='A')  # any record's value equal to  'A'
                 >>> jdb.find(vals={'name.$has': 'ice'})
                 >>> jdb.find(vals={'!name.$ihas': 'ice'})
@@ -3254,12 +3385,12 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(ANY='name')
             >>> jdb.find_iter(vals={'$any' : r'name'})
             >>> jdb.find_iter(vals={'$any' : {'$re' : r'name'}})
-            >>> jdb.find_iter(vals={'$or': [{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            >>> jdb.find_iter(OR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            >>> jdb.find_iter(NOR=[{'name1':{'$eq':'value1'}, {'name2':{'$eq':'value2'}}])
-            >>> jdb.find_iter(vals={'$and': [{'age':{'$gt':0}, {'age':{'$lte':100}}])
-            >>> jdb.find_iter(AND=[{'age':{'$gt':0}, {'age':{'$lte':100}}]) # 100 >= age >= 0
-            >>> jdb.find_iter(vals={'$not: {'$eq':'value1'})
+            >>> jdb.find_iter(vals={'$or': [{'name1':{'$eq':'value1'}}, {'name2':{'$eq':'value2'}}]})
+            >>> jdb.find_iter(OR=[{'name1':{'$eq':'value1'}}, {'name2':{'$eq':'value2'}}])
+            >>> jdb.find_iter(NOR=[{'name1':{'$eq':'value1'}}, {'name2':{'$eq':'value2'}}])
+            >>> jdb.find_iter(vals={'$and': [{'age':{'$gt':0}}, {'age':{'$lte':100}}]})
+            >>> jdb.find_iter(AND=[{'age':{'$gt':0}}, {'age':{'$lte':100}}]) # 100 >= age >= 0
+            >>> jdb.find_iter(vals={'$not': {'$eq':'value1'}})
             >>> jdb.find_iter(NOT={'$eq':'value1'}) # find_iter(NE='value1')
             >>> jdb.find_iter(EXISTS='role')
             >>> jdb.find_iter(vals={'name.$has': 'ice'})      # $has as query operator
@@ -3679,7 +3810,7 @@ class JDbReader(JDbBase):
             group_by:Optional[Any]=None,\
             **kwargs) -> Dict[str,Any]:
         """
-        show matched key+value in table.
+        Print the matched records as a formatted console table and return them.
 
         Args:
             keys (Any, optional): Condition for key filtering.
@@ -3781,6 +3912,8 @@ class JDbReader(JDbBase):
         clean_re = re_compile(r'\x1b\[\d\d?m')
 
         def _format_cell(val:Any) -> str:
+            """Render one value as display text (colored scalars, short lists,
+            or an underlined ``<type:len>`` placeholder)."""
             if val is None:
                 return ""
 
@@ -3805,6 +3938,8 @@ class JDbReader(JDbBase):
                 return f"\x1b[4m'<{type(val).__name__}>\x1b[0m"
 
         def _get_display_width(s_str:str) -> int:
+            """Terminal display width of a string, counting East-Asian wide
+            characters as 2 and ignoring ANSI color codes."""
             width = 0
             s_str_ = clean_re.sub('', s_str) if s_str.find('\x1b[') >= 0 else s_str
             for ch in s_str_:
@@ -3842,6 +3977,7 @@ class JDbReader(JDbBase):
             matrix.append(row_data)
 
         def _pad_string(s_str, target_width):
+            """Right-pad a string to the target display width."""
             return s_str + " " * (target_width - _get_display_width(s_str))
 
         sep = "┼".join("─" * (col_widths[field] + 2) for field in fields)
@@ -3870,14 +4006,17 @@ class JDbReader(JDbBase):
         return {k:v[0] for k,v in data_rows} # pylint: disable=unnecessary-comprehension
 
     def sync(self, force:bool=False, with_child:bool=False) -> JDbReader:
-        """Refresh configuration maps arrays state ensuring compatibility with concurrent system modifications.
+        """Reload the in-memory key table from disk so it reflects changes
+        made by other processes.
 
         Args:
-            force (bool, optional): Obliterate internal state layouts prior to polling system state logs. Defaults to False.
-            with_child (bool, optional): Cascades environment register purge rules downwards to inner instances. Defaults to False.
+            force (bool, optional): Drop all in-memory state first
+                (see :meth:`unsync`) to force a full reload. Defaults to ``False``.
+            with_child (bool, optional): Also sync every child/group database.
+                Defaults to ``False``.
 
         Returns:
-            JDbReader: The updated synchronization reference object instance.
+            JDbReader: ``self``, for call chaining.
         """
         if force:
             self.unsync()
@@ -3897,13 +4036,15 @@ class JDbReader(JDbBase):
         return self
 
     def unsync(self, with_child:bool=False) -> JDbReader:
-        """Flush and drop internal tracker registries resetting structures states to standard zero parameters.
+        """Drop the in-memory key table, file table, and value cache so the
+        next access reloads everything from disk. No file content is changed.
 
         Args:
-            with_child (bool, optional): Cascades environment register purge rules downwards to inner instances. Defaults to False.
+            with_child (bool, optional): Also unsync every child/group database.
+                Defaults to ``False``.
 
         Returns:
-            JDbReader: Clean slate structural tracking instance.
+            JDbReader: ``self``, for call chaining.
         """
         if not self.lock.acquire(): # pylint: disable=consider-using-with
             raise RuntimeError
@@ -3929,13 +4070,16 @@ class JDbReader(JDbBase):
         return self
 
     def load_table(self, force:bool=False) -> Tuple[Dict[str,int],Dict[int,int]]:
-        """Synchronize primary tables records maps checking current physical descriptor files states signatures.
+        """Load the key table and file table from disk (skipped when the
+        in-memory copy is already up to date) and return both.
 
         Args:
-            force (bool, optional): Bypass transaction timeline validation checks forcing an absolute rebuild. Defaults to False.
+            force (bool, optional): Rebuild the tables even if they appear
+                up to date. Defaults to ``False``.
 
         Returns:
-            Tuple[Dict[str, int], Dict[int, int]]: Synced key_table map paired with active file_table indices.
+            Tuple[Dict[str, int], Dict[int, int]]: ``(key_table, file_table)`` —
+            key -> row id, and VAL file id -> used size.
         """
         with self.open(read_only=True) as fp:
             self.f_load_keys(fp, force=force)
@@ -3966,15 +4110,19 @@ class JDbReader(JDbBase):
 
     def get_cache(self, key:str, default_val:Any=None, copy:bool=False) -> Any:
         """
-        Attempt to retrieve the value from memory cache first, minimizing disk I/O.
+        Retrieve a value, checking the in-memory cache first to avoid disk
+        I/O. A cache hit is returned without verifying against the file, so
+        the value may be stale if another process modified the database.
 
         Args:
             key (str): The target key.
-            default_val (Any, optional): Fallback value. Defaults to None.
-            copy (bool, optional): Return a deep copy. Defaults to False.
+            default_val (Any, optional): Returned when the key is missing.
+                Defaults to ``None``.
+            copy (bool, optional): Return a deep copy of a cached value.
+                Defaults to ``False``.
 
         Returns:
-            Any: The resolved data.
+            Any: The value, or ``default_val``.
         """
         val = self._cache.get(key, _MISSING)
         if val is not _MISSING:
@@ -3991,13 +4139,16 @@ class JDbReader(JDbBase):
 
     def get_n(self, *records:str) -> Dict[str,Any]:
         """
-        Retrieve multiple keys simultaneously and pack them into a dictionary.
+        Retrieve multiple keys at once and pack them into a dictionary.
+        Missing keys are silently skipped; calling with no arguments returns
+        the whole database (see :meth:`get_all`).
 
         Args:
-            *records (str): Variable arguments representing the keys to fetch.
+            *records: Keys to fetch. Each argument may be a string, any
+                hashable (converted with ``str``), or an iterable of keys.
 
         Returns:
-            Dict[str, Any]: A mapping of the requested keys to their values.
+            Dict[str, Any]: A mapping of the found keys to their values.
         """
         keys = set()
         for key in records: # pragma: no cover
@@ -4024,13 +4175,16 @@ class JDbReader(JDbBase):
 
     def get_all(self, cache_only:bool=False) -> Dict[str,Any]:
         """
-        Retrieve the entirety of the database content into a single dictionary.
+        Retrieve the entire database content into a single dictionary.
 
         Args:
-            cache_only (bool, optional): If True, only load what fits in the predefined cache_limit. Defaults to False.
+            cache_only (bool, optional): If ``True``, records are read only to
+                warm the in-memory cache (up to ``cache_limit``) and an
+                **empty** dict is returned. Defaults to ``False``.
 
         Returns:
-            Dict[str, Any]: A full snapshot of the database.
+            Dict[str, Any]: A full ``{key: value}`` snapshot, or ``{}`` when
+            ``cache_only=True``.
         """
         data = {}
         with self.open(read_only=True) as fp:
@@ -4050,52 +4204,70 @@ class JDbReader(JDbBase):
             return data
 
     def check_version(self, version:int, max_version:Optional[int]=None, with_value:bool=False) -> dict:
-        """Query modifications records parameters isolated within variable version sequence ranges markers.
+        """Return the rows whose version (write-session id) falls within
+        ``version <= ver <= max_version``, including dead/history rows.
 
         Args:
-            version (int): Floor execution sequence baseline constraint number.
-            max_version (Optional[int], optional): Cutoff ceiling phase identifier number index. Defaults to None.
-            with_value (bool, optional): Decouple data arrays forcing real row data content parsing execution. Defaults to False.
+            version (int): Lowest version to include (clamped to 0).
+            max_version (Optional[int], optional): Highest version to include.
+                ``None`` means no upper bound. Defaults to ``None``.
+            with_value (bool, optional): Also decode and append each row's
+                value. Defaults to ``False``.
 
         Returns:
-            dict: Historical mapping records subset data.
+            dict: ``{row_id: [key, file_id, offset, row_size, val_size, ver,
+            days, is_active(, value)]}`` — see :meth:`f_read_version`.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_version(fp, version=version, max_version=max_version, with_value=with_value)
 
     def check_row(self, row_id:int=0, with_value:bool=False) -> Optional[tuple]:
-        """Inspect item layout metadata configurations across specific segment slots boundaries positions.
+        """Read one row's stored metadata (and optionally its value) by row
+        index, including dead/history rows.
 
         Args:
-            row_id (int, optional): Target alignment index position integer. Defaults to 0.
-            with_value (bool, optional): Load true content alongside structural layout configurations metrics. Defaults to False.
+            row_id (int, optional): Row index; negative counts from the end of
+                the active records. Defaults to ``0``.
+            with_value (bool, optional): Also decode and append the row's
+                value. Defaults to ``False``.
 
         Returns:
-            Optional[tuple]: Tuple containing binary allocation mapping profiles parameters or None.
+            Optional[tuple]: ``(key, file_id, offset, row_size, val_size, ver,
+            days, is_active(, value))``, or ``None`` if ``row_id`` is out of
+            range.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_row(fp, row_id, with_value)
 
     def get_bytes(self, key:str) -> bytes:
-        """Extract the raw, compressed binary payload of a stored value without deserializing it.
+        """Return a value's serialized (and, when compression is enabled,
+        compressed) bytes without deserializing. Small values packed inline in
+        the KEY row are re-serialized on the fly.
 
         Args:
-            key (str): The key mapping to the payload.
+            key (str): The record key.
 
         Returns:
-            bytes: Raw binary block. Returns empty bytes if the key is not found.
+            bytes: The stored payload, or ``b''`` if the key is not found.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_bytes(fp, key)
 
     def check_status(self, keys:dict) -> Dict[str,Tuple[str,int]]:
-        """Evaluate status delta trackers processing system divergence tags across active entries collections.
+        """Compare keys against known versions and report what changed.
 
         Args:
-            keys (dict): Target mapping assigning reference variables tokens to distinct version baseline thresholds.
+            keys (dict): ``{key: last_known_version}``. A ``None`` version just
+                fetches the current status/version. The special key ``''``
+                reports every active record whose version is >= the given
+                version as ``('+', ver)`` (new or modified).
 
         Returns:
-            Dict[str, Tuple[str, int]]: Dictionary associating identifiers with state change indicators (e.g., '+', '-', '!').
+            Dict[str, Tuple[str, int]]: ``{key: (status, version)}`` where
+            status is ``''`` = unchanged (or current version when the input
+            version was ``None``), ``'!'`` = changed, ``'-'`` = deleted,
+            ``'x'`` = does not exist, ``'+'`` = new/modified (only from the
+            ``''`` query).
         """
         status = {}
         with self.open(read_only=True) as fp_dict:
@@ -4120,10 +4292,12 @@ class JDbReader(JDbBase):
         return status
 
     def is_latest(self) -> bool:
-        """Verify absolute parity matching current application memory arrays states with filesystem indicators on disk.
+        """Check whether the in-memory state matches the file on disk (same
+        header counters and file size), i.e. no other process has modified
+        the database since it was last loaded.
 
         Returns:
-            bool: True if records mirror filesystem metrics perfectly, False if changes are pending.
+            bool: ``True`` if the in-memory state is current.
         """
         with self.KEY_fopen():
             if self.io.is_updated():
@@ -4133,13 +4307,16 @@ class JDbReader(JDbBase):
         return False
 
     def get_group(self, key:str) -> Optional[JDbReader]:
-        """Isolate nested dataset directories initializing separate partitions spaces bound to distinct data keys.
+        """Get the nested group database stored under ``key``. A group is a
+        sub-database whose files live alongside the parent's files.
 
         Args:
-            key (str): Selector name defining sub-database namespace boundaries.
+            key (str): Group name; must match ``[0-9A-Za-z_]+`` or ``KeyError``
+                is raised.
 
         Returns:
-            Optional[JDbReader]: Active partition workspace or None if allocation rules break.
+            Optional[JDbReader]: The group database, or ``None`` if ``key`` is
+            not a group.
         """
         if not re_match(r'^[0-9A-Za-z_]+$', key):
             raise KeyError
@@ -4148,26 +4325,33 @@ class JDbReader(JDbBase):
             return self.f_get_group(fp, key)
 
     def get_child(self, name:str) -> Optional[JDbReader]:
-        """Resolve specific detached child storage database elements indexed under active mappings names.
+        """Get the child database registered under ``name``. A child is either
+        a group (see :meth:`get_group`) or an external database whose KEY file
+        path is stored as the record's value.
 
         Args:
-            name (str): Named partition token directory target selector.
+            name (str): Child name (a key of this database).
 
         Returns:
-            Optional[JDbReader]: Initialized isolated reader interface or None if file records break.
+            Optional[JDbReader]: The child database, or ``None`` if ``name``
+            is not a child or its file no longer exists.
         """
         with self.open(read_only=True) as fp:
             return self.f_get_child(fp, name)
 
     def f_get_group(self, fp_dict:Dict[int,IO], key:str) -> Optional[JDbReader]:
-        """Extract partition headers from stream context buffers generating group space profiles models.
+        """Internal :meth:`get_group` — resolve a group database using an
+        already-open file-pointer table (must be called inside :meth:`open`).
+        The resolved instance is cached in ``io.groups``.
 
         Args:
-            fp_dict (Dict[int, IO]): Persistent active handles arrays pool mapping current thread.
-            key (str): Unique sub-space path allocation label selector string.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table
+                (or a raw KEY file pointer).
+            key (str): Group name.
 
         Returns:
-            Optional[JDbReader]: Context bound group instance or None.
+            Optional[JDbReader]: The group database, or ``None`` if ``key`` is
+            not a group.
         """
         io = self.io
         row = io.key_table[key]
@@ -4193,14 +4377,19 @@ class JDbReader(JDbBase):
         return None
 
     def f_get_child(self, fp_dict:Dict[int,IO], name:str) -> Optional[JDbReader]: # pragma: no cover
-        """Assemble child dataset references by evaluating storage descriptor arrays fields.
+        """Internal :meth:`get_child` — resolve a child database (group or
+        external file) using an already-open file-pointer table (must be
+        called inside :meth:`open`). External children are opened from the
+        KEY file path stored as the record's value and cached in
+        ``self.childs``.
 
         Args:
-            fp_dict (Dict[int, IO]): Persistent active registers tables.
-            name (str): Selector token string matching underlying index rows data layers.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            name (str): Child name (a key of this database).
 
         Returns:
-            Optional[JDbReader]: Disconnected instance context or None.
+            Optional[JDbReader]: The child database, or ``None`` if ``name``
+            is not a child or its file no longer exists.
         """
         io = self.io
         childs = self.childs
@@ -4235,12 +4424,16 @@ class JDbReader(JDbBase):
         return jdb
 
     def _update_cache(self, key:str, val:Any, copy:bool=True):
-        """Append metadata entries into local tracking registers using LFU/FIFO capacity control logic.
+        """Store a value in the in-memory read cache with LRU eviction: when
+        the cache is full the least-recently-used entry is evicted, and the
+        stored key is moved to the most-recently-used position. Does nothing
+        when ``cache_limit == 0``.
 
         Args:
-            key (str): Content selector lookups reference string.
-            val (Any): Deserialized object instance data to store.
-            copy (bool, optional): Isolate storage pointers utilizing deep copies to protect thread variables. Defaults to True.
+            key (str): The record key.
+            val (Any): The deserialized value to cache.
+            copy (bool, optional): Store a deep copy instead of the object
+                itself. Defaults to ``True``.
         """
         cache_limit = self._cache_limit
         if cache_limit != 0:
@@ -4257,15 +4450,21 @@ class JDbReader(JDbBase):
             _cache.move_to_end(key, last=True)
 
     def f_read_row(self, fp_dict:Dict[int,IO], row_id:int, with_value:bool=False) -> Optional[tuple]:
-        """Low level data chunk stream parsing factory isolating specific physical slot blocks parameters.
+        """Internal :meth:`check_row` — read one row's stored metadata (and
+        optionally its value) by row index, including dead/history rows.
 
         Args:
-            fp_dict (Dict[int, IO]): Active file pointer table session.
-            row_id (int): Hardware data sector alignment index value.
-            with_value (bool, optional): Engage serialization routines unpacking real row contents blocks. Defaults to False.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            row_id (int): Row index; negative counts from the end of the
+                active records.
+            with_value (bool, optional): Also decode and append the row's
+                value. Defaults to ``False``.
 
         Returns:
-            Optional[tuple]: Segment tracking array schema mapping allocation boundaries metrics or None.
+            Optional[tuple]: ``(key, file_id, offset, row_size, val_size, ver,
+            days, is_active(, value))`` where ``is_active`` is ``True`` for a
+            live record and ``False`` for a dead/history row, or ``None`` if
+            ``row_id`` is out of range.
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
 
@@ -4298,17 +4497,20 @@ class JDbReader(JDbBase):
         return None
 
     def f_read_version(self, fp_dict:Dict[int,IO], version:int, max_version:Optional[int]=None, with_value:bool=False) -> Dict[str,list]:
-        """
-        Extract history lines and records bounded by version (sync/swap) IDs.
+        """Internal :meth:`check_version` — return every row (active and
+        dead/history) whose version satisfies ``version <= ver <= max_version``.
 
         Args:
-            fp_dict (Dict[int, IO]): Active file pointers.
-            version (int): The starting threshold version.
-            max_version (Optional[int], optional): The capping threshold version. Defaults to None.
-            with_value (bool, optional): Whether to also extract the true value into the returned array. Defaults to False.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            version (int): Lowest version to include (clamped to 0).
+            max_version (Optional[int], optional): Highest version to include.
+                ``None`` means no upper bound. Defaults to ``None``.
+            with_value (bool, optional): Also decode and append each row's
+                value. Defaults to ``False``.
 
         Returns:
-            Dict[str, list]: A map of row-ID to a list containing metadata elements.
+            Dict[int, list]: ``{row_id: [key, file_id, offset, row_size,
+            val_size, ver, days, is_active(, value)]}``.
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         if max_version is None:
@@ -4347,14 +4549,16 @@ class JDbReader(JDbBase):
         return matched_list
 
     def f_read_bytes(self, fp_dict:Dict[int,IO], key:str) -> bytes:
-        """Extract compressed raw row values segments records bypassing standard engine factory loading steps.
+        """Internal :meth:`get_bytes` — return a value's serialized (and, when
+        compression is enabled, compressed) bytes without deserializing.
+        Values packed inline in the KEY row are re-serialized on the fly.
 
         Args:
-            fp_dict (Dict[int, IO]): Current workspace active file descriptors map.
-            key (str): Lookup selection parameter string identifier.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (str): The record key.
 
         Returns:
-            bytes: Compressed or raw unparsed payload binary segment array block.
+            bytes: The stored payload, or ``b''`` if the key does not exist.
         """
         if not isinstance(key, str): # pragma: no cover
             key = str(key)
@@ -4374,19 +4578,18 @@ class JDbReader(JDbBase):
         return io.read_bytes(val_fp, offset, row_size, val_size)
 
     def f_read_with_bytes(self, fp_dict:Dict[int,IO], key:str) -> Tuple[Any, bytes]:
-        """
-        read value with unzip bytes
-        
+        """Read a value together with its serialized (decompressed) bytes,
+        so callers can match byte-level rules without re-serializing.
+
         Args:
-            fp_dict (Optional, Dict[int, IO])
+            fp_dict (Optional[Dict[int, IO]]): The thread's open file-pointer
+                table; ``None`` looks up the current thread's table.
+            key (str): The record key. Raises ``JKeyError`` when missing.
 
-                - None = use current thread
-
-            key (str): read key from database
-        
         Returns:
-            Tuple[Any, bytes]: key's data and key's unzip bytes
-
+            Tuple[Any, bytes]: ``(value, serialized_bytes)``. For a child or
+            group record the bytes are ``None`` and the value is the child
+            :class:`JDbReader`.
         """
         if not isinstance(key, str): # pragma: no cover
             key = str(key)
@@ -4420,18 +4623,22 @@ class JDbReader(JDbBase):
         return val, val_bytes
 
     def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True) -> Any:
-        """
-        Low-level internal function to extract and deserialize a single data row via file pointers.
+        """Low-level read of a single record, preferring the in-memory cache
+        over disk (must be called inside :meth:`open`).
 
         Args:
-            fp_dict (Dict[int, IO]): Dictionary holding active open files.
-            key (Optional[str]): The target key string.
-            default_val (Optional[Any], optional): Fallback if missing. Defaults to None.
-            row (Optional[int], optional): Precise row integer to skip indexing. Defaults to None.
-            copy (bool, optional): Ensure safety by returning a deepcopy. Defaults to True.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (Optional[str]): The record key (non-strings are converted).
+            default_val (Optional[Any], optional): Returned when the key is
+                missing; pass the internal ``_MISSING`` sentinel to raise
+                ``JKeyError`` instead. Defaults to ``None``.
+            row (Optional[int], optional): The key's known row id, to skip the
+                key-table lookup. Defaults to ``None``.
+            copy (bool, optional): Return a deep copy when the value comes
+                from (or enters) the cache. Defaults to ``True``.
 
         Returns:
-            Any: Deserialized object.
+            Any: The deserialized value, or ``default_val``.
         """
         key = str(key) if not isinstance(key, str) else key
 
@@ -4486,11 +4693,14 @@ class JDbReader(JDbBase):
         return deepcopy(val) if copy else val
 
     def f_load_keys(self, fp_dict:Dict[int,IO], force:bool=False):
-        """Populate transactional key tables by evaluating raw data blocks tracking structures logs.
+        """Load the key table from the KEY file into memory, opening the file
+        (or creating a fresh one) if needed. The load is skipped when the
+        in-memory copy is already up to date, unless ``force`` is set.
 
         Args:
-            fp_dict (Dict[int, IO]): Open file pointers collections tracking variables.
-            force (bool, optional): Overrule native consistency timestamps forcing full stream reconstruction. Defaults to False.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            force (bool, optional): Reload even if the in-memory copy appears
+                up to date. Defaults to ``False``.
         """
         key_fp = fp_dict.get(-1, None)
         if key_fp is None:
@@ -4512,14 +4722,15 @@ class JDbReader(JDbBase):
             self.fsize = io.file_size
 
     def f_find_keys(self, fp_dict:Dict[int,IO], pattern:Union[str,Pattern], **kwargs) -> Set[str]:
-        """Filter record namespaces utilizing regex compilation routines inside storage descriptor environments.
+        """Return every key matching a regular expression (``re.search``).
 
         Args:
-            fp_dict (Dict[int, IO]): Collection tracking active system streams pointers.
-            pattern (Union[str, Pattern]): String token or compiled pattern layout blueprint matching queries.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            pattern (Union[str, Pattern]): A compiled pattern, or a pattern
+                string compiled with ``**kwargs`` (e.g. ``flags=re.I``).
 
         Returns:
-            Set[str]: Filtered collection array tracking matching variables.
+            Set[str]: The matching keys.
         """
         if isinstance(pattern, Pattern):
             pass
@@ -4537,15 +4748,19 @@ class JDbReader(JDbBase):
         return matches
 
     def f_read_status(self, fp_dict:Dict[int,IO], key:str, ver:int) -> Tuple[str,int]:
-        """Compare operational transactional signatures identifying delta indicators across historical timelines.
+        """Report a key's change status relative to a known version.
 
         Args:
-            fp_dict (Dict[int, IO]): Transaction registers maps array handles pool.
-            key (str): Target reference lookup indicator selection token string.
-            ver (int): Base reference comparison epoch phase index constraint value.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (str): The key to check.
+            ver (int): The last version known to the caller, or ``None`` to
+                just fetch the current version.
 
         Returns:
-            Tuple[str, int]: Operational structural status code mapping paired with active transaction number index.
+            Tuple[str, int]: ``(status, version)`` where status is
+            ``''`` = unchanged (or current version when ``ver`` is ``None``),
+            ``'!'`` = changed, ``'-'`` = deleted (version of the deletion),
+            ``'x'`` = does not exist.
         """
         if not isinstance(key, str): # pragma: no cover
             key = str(key)
@@ -4575,13 +4790,17 @@ class JDbReader(JDbBase):
         return ('!', _ver) # changed
 
     def f_get_fp(self, fp_dict:Optional[Dict[int,IO]]) -> Tuple[JIo,Dict[int,IO],IO]:
-        """Resolve environment processing configuration mappings matching active isolation boundaries records.
+        """Ensure the KEY file is open for the current thread and return the
+        working handles. If the KEY file was not open yet it is opened (or
+        created) and the key table is reloaded when out of date.
 
         Args:
-            fp_dict (Optional[Dict[int, IO]]): Current session file pointer register collection array map or None.
+            fp_dict (Optional[Dict[int, IO]]): The thread's file-pointer
+                table; ``None`` looks up the current thread's table.
 
         Returns:
-            Tuple[JIo, Dict[int, IO], IO]: Primary processing engine engine block, register mappings, and master stream handles context.
+            Tuple[JIo, Dict[int, IO], IO]: ``(io, fp_dict, key_fp)`` — the IO
+            engine, the file-pointer table, and the open KEY file pointer.
         """
         if fp_dict is None:
             ident = get_ident()
@@ -4609,16 +4828,24 @@ class JDbReader(JDbBase):
         return io, fp_dict, key_fp
 
     def f_get_val_fp(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None, req_size:Optional[int]=None, max_fp:int=32) -> Tuple[IO,int,int]:
-        """Manage active record segment storage files limiting concurrent hardware descriptive blocks allocation density.
+        """Open (or reuse) the VAL data file identified by ``file_id`` for the
+        current thread. When ``file_id`` is ``None``, pick a VAL file with at
+        least ``req_size`` free bytes, creating a new one when all existing
+        files are full. Excess VAL file pointers beyond ``max_fp`` are closed
+        first (the KEY pointer is never closed).
 
         Args:
-            fp_dict (Dict[int, IO]): Active file handler matrix registration array mappings table.
-            file_id (Optional[int], optional): Target segment classification index code identifier. Defaults to None.
-            req_size (Optional[int], optional): request new file size
-            max_fp (int, optional): System density boundary constraining total allocated storage streams descriptors. Defaults to 32.
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            file_id (Optional[int], optional): VAL file id to open, or ``None``
+                to pick one with enough free space. Defaults to ``None``.
+            req_size (Optional[int], optional): Bytes required when picking a
+                file. Defaults to ``1024``.
+            max_fp (int, optional): Maximum number of VAL file pointers kept
+                open per thread. Defaults to ``32``.
 
         Returns:
-            Tuple[IO, int, int]: Target segment file stream controller instance, active section block index, and current capacity offset tracker.
+            Tuple[IO, int, int]: ``(val_fp, file_id, offset)`` — the open VAL
+            file pointer, its file id, and the file's current used size.
         """
         io = self.io
         file_table = io.file_table
@@ -4681,15 +4908,20 @@ class JDbReader(JDbBase):
         return val_fp, file_id, offset
 
     def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition]) -> Generator[Tuple[str,tuple], None, None]:
-        """
-        Iterate over keys and their corresponding information.
+        """Iterate over keys and their stored metadata for a slice / date /
+        Condition filter (resolved by :meth:`f_slice`).
 
         Args:
-            fp_dict (Dict[int, IO]): Active file handler matrix registration array mappings table.
-            slice_obj (Union[slice, dt_date, datetime, Condition]]): slice object
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            slice_obj (Union[slice, dt_date, datetime, Condition]): The filter;
+                see :meth:`JDbKey.item_iter` for the accepted slice forms.
 
-        Returns:
-            (str, tuple): key, (row_id, file_id, offset, row_size, val_size, version, days, modified_date, created_date)
+        Yields:
+            (str, tuple): ``key, (row_id, file_id, offset, row_size, val_size,
+            version, days, modified_date, created_date)``. When a version
+            (float) slice includes dead/history rows, their keys are yielded
+            decorated as ``'|<key>|~~<ver>~\t\t'`` so they cannot collide with
+            live keys.
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
@@ -4734,14 +4966,21 @@ class JDbReader(JDbBase):
                 yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, str(new_date), str(old_date))
 
     def f_items(self, fp_dict:Dict[int,IO], with_value:bool=True, reverse:bool=False) -> Generator[Tuple[str,Any], None, None]:
-        """Generate structured key-value maps pairs extracted from indices tables.
-        
+        """Iterate over all active ``(key, value)`` pairs in row order, reading
+        the KEY file in large blocks for speed.
+
+        Note: cached values are yielded by reference (no deep copy); do not
+        mutate them in place.
+
         Args:
-            with_value (bool, optional): Whether to also extract the true value into the returned array. Defaults to True.
-            reverse (bool, optional): Reverse the sort order. Defaults to ``False``
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            with_value (bool, optional): Decode each row's value; when
+                ``False`` the value is ``None``. Defaults to ``True``.
+            reverse (bool, optional): Iterate rows in reverse order.
+                Defaults to ``False``.
 
         Yields:
-            (str, Any): A structural tuple pair associating key name strings with content values.
+            (str, Any): Each record's key and value (or ``None``).
         """
         n_records = self.io.n_records
         n_rows = min(8192, n_records)
@@ -4795,13 +5034,16 @@ class JDbReader(JDbBase):
                     row_id += _rows
                 else:
                     row_id = max(row_id - _rows, 0)
-                    if row_id >= 0: io.seek(key_fp, row_id)
+                    if row_id >= 0: # pragma: no cover
+                        io.seek(key_fp, row_id)
 
     def _init_KEY(self) -> Tuple[JIo,IO]:
-        """Wipe tracking maps writing fresh primary configuration sheets records blueprints templates.
+        """Create (or truncate) the KEY file, reset the IO state and cache,
+        and write a fresh header. All existing records are discarded.
 
         Returns:
-            Tuple[JIo, IO]: Re-initialized pipeline engine coupled with active structural index file descriptor interface.
+            Tuple[JIo, IO]: ``(io, key_fp)`` — the reset IO engine and the
+            newly opened KEY file pointer (positioned at 0).
         """
         io = self.io
         key_fp = self.files_obj.KEY_open('wb+', buffering=KEY_FILE_BUF_SIZE)
@@ -4813,10 +5055,10 @@ class JDbReader(JDbBase):
         return io, key_fp
 
     def _init_VAL(self, file_id:int): # pragma: no cover
-        """Format structural block segment file containers allocated onto physical memory frames arrays layers.
+        """Create an empty VAL data file for the given file id.
 
         Args:
-            file_id (int): Segment data section classification token identifier integer number.
+            file_id (int): The VAL file id to create.
         """
         val_fp = None
         try:
@@ -4828,16 +5070,26 @@ class JDbReader(JDbBase):
 
     def _decode_row(self, file_id:int, offset:int, key:str, val_size:int=0) -> Any:
         """
-        Deserialize extremely compact structures stored strictly within the 8-byte metadata limit.
+        Decode a value that was packed inline into the KEY row's metadata
+        fields (``row_size == 0``) instead of the VAL file — the reverse of
+        :meth:`_encode_row`. See that method's table for the type-id layout.
 
         Args:
-            file_id (int): Type flag identifier indicating base data type (int, float, date, bool, etc.).
-            offset (int): Raw integer offset containing the packed binary payload.
-            key (str): Associated key name.
-            val_size (int, optional): Expected byte size. Defaults to 0.
+            file_id (int): Inline type id (``0x00`` = empties/None,
+                ``0x01`` = bool, ``0x02``/``0x03`` = int, ``0x04`` = float,
+                ``0x08``/``0x09`` = serialized bytes <= 8, high-bit ids =
+                serialized bytes <= 15, ``0x10`` = group JDb, ``0x18`` = date,
+                ``0x19`` = datetime).
+            offset (int): The packed payload (interpreted per ``file_id``).
+            key (str): The record key (used to resolve group databases).
+            val_size (int, optional): Serialized byte length for the
+                bytes-payload type ids. Defaults to ``0``.
 
         Returns:
-            Any: The unpacked python primitive or short object.
+            Any: The decoded Python object.
+
+        Raises:
+            ValueError: If ``file_id`` is not a known inline type id.
         """
         if offset < 0: # pragma: no cover
             # BUG fixed: offset must be uint64
@@ -4907,7 +5159,9 @@ class JDbReader(JDbBase):
 
     def _encode_row(self, key:str, val:Any) -> Tuple[int,Union[int,bytes],int]:
         """
-        Determine compact serialization strategies and compress objects to map onto the 8-byte metadata layout.        
+        Choose how to store a value: pack it inline into the KEY row's 8-byte
+        metadata fields when possible (see the type-id table below), or
+        serialize (and optionally compress) it for the VAL file.
         +---------------------------+----------------------------------+
         | type_id = file_id (uint64)| type_val = offset (uint64)       |
         +===========================+==================================+
@@ -4942,11 +5196,15 @@ class JDbReader(JDbBase):
         +---------------------------+----------------------------------+
     
         Args:
-            key (str): The key target.
-            val (Any): The payload object.
+            key (str): The record key (used to register group databases).
+            val (Any): The value to encode.
 
         Returns:
-            Tuple[int, Union[int, bytes], int]: File ID classification, serialized value/offset, and actual byte length.
+            Tuple[int, Union[int, bytes], int]: ``(type_id, payload, n_bytes)``.
+            For inline values: the type id, the packed integer payload, and
+            the serialized length (``0`` for primitives). For VAL-file values:
+            ``-1``, the serialized (possibly compressed) ``bytes``, and the
+            uncompressed length.
         """
         is_jdb = isinstance(val, JDbReader)
         if not is_jdb and not val:

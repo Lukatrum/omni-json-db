@@ -87,7 +87,14 @@ try:
     json_loads = _json_loads
 
 except ModuleNotFoundError:
-    from json import loads as _json_loads, dumps as __json_dumps, JSONDecodeError
+    from json import loads as __json_loads, dumps as __json_dumps, JSONDecodeError
+
+    def _json_loads(data:bytes) -> Any:
+        if isinstance(data, memoryview):
+            data = bytes(data)
+
+        return __json_loads(data)
+
     def _json_dumps(obj:Any, default:Optional[Callable[[Any], bytes]]=None) -> bytes:
         """Internal JSON string dump utility function acting as alternative to orjson.
 
@@ -1454,7 +1461,7 @@ class JIoVAL_Y(JIoVAL):
         if yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
-        if isinstance(data, (bytearray, memoryview)):
+        if isinstance(data, (bytearray, memoryview)): # pragma: no cover
             # PyYAML only accepts str/bytes; any other object is treated as a
             # file-like stream (and fails with AttributeError: no 'read').
             data = bytes(data)

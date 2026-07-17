@@ -887,7 +887,7 @@ def _resolve_group_path(parts:List[str], key:str, val:Any, cdate:Optional[dt_dat
         elif isinstance(cur, (list, tuple)):
             try:
                 cur = cur[int(part)]
-            except (ValueError, IndexError):
+            except (ValueError, IndexError): # pragma: no cover
                 return False, None
         else:
             return False, None
