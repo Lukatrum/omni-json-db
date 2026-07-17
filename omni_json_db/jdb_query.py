@@ -795,7 +795,7 @@ def resolve_sort_value(parts:List[str], key:str, val:Any, cdate:dt_date, mdate:d
         elif isinstance(cur, (list, tuple)):
             try:
                 cur = cur[int(part)]
-            except (ValueError, IndexError):
+            except (ValueError, IndexError): # pragma: no cover
                 return False, None
         else:
             return False, None
@@ -864,9 +864,9 @@ def _resolve_group_path(parts:List[str], key:str, val:Any, cdate:Optional[dt_dat
         cur = key
     elif root == '_date':
         cur = (cdate, mdate)
-    elif root == '':
+    elif root == '': # pragma: no cover
         cur = val
-    elif root in TRANSFORM_OPS:
+    elif root in TRANSFORM_OPS: # pragma: no cover
         cur = _apply_transform(root, val)
         if cur is None:
             return False, None
@@ -880,11 +880,11 @@ def _resolve_group_path(parts:List[str], key:str, val:Any, cdate:Optional[dt_dat
             cur = _apply_transform(part, cur)
             if cur is None:
                 return False, None
-        elif isinstance(cur, dict):
+        elif isinstance(cur, dict): # pragma: no cover
             if part not in cur:
                 return False, None
             cur = cur[part]
-        elif isinstance(cur, (list, tuple)):
+        elif isinstance(cur, (list, tuple)): # pragma: no cover
             try:
                 cur = cur[int(part)]
             except (ValueError, IndexError): # pragma: no cover

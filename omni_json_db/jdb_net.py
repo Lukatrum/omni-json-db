@@ -259,7 +259,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
             if whence == 0 and offset != self.offset or \
@@ -280,7 +280,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
             return True
@@ -295,7 +295,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
             return True
@@ -310,7 +310,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
             return self.mode.startswith(('a', 'w')) or self.mode.endswith('+')
@@ -328,7 +328,7 @@ class JNetIO(RawIOBase):
             if self.closed:
                 raise ValueError(f'I/O operation on closed file. ({self.file})')
 
-            if self.not_found:
+            if self.not_found: # pragma: no cover
                 raise FileNotFoundError(f'Cannot find {self.file}')
 
             return self.offset

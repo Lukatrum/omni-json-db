@@ -1824,8 +1824,8 @@ class JIo(JIoBase):
         zip_type = self._zip_type
         try:
             fp = files_obj.KEY_open('rb')
-            header = bytearray(HEADER_SIZE)
-            _len = fp.readinto(header) or 0
+            header = fp.read(HEADER_SIZE)
+            _len = len(header)
             if _len == HEADER_SIZE:
                 if header[0] == 91: # = '['
                     info = json_loads(header)
@@ -2697,8 +2697,8 @@ class JIo(JIoBase):
             JIo: The synchronized processing engine master instance context reference.
         """
         if fp.tell() != 0: fp.seek(0)
-        header = bytearray(HEADER_SIZE)
-        _len = fp.readinto(header)
+        header = fp.read(HEADER_SIZE)
+        _len = len(header)
         if _len == HEADER_SIZE:
             sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver = self.HEAD_loads(header)
         else:
