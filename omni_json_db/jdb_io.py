@@ -715,10 +715,12 @@ class KeyTable:
         return True
 
     def _item_iter(self) -> Generator[Tuple[str,int], None, None]:
-        """Iterate pairs matching target identifiers text tokens straight onto physical rows blocks integers coordinates indices trackers sequences.
+        """Iterate over every ``(key, row_id)`` pair by scanning the KEY file,
+        reading the index in large blocks for speed. Rows not yet registered
+        in the hash table are added on the fly.
 
         Yields:
-            (str, int): Associated unique identity string token paired along exact allocation row position line index number value.
+            (str, int): Each record's key and its row id.
         """
         jio = self.io
         is_empty = self.size == 0
@@ -727,17 +729,12 @@ class KeyTable:
         flags_mask = self.flags_mask
         get_found_flag = self._get_found_flag
         set_found_flag = self._set_found_flag
-        index_size = jio.index_size
-        KEY_loads = jio.KEY_loads
         groups = self.groups
         fp = None
         try:
             fp = self.files_obj.KEY_open('rb')
-            fp.seek(HEADER_SIZE)
-            line = bytearray(index_size)
-            for row_id in range(jio.n_records):
-                fp.readinto(line)
-                _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
+            row_id = 0
+            for (_key, _f, _o, _r, _v, _s, _d) in jio.KEY_iter(fp, row_id, jio.n_records):
                 if is_empty or not get_found_flag(row_id):
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
@@ -746,6 +743,7 @@ class KeyTable:
                     self.size += 1
 
                 yield _key, row_id
+                row_id += 1
 
         except FileNotFoundError: # pragma: no cover
             self.clear()
@@ -2306,22 +2304,11 @@ class JIo(JIoBase):
             fp = None
             try:
                 files_obj = self.files_obj.copy()
-                KEY_loads = self.KEY_loads
-                index_size = self.index_size
-                line = bytearray(index_size)
                 fp = files_obj.KEY_open('rb')
-                if reverse:
-                    for row_id in range(stop_row-1, start_row-1, -1):
-                        fp.seek(HEADER_SIZE + row_id * index_size)
-                        fp.readinto(line)
-                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
-                        yield _key, row_id
-                else:
-                    fp.seek(HEADER_SIZE + start_row * index_size)
-                    for row_id in range(start_row, stop_row):
-                        fp.readinto(line)
-                        _key, _f, _o, _r, _v, _s, _d = KEY_loads(line)
-                        yield _key, row_id
+                row_id = (stop_row-1) if reverse else start_row
+                for (_key, _f, _o, _r, _v, _s, _d) in self.KEY_iter(fp, start_row, stop_row, reverse=reverse):
+                    yield _key, row_id
+                    row_id = (row_id - 1) if reverse else (row_id + 1)
 
             finally:
                 if fp is not None:
@@ -2903,7 +2890,7 @@ class JIo(JIoBase):
         fast_mode       = isinstance(key_table, KeyTable)
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
-        self.file_size = records = lines = 0
+        self.file_size = records = 0
         self.update_days()
         if force or n_lines == 0 or prev_n_lines == 0 or line_diff < 0:
             key_table.clear()
@@ -2958,22 +2945,18 @@ class JIo(JIoBase):
                 # swap_diff == remv_diff == 0 and rec_diff > 0
                 if remv_diff == 0 and rec_diff > 0:
                     records = max(0, prev_n_records)
-                    lines = min(n_lines, n_records+line_diff) if line_diff == 0 else n_lines
 
                 # swap_diff == rec_diff == 0 and remv_diff > 0
                 elif rec_diff == 0 and remv_diff > 0: # ADD == DEL
                     records = max(0, n_records-remv_diff)
-                    lines = min(n_lines, n_records+line_diff+remv_diff) if line_diff == 0 else n_lines
 
                 # swap_diff == 0 and remv_diff > 0 and rec_diff > 0
                 elif rec_diff > 0: # ADD > DEL
                     records = max(0, prev_n_records-remv_diff)
-                    lines = min(n_lines, n_records+remv_diff) if line_diff == 0 else n_lines
 
                 # swap_diff == 0 and remv_diff > 0 and rec_diff < 0
                 else: # ADD < DEL
                     records = max(0, n_records-remv_diff)
-                    lines = min(n_lines, n_records+remv_diff) if line_diff == 0 else n_lines
 
                 if n_records <= 0 or records == 0 or fast_mode:
                     key_table.clear()
@@ -2993,20 +2976,14 @@ class JIo(JIoBase):
                         for key in del_keys:
                             key_table.pop(key, 0)
 
-                self.update_file_table()
                 if records < n_records:
-                    KEY_loads = self.KEY_loads
-                    line = bytearray(index_size)
-                    fp.seek(HEADER_SIZE + records * index_size)
-                    for row in range(records, n_records):
-                        fp.readinto(line)
-                        key,file_id,offset,row_size,_val_size = KEY_loads(line)[:5]
-                        key_table[key] = row
-                        if row_size > 0:
-                            file_table[file_id] = max(file_table[file_id], offset + row_size)
-                        elif row_size == 0 and file_id == 0x10: # pragma: no cover
+                    for (key, file_id, _offset, row_size, _val_size, _ver, _days) in self.KEY_iter(fp, records, n_records):
+                        key_table[key] = records
+                        if row_size == 0 and file_id == 0x10: # pragma: no cover
                             self.groups.setdefault(key, None)
+                        records += 1
 
+                self.update_file_table()
                 self._sync_id   = sync_id
                 self._swap_id   = swap_id
                 self._remv_id   = remv_id
@@ -3037,17 +3014,14 @@ class JIo(JIoBase):
                     else:
                         KEY_loads = self.KEY_loads
                         line = bytearray(index_size)
-                        fp.seek(HEADER_SIZE + n_records * index_size)
-                        for row in range(n_records, min(n_lines, n_records+remv_diff)):
-                            fp.readinto(line)
-                            del_rec = KEY_loads(line)
-                            old_row = key_table.pop(del_rec[0], -1)
+                        for (key, _f, _o, _rs, _vs, _v, _d) in self.KEY_iter(fp, n_records, min(n_lines, n_records+remv_diff)):
+                            old_row = key_table.pop(key, -1)
                             if n_records > old_row >= 0:
                                 cur_pos = fp.tell()
                                 fp.seek(HEADER_SIZE + old_row * index_size)
-                                fp.readinto(line)
-                                new_rec = KEY_loads(line)
-                                key_table[new_rec[0]] = old_row
+                                if fp.readinto(line) == index_size:
+                                    new_rec = KEY_loads(line)
+                                    key_table[new_rec[0]] = old_row
                                 fp.seek(cur_pos)
 
                     self._sync_id   = sync_id
@@ -3079,78 +3053,13 @@ class JIo(JIoBase):
             self.file_size  = fp.seek(0, 2)
             return
 
-        fp.seek(HEADER_SIZE + lines * self.index_size)
-        # read key info line by line
-        data_type_s = self.data_type_str
-        KEY_loads = self.KEY_loads
-        if data_type_s.startswith(('L', 'J')):
-            for line in fp: # 1.29% faster than fp.readlines(block_size)
-                if line[0] == 10: # pragma: no cover
-                    if lines < n_lines or records < n_records:
-                        print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type}|{self.zip_type}] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})'))
-                    break
+        for (key, file_id, _offset, row_size, _val_size, _ver, _days) in self.KEY_iter(fp, records, n_records):
+            key_table[key] = records
+            if row_size == 0 and file_id == 0x10: # pragma: no cover
+                self.groups.setdefault(key, None)
+            records += 1
 
-                try:
-                    key, file_id, offset, row_size, _val_size, _ver, _days = KEY_loads(line)
-
-                except ValueError as e: # pragma: no cover
-                    if lines < n_lines or records < n_records:
-                        print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
-                    break
-
-                if records < n_records:
-                    records += 1
-                    key_table[key] = lines
-
-                    if row_size > 0:
-                        file_table[file_id] = max(file_table[file_id], offset + row_size)
-                    elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                        self.groups.setdefault(key, None)
-
-                    lines += 1
-                else:
-                    lines = n_lines
-                    self.update_file_table()
-                    break
-
-        else: # M, S
-            line = bytearray(index_size)
-            while lines < n_lines:
-                n_read = fp.readinto(line) or 0
-                if n_read != index_size: # pragma: no cover
-                    break
-
-                try:
-                    key, file_id, offset, row_size, _val_size, _ver, _days = KEY_loads(line)
-
-                except ValueError as e: # pragma: no cover
-                    if lines < n_lines or records < n_records:
-                        print(Style(f'!!!!!!!!!!! [DECODE|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!load_keys(#{records}/{n_lines} fp:{fp} line:{line})\nexception:{e}'))
-                    break
-
-                if records < n_records:
-                    records += 1
-                    key_table[key] = lines
-
-                    if row_size > 0:
-                        file_table[file_id] = max(file_table[file_id], offset + row_size)
-                    elif row_size == 0 and file_id == 0x10: # pragma: no cover
-                        self.groups.setdefault(key, None)
-
-                    lines += 1
-                else:
-                    lines = n_lines
-                    self.update_file_table()
-                    break
-
-        if lines <= 0: # pragma: no cover
-            n_records = n_lines = 0
-            key_table.clear()
-            file_table.clear()
-        else:
-            n_records = records
-            n_lines = lines
-
+        self.update_file_table()
         self._sync_id   = sync_id
         self._swap_id   = swap_id
         self._remv_id   = remv_id
@@ -3267,6 +3176,82 @@ class JIo(JIoBase):
         self.write_header(fp)
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
+
+    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False) -> Generator[Tuple[str, int, int, int, int, int, int], None, None]:
+        """Iterate decoded KEY rows in the half-open row range ``[start, stop)``,
+        reading the index file in large blocks for speed.
+
+        The file position is re-seeked before every block, so repositioning
+        ``fp`` between yields is safe. However, the rows of the current block
+        are served from a snapshot buffer: writing to the KEY file during
+        iteration may yield stale rows, and replacing/closing ``fp`` (e.g. a
+        read-to-write mode switch) breaks the iterator. Do not modify the
+        database while iterating.
+
+        Args:
+            fp (IO): The open KEY file pointer.
+            start (int): First row id to yield (inclusive).
+            stop (int): End row id (exclusive); clamped to ``n_lines``.
+            reverse (bool, optional): Yield rows in descending row order.
+                Defaults to ``False``.
+
+        Yields:
+            Tuple[str, int, int, int, int, int, int]: The decoded row
+            ``(key, file_id, offset, row_size, val_size, ver, days)``.
+            Iteration stops silently on a short read or a row decode error.
+        """
+        if stop <= start or stop < 0 or start < 0 or self.n_lines < 0: # pragma: no cover
+            return
+
+        n_lines = self.n_lines
+        if start >= n_lines: # pragma: no cover
+            return
+
+        index_size = self.index_size
+        stop = n_lines if stop >= n_lines else stop
+        n_keys = stop - start
+        n_rows = min(8192, (2**22) // index_size, n_keys)
+        if n_rows <= 0:
+            return
+
+        KEY_loads = self.KEY_loads
+        buf = bytearray(index_size * n_rows)
+        mv_buf = memoryview(buf)
+        row_id = start if not reverse else stop
+        cnt = 0
+        if not reverse:
+            fp.seek(HEADER_SIZE + row_id * index_size)
+            while cnt < n_keys:
+                _n_rows = min(n_keys - cnt, n_rows)
+                n_bytes = fp.readinto(buf if _n_rows == n_rows else mv_buf[:_n_rows * index_size])
+                if n_bytes < index_size or n_bytes % index_size != 0:
+                    break
+
+                for idx in range(0, n_bytes, index_size):
+                    try:
+                        yield KEY_loads(mv_buf[idx:idx+index_size])
+                    except ValueError: # pragma: no cover
+                        cnt += n_lines
+                        break
+
+                cnt += _n_rows
+        else:
+            while cnt < n_keys:
+                _n_rows = min(n_keys - cnt, n_rows)
+                row_id -= _n_rows
+                fp.seek(HEADER_SIZE + row_id * index_size)
+                n_bytes = fp.readinto(buf if _n_rows == n_rows else mv_buf[:_n_rows * index_size])
+                if n_bytes < index_size or n_bytes % index_size != 0:
+                    break
+
+                for idx in range(n_bytes-index_size, -index_size, -index_size):
+                    try:
+                        yield KEY_loads(mv_buf[idx:idx+index_size])
+                    except ValueError: # pragma: no cover
+                        cnt += n_lines
+                        break
+
+                cnt += _n_rows
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------

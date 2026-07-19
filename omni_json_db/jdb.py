@@ -1374,21 +1374,21 @@ class JDb(JDbReader):
             file_table = io.file_table
             old_lines = n_lines = io.n_lines
             sortable = False
-            for row_id in range(io.n_records, n_lines):
+            row_id = io.n_records
+            for (key, file_id, offset, row_size, val_size, ver, days) in io.KEY_iter(key_fp, row_id, n_lines):
                 if has_SIGINT():
                     return
 
-                key, file_id, offset, row_size, val_size, ver, days = io_read_key(key_fp, row_id)
                 if row_size == 0:
-                    # if verbose:
-                    #     print(f'del0 KV-row[{key}] #{row_id}')
-
+                    # if verbose: print(f'del0 KV-row[{key}] #{row_id}')
                     sortable = True
                 else:
                     curr_end = offset + row_size
                     file_end = file_table.get(file_id, curr_end)
                     del_rows.append((file_id, offset, row_size, val_size, ver, days, key, row_id))
                     sortable = sortable or curr_end >= file_end
+
+                row_id += 1
 
             if not merge and not sortable: # pragma: no cover
                 curr_pos = key_fp.tell()
@@ -2055,7 +2055,7 @@ class JDb(JDbReader):
             src_index_size = src_io.index_size
             src_io.seek(key_fp_s, 0)
             src_line = bytearray(src_index_size)
-            for row_id in range(src_io.n_records):
+            for _row_id in range(src_io.n_records):
                 _size = key_fp_s.readinto(src_line)
                 if _size == src_index_size:
                     row = src_line.rstrip(b'\n \x00')
@@ -2117,7 +2117,6 @@ class JDb(JDbReader):
                 dst_io.write_header(key_fp_d, truncate=True)
 
                 fast_mode = fast_mode and dst_io._data_type == src_io._data_type and dst_io._zip_type == src_io._zip_type
-                src_io_read_key = src_io.read_key
                 src_io_read_value = src_io.read_value
                 src_io_unpad = src_io.unpad
                 src_decode_row = self._decode_row
@@ -2140,8 +2139,7 @@ class JDb(JDbReader):
                 if signal:
                     print(signal, end='', flush=True)
 
-                for row_id in range(src_io.n_records):
-                    key, file_id, offset, row_size, val_size, _ver, days = src_io_read_key(key_fp_s, row_id)
+                for (key, file_id, offset, row_size, val_size, _ver, days) in src_io.KEY_iter(key_fp_s, 0, src_io.n_records):
                     if row_size == 0:
                         try:
                             val = src_decode_row(file_id, offset, key, val_size)
@@ -2631,12 +2629,10 @@ class JDb(JDbReader):
                 f_get_val_fp = self.f_get_val_fp
                 _update_cache = self._update_cache
                 n_records = io.n_records
-                io_read_key = io.read_key
                 io_read_value = io.read_value
                 writer = DictWriter(csv_fp, fieldnames=fields, **kwargs)
                 writer.writeheader()
-                for row_id in range(n_records):
-                    _key, _file_id, _offset, _size, _vsize, _ver, _days = io_read_key(key_fp, row_id)
+                for (_key, _file_id, _offset, _size, _vsize, _ver, _days) in io.KEY_iter(key_fp, 0, n_records):
                     if _cache and _key in _cache:
                         val = _cache.get(_key, None)
                     else:
@@ -2757,7 +2753,6 @@ class JDb(JDbReader):
             tables = [row['name'] for row in cursor.fetchall() if row['name'] != 'sqlite_sequence']
             for tb_name in tables:
                 child_jdb = self.add_group(tb_name)
-
                 cursor.execute(f"PRAGMA table_info({tb_name})")
                 columns_info = cursor.fetchall()
 
@@ -2768,6 +2763,9 @@ class JDb(JDbReader):
                 cursor.execute(f"SELECT * FROM {tb_name}")
                 with child_jdb.open(read_only=False) as fp:
                     jio = child_jdb.io
+                    if jio.n_records > 0:
+                        child_jdb.remove_fast(child_jdb)
+
                     while True:
                         rows = cursor.fetchmany(batch_size) if batch_size > 0 else cursor.fetchall()
                         if not rows:
@@ -4824,7 +4822,7 @@ class JDb(JDbReader):
 
             if row is None:
                 for _row in range(io.n_records, io.n_lines):
-                    _key, file_id, offset, row_size, val_size, _ver, days =  io_read_key(key_fp, _row)
+                    _key, file_id, offset, row_size, val_size, _ver, days = io_read_key(key_fp, _row)
                     if _key == key:
                         row = _row
                         break
@@ -4835,7 +4833,7 @@ class JDb(JDbReader):
                 if row < io.n_records:
                     return None
 
-                _key, file_id, offset, row_size, val_size, _ver, days =  io_read_key(key_fp, row)
+                _key, file_id, offset, row_size, val_size, _ver, days = io_read_key(key_fp, row)
                 if _key != key:
                     return None
 
