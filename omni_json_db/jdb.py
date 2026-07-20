@@ -3665,7 +3665,7 @@ class JDb(JDbReader):
 
                             if row_id < record_t:
                                 if isinstance(key_table, KeyTable):
-                                    key_table.pop(_key, fp=key_fp, with_value=False)
+                                    key_table.pop(_key, fp=key_fp)
                                 else:
                                     key_table.pop(_key, 0)
                                 rec_args = io.copy_key(key_fp, record_t, row_id, decode=True)
@@ -3693,7 +3693,7 @@ class JDb(JDbReader):
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                             if isinstance(key_table, KeyTable):
                                 # key_fp.flush() # before key_table
-                                key_table.pop(_key, fp=key_fp, with_value=False)
+                                key_table.pop(_key, fp=key_fp)
                             else:
                                 key_table.pop(_key, 0)
 
@@ -4650,7 +4650,7 @@ class JDb(JDbReader):
             # it is not last record, swap it
             # REC[t] -> REC[r]
             if isinstance(key_table, KeyTable):
-                key_table.pop(key, fp=key_fp, with_value=False)
+                key_table.pop(key, fp=key_fp)
             else:
                 key_table.pop(key, -1)
             rec_args = io.copy_key(key_fp, record_t, row, decode=True)
@@ -4688,7 +4688,7 @@ class JDb(JDbReader):
         for _key,_row_id in set_key_table:
             key_table[_key] = _row_id
         if isinstance(key_table, KeyTable):
-            key_table.pop(key, fp=key_fp, with_value=False)
+            key_table.pop(key, fp=key_fp)
         else:
             key_table.pop(key, -1)
         return val
@@ -4901,7 +4901,7 @@ class JDb(JDbReader):
             io.swap_id = (io.swap_id + 1) & 0X_7FF_FFFF_FFFF
             if isinstance(key_table, KeyTable):
                 # key_fp.flush() # before key_table
-                key_table.pop(key, fp=key_fp, with_value=False)
+                key_table.pop(key, fp=key_fp)
             else:
                 key_table.pop(key, 0)
             key_table[new_key] = row

@@ -443,12 +443,13 @@ class KeyTable:
             cache[key] = row_id
             cache.move_to_end(key, last=True)
 
-    def pop(self, key:str, default_row_id:int=-1, fp:IO=None, with_value:bool=True) -> int:
+    def pop(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
         """Remove a key mapping from the index table.
 
         Args:
             key (str): The string identifier to remove.
             default_row_id (int, optional): The value to return if the key is not found. Defaults to -1.
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Returns:
             int: The row ID that was unlinked, or ``default_row_id`` if not found.
@@ -471,7 +472,7 @@ class KeyTable:
         key_array = groups[key_hash & mask]
         row_id, s_idx, e_idx = find_key(key_array, key)
         if row_id >= 0:
-            if is_sync or not with_value:
+            if is_sync:
                 del key_array[s_idx:e_idx]
                 self.size -= 1
                 set_found_flag(row_id, False)
@@ -503,7 +504,7 @@ class KeyTable:
                 if key_fp is not None and fp is None:
                     key_fp.close()
 
-        if not is_sync and with_value:
+        if not is_sync:
             for _key, row_id in self._item_iter(fp):
                 if key == _key:
                     old_row_id, s_idx, e_idx = find_key(key_array, key)
@@ -522,6 +523,7 @@ class KeyTable:
         Args:
             key (str): The string identifier to look up.
             default_row_id (int, optional): The value to return if the key is not found. Defaults to -1.
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Returns:
             int: The mapped row index, or ``default_row_id`` if not found.
@@ -574,7 +576,10 @@ class KeyTable:
 
     def items(self, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Yield all key and row_id pairs from the table.
-
+        
+        Args:
+            fp (IO, optional): The open KEY file pointer. None=use internal
+        
         Yields:
             (str, int): A tuple containing the key and its corresponding row index.
         """
@@ -596,6 +601,9 @@ class KeyTable:
 
     def values(self, fp:IO=None) -> Generator[int, None, None]:
         """Yield all active row indices in the table.
+
+        Args:
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Yields:
             int: An active row index.
@@ -620,6 +628,9 @@ class KeyTable:
 
     def keys(self, fp:IO=None) -> Generator[str, None, None]:
         """Yield all keys registered in the table.
+
+        Args:
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Yields:
             str: A registered key string.
@@ -718,6 +729,9 @@ class KeyTable:
         """Iterate over every ``(key, row_id)`` pair by scanning the KEY file,
         reading the index in large blocks for speed. Rows not yet registered
         in the hash table are added on the fly.
+
+        Args:
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Yields:
             (str, int): Each record's key and its row id.
