@@ -495,9 +495,7 @@ class JBytesIO(RawIOBase):
         if next_idx <= idx:
             return b''
 
-        with memoryview(buf) as mv_buf:
-            result = mv_buf[idx:next_idx].tobytes()
-
+        result = bytes(buf[idx:next_idx])
         self.idx = next_idx
         return result
 
@@ -513,16 +511,10 @@ class JBytesIO(RawIOBase):
         return self.read(-1)
 
     def readinto(self, b) -> int:
-        """Read bytes directly into a pre-allocated, mutable byte-like object.
-
-        bytearray targets use a size-based hybrid strategy: small reads assign
-        through a plain bytearray slice (CPython builds a tiny temporary, but
-        object overhead is minimal), while large reads assign into
-        ``memoryview(b)`` for a single direct ``memcpy`` (a plain bytearray
-        slice assignment from a memoryview would first build a temporary
-        bytearray, i.e. copy twice). Non-bytearray writable buffers (memoryview
-        slices, ``array('I', ...)``, ...) always take the memoryview path and
-        are measured in bytes like ``io.BytesIO.readinto``.
+        """Read bytes directly into a pre-allocated writable byte buffer
+        (``bytearray`` or a 1-byte-itemsize ``memoryview``), copying up to
+        ``len(b)`` bytes from the current position. Multi-byte-itemsize
+        buffers (e.g. ``array('I', ...)``) are not supported.
 
         Returns:
             int: The number of bytes copied (0 at EOF or past-end positions).
@@ -552,11 +544,13 @@ class JBytesIO(RawIOBase):
         return max(rd_size, 0)
 
     def write(self, b) -> int:
-        """Write the given bytes-like object to the stream.
+        """Write a bytes-like object (``bytes``/``bytearray``/1-byte-itemsize
+        ``memoryview``) to the stream, zero-filling any gap left by seeking
+        past the end. Multi-byte-itemsize buffers (e.g. ``array('I', ...)``)
+        are not supported.
 
         Returns:
-            int: The number of *bytes* written (multi-byte-itemsize inputs such
-            as ``array('I', ...)`` are measured in bytes, like ``io.BytesIO``).
+            int: The number of bytes written.
 
         Raises:
             ValueError: If the stream is closed.

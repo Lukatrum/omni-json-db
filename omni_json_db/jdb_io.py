@@ -443,7 +443,7 @@ class KeyTable:
             cache[key] = row_id
             cache.move_to_end(key, last=True)
 
-    def pop(self, key:str, default_row_id:int=-1) -> int:
+    def pop(self, key:str, default_row_id:int=-1, fp:IO=None, with_value:bool=True) -> int:
         """Remove a key mapping from the index table.
 
         Args:
@@ -471,7 +471,7 @@ class KeyTable:
         key_array = groups[key_hash & mask]
         row_id, s_idx, e_idx = find_key(key_array, key)
         if row_id >= 0:
-            if is_sync:
+            if is_sync or not with_value:
                 del key_array[s_idx:e_idx]
                 self.size -= 1
                 set_found_flag(row_id, False)
@@ -479,11 +479,11 @@ class KeyTable:
 
             KEY_loads = jio.KEY_loads
             index_size = jio.index_size
-            fp = None
+            key_fp = None if fp is None else fp
             try:
-                fp = self.files_obj.KEY_open('rb')
-                fp.seek(HEADER_SIZE + row_id * index_size)
-                _key, _f, _o, _r, _v, _s, _d = KEY_loads(fp.read(index_size))
+                key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
+                key_fp.seek(HEADER_SIZE + row_id * index_size)
+                _key, _f, _o, _r, _v, _s, _d = KEY_loads(key_fp.read(index_size))
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
@@ -500,11 +500,11 @@ class KeyTable:
                 self.clear()
 
             finally:
-                if fp is not None:
-                    fp.close()
+                if key_fp is not None and fp is None:
+                    key_fp.close()
 
-        if not is_sync:
-            for _key, row_id in self._item_iter():
+        if not is_sync and with_value:
+            for _key, row_id in self._item_iter(fp):
                 if key == _key:
                     old_row_id, s_idx, e_idx = find_key(key_array, key)
                     if old_row_id == row_id:
@@ -516,7 +516,7 @@ class KeyTable:
 
         return default_row_id
 
-    def get(self, key:str, default_row_id:int=-1) -> int:
+    def get(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
         """Retrieve the row index mapped to a specific key.
 
         Args:
@@ -558,7 +558,7 @@ class KeyTable:
             return row_id
 
         if not is_sync:
-            for _key, row_id in self._item_iter():
+            for _key, row_id in self._item_iter(fp):
                 if _key == key:
                     # clean up extra buffer
                     if self.with_cache:
@@ -572,7 +572,7 @@ class KeyTable:
 
         return default_row_id
 
-    def items(self) -> Generator[Tuple[str,int], None, None]:
+    def items(self, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Yield all key and row_id pairs from the table.
 
         Yields:
@@ -592,9 +592,9 @@ class KeyTable:
             return
 
         # not sync
-        yield from self._item_iter()
+        yield from self._item_iter(fp)
 
-    def values(self) -> Generator[int, None, None]:
+    def values(self, fp:IO=None) -> Generator[int, None, None]:
         """Yield all active row indices in the table.
 
         Yields:
@@ -615,10 +615,10 @@ class KeyTable:
             return
 
         # not sync
-        for _key,row_id in self._item_iter():
+        for _key,row_id in self._item_iter(fp):
             yield row_id
 
-    def keys(self) -> Generator[str, None, None]:
+    def keys(self, fp:IO=None) -> Generator[str, None, None]:
         """Yield all keys registered in the table.
 
         Yields:
@@ -639,7 +639,7 @@ class KeyTable:
             return
 
         # not sync
-        for key,_row_id in self._item_iter():
+        for key,_row_id in self._item_iter(fp):
             yield key
 
     def copy(self) -> KeyTable: # pragma: no cover
@@ -714,7 +714,7 @@ class KeyTable:
 
         return True
 
-    def _item_iter(self) -> Generator[Tuple[str,int], None, None]:
+    def _item_iter(self, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Iterate over every ``(key, row_id)`` pair by scanning the KEY file,
         reading the index in large blocks for speed. Rows not yet registered
         in the hash table are added on the fly.
@@ -730,11 +730,11 @@ class KeyTable:
         get_found_flag = self._get_found_flag
         set_found_flag = self._set_found_flag
         groups = self.groups
-        fp = None
+        key_fp = None if fp is None else fp
         try:
-            fp = self.files_obj.KEY_open('rb')
+            key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
             row_id = 0
-            for (_key, _f, _o, _r, _v, _s, _d) in jio.KEY_iter(fp, row_id, jio.n_records):
+            for (_key, _f, _o, _r, _v, _s, _d) in jio.KEY_iter(key_fp, row_id, jio.n_records):
                 if is_empty or not get_found_flag(row_id):
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
@@ -749,8 +749,8 @@ class KeyTable:
             self.clear()
 
         finally:
-            if fp is not None:
-                fp.close()
+            if key_fp is not None and fp is None:
+                key_fp.close()
 
     def _find_key(self, key_array:bytearray, key:str) -> Tuple[int, int, int]:
         """Find key msgpack pattern in bytearray.
@@ -3177,7 +3177,7 @@ class JIo(JIoBase):
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
 
-    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False) -> Generator[Tuple[str, int, int, int, int, int, int], None, None]:
+    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False, n_rows:int=8192) -> Generator[Tuple[str, int, int, int, int, int, int], None, None]:
         """Iterate decoded KEY rows in the half-open row range ``[start, stop)``,
         reading the index file in large blocks for speed.
 
@@ -3194,6 +3194,9 @@ class JIo(JIoBase):
             stop (int): End row id (exclusive); clamped to ``n_lines``.
             reverse (bool, optional): Yield rows in descending row order.
                 Defaults to ``False``.
+            n_rows (int, optional): Maximum rows per read block; the effective
+                block size is also capped at 4MB and at the range length.
+                Defaults to ``8192``.
 
         Yields:
             Tuple[str, int, int, int, int, int, int]: The decoded row
@@ -3210,7 +3213,7 @@ class JIo(JIoBase):
         index_size = self.index_size
         stop = n_lines if stop >= n_lines else stop
         n_keys = stop - start
-        n_rows = min(8192, (2**22) // index_size, n_keys)
+        n_rows = min(n_rows, (2**22) // index_size, n_keys)
         if n_rows <= 0:
             return
 
@@ -3220,11 +3223,11 @@ class JIo(JIoBase):
         row_id = start if not reverse else stop
         cnt = 0
         if not reverse:
-            fp.seek(HEADER_SIZE + row_id * index_size)
             while cnt < n_keys:
                 _n_rows = min(n_keys - cnt, n_rows)
+                fp.seek(HEADER_SIZE + row_id * index_size)
                 n_bytes = fp.readinto(buf if _n_rows == n_rows else mv_buf[:_n_rows * index_size])
-                if n_bytes < index_size or n_bytes % index_size != 0:
+                if n_bytes < index_size or n_bytes % index_size != 0: # pragma: no cover
                     break
 
                 for idx in range(0, n_bytes, index_size):
@@ -3235,13 +3238,14 @@ class JIo(JIoBase):
                         break
 
                 cnt += _n_rows
+                row_id += _n_rows
         else:
             while cnt < n_keys:
                 _n_rows = min(n_keys - cnt, n_rows)
                 row_id -= _n_rows
                 fp.seek(HEADER_SIZE + row_id * index_size)
                 n_bytes = fp.readinto(buf if _n_rows == n_rows else mv_buf[:_n_rows * index_size])
-                if n_bytes < index_size or n_bytes % index_size != 0:
+                if n_bytes < index_size or n_bytes % index_size != 0: # pragma: no cover
                     break
 
                 for idx in range(n_bytes-index_size, -index_size, -index_size):

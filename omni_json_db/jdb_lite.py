@@ -1772,7 +1772,7 @@ class JDbReader(JDbBase):
 
                     key_fp = fp_dict.get(-1, None)
                     if key_fp is not None: # pragma: no cover
-                        key_fp.flush()
+                        # key_fp.flush()
                         key_fp.seek(0)
                     else:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
@@ -1846,7 +1846,7 @@ class JDbReader(JDbBase):
                                 io, key_fp = self._init_KEY()
                                 fp_dict[-1] = key_fp
                         else:
-                            key_fp.flush()
+                            # key_fp.flush()
                             key_fp.seek(0)
 
                         if _cache: # pragma: no cover
@@ -1953,7 +1953,7 @@ class JDbReader(JDbBase):
 
                     key_fp = fp_dict.get(-1, None)
                     if key_fp is not None: # pragma: no cover
-                        key_fp.flush()
+                        # key_fp.flush()
                         key_fp.seek(0)
                     else:
                         key_fp = fp_dict[-1] = files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)
@@ -2042,8 +2042,8 @@ class JDbReader(JDbBase):
                                 key_fp = fp_dict.get(-1, None)
                                 if key_fp is None: # pragma: no cover
                                     fp_dict[-1] = key_fp = files_obj.KEY_open('ab+', buffering=KEY_FILE_BUF_SIZE)
-                                else:
-                                    key_fp.flush()
+                                # else:
+                                #     key_fp.flush()
 
                                 if _cache and io.remv_id != io._remv_id:
                                     for kk in set(_cache).difference(io.key_table):
@@ -4710,7 +4710,7 @@ class JDbReader(JDbBase):
                 io, key_fp = self._init_KEY()
                 fp_dict[-1] = key_fp
         else:
-            key_fp.flush()
+            # key_fp.flush()
             key_fp.seek(0)
 
         io = self.io.read_header(key_fp)
@@ -5019,7 +5019,7 @@ class JDbReader(JDbBase):
         io.reset()
         self._cache.clear()
         self.fsize = io.write_header(key_fp)
-        key_fp.flush()
+        # key_fp.flush()
         key_fp.seek(0)
         return io, key_fp
 
