@@ -1,4 +1,5 @@
-from __future__ import annotations # pylint: disable=too-many-lines
+# pylint: disable=too-many-lines
+from __future__ import annotations
 from socketserver import BaseRequestHandler, ThreadingMixIn, TCPServer
 from threading import get_ident, Thread
 from re import match as re_match

@@ -1,4 +1,5 @@
-from __future__ import annotations # pylint: disable=too-many-lines
+# pylint: disable=too-many-lines
+from __future__ import annotations
 from enum import IntFlag
 from io import RawIOBase
 from struct import Struct

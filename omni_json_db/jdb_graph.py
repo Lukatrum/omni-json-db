@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines
+# pylint: disable=too-many-lines,W0135,import-outside-toplevel
 from __future__ import annotations
 from datetime import date as dt_date, datetime
 from collections import deque
@@ -234,7 +234,7 @@ class GraphDb(JDb):
         Yields:
             str, int: ``node_id, row_id`` for each node.
         """
-        with self.open() as fp: # pylint: disable=W0135
+        with self.open() as fp:
             yield from self.f_iter_nodes(fp)
 
     def add_edge(self, u:str, v:str, directed:bool=True, **properties) -> bool:
@@ -445,7 +445,7 @@ class GraphDb(JDb):
                 each edge, where ``edge_type`` is ``'>'`` (directed) or
                 ``'-'`` (undirected).
         """
-        with self.open() as fp: # pylint: disable=W0135
+        with self.open() as fp:
             yield from self.f_iter_edges(fp)
 
     def iter_adjs(self) -> Generator[Tuple[str,Tuple[int,List[str]]],None,None]:
@@ -455,7 +455,7 @@ class GraphDb(JDb):
             str, (int, [str]): ``adj_id, (row_id, adj)`` where ``adj``
                 is the list of direction-prefixed neighbor ids for that node.
         """
-        with self.open() as fp: # pylint: disable=W0135
+        with self.open() as fp:
             yield from self.f_iter_adjs(fp)
 
     def neighbors(self, node_id: str) -> Set[str]:
@@ -1363,7 +1363,7 @@ class GraphDb(JDb):
             ImportError: If the ``networkx`` package is not installed.
         """
         try:
-            import networkx as nx # pylint: disable=import-outside-toplevel
+            import networkx as nx
         except ImportError as e:
             raise ImportError("to_networkx() requires the 'networkx' package (pip install networkx)") from e
 

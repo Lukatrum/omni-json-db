@@ -1,4 +1,5 @@
-from __future__ import annotations # pylint: disable=too-many-lines
+# pylint: disable=too-many-boolean-expressions, too-many-lines, no-name-in-module, import-error
+from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, Dict
 from io import DEFAULT_BUFFER_SIZE
@@ -20,7 +21,7 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, bitarray
+from .utils import Style, JIoBase, bitarray, JValueError
 
 try:
     import yaml
@@ -941,7 +942,7 @@ class LiteKeyTable(KeyTable):
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 try:
-    from BTrees.OLBTree import OLBTree as BTree # pylint: disable=no-name-in-module, import-error
+    from BTrees.OLBTree import OLBTree as BTree
 
     class BTreeKeyTable(BTree):
         """BTree-backed alternative implementation of KeyTable protocol handling heavy database datasets scalability arrays metrics grids."""
@@ -1169,7 +1170,7 @@ class JIoKEY_J(JIoKEY):
             return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1183,21 +1184,21 @@ class JIoKEY_J(JIoKEY):
             return key, file_id, offset, row_size, val_size, ver, days
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         try:
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
             return _json_loads(data)
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
 class JIoKEY_S(JIoKEY):
     """MsgPack compression serialization codec subclass handling high density row index mapping metadata packing rows blocks fields parameters."""
@@ -1208,7 +1209,7 @@ class JIoKEY_S(JIoKEY):
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1220,9 +1221,9 @@ class JIoKEY_S(JIoKEY):
                 return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
-        raise ValueError
+        raise JValueError
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         try:
@@ -1231,7 +1232,7 @@ class JIoKEY_S(JIoKEY):
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1242,9 +1243,9 @@ class JIoKEY_S(JIoKEY):
                 return _msg_loads(data[3:end_idx])
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
-        raise ValueError
+        raise JValueError
 
 class JIoKEY_M(JIoKEY):
     """Marshal binary compilation speed codec subclass handling raw system variables mapping optimization layouts structures."""
@@ -1254,7 +1255,7 @@ class JIoKEY_M(JIoKEY):
             return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1270,9 +1271,9 @@ class JIoKEY_M(JIoKEY):
                 return key, file_id, offset, row_size, val_size, ver, days
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
-        raise ValueError
+        raise JValueError
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         try:
@@ -1280,7 +1281,7 @@ class JIoKEY_M(JIoKEY):
             return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1290,9 +1291,9 @@ class JIoKEY_M(JIoKEY):
                 return args
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
-        raise ValueError
+        raise JValueError
 
 class JIoKEY_L(JIoKEY):
     """Legacy text string comma-separated encoder subclass generating human-readable tracking line rows entries records segments maps paths."""
@@ -1302,7 +1303,7 @@ class JIoKEY_L(JIoKEY):
             return data.encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1334,7 +1335,7 @@ class JIoKEY_L(JIoKEY):
             return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         try:
@@ -1342,7 +1343,7 @@ class JIoKEY_L(JIoKEY):
             return data.encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         try:
@@ -1357,7 +1358,7 @@ class JIoKEY_L(JIoKEY):
             return key, file_id, offset, row_size, val_size, ver, days
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1377,7 +1378,7 @@ class JIoVAL_J(JIoVAL):
             return _json_dumps(data, default=_json_default)
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         try:
@@ -1394,7 +1395,7 @@ class JIoVAL_J(JIoVAL):
             return val
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
 class JIoVAL_S(JIoVAL):
     """MsgPack value payload compiler handling high density binary records packaging."""
@@ -1403,7 +1404,7 @@ class JIoVAL_S(JIoVAL):
             return _msg_dumps(data, default=_msg_encode) or b''
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
@@ -1413,7 +1414,7 @@ class JIoVAL_S(JIoVAL):
             except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
                 data = data + b'\xc1'
 
-        raise ValueError
+        raise JValueError
 
 class JIoVAL_M(JIoVAL):
     """Marshal payload value processing interface utilizing rapid low-level internal runtime hooks."""
@@ -1423,7 +1424,7 @@ class JIoVAL_M(JIoVAL):
             return marshal_dumps(data)
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
@@ -1434,7 +1435,7 @@ class JIoVAL_M(JIoVAL):
             except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
                 data = data + b'\n'
 
-        raise ValueError
+        raise JValueError
 
 class JIoVAL_P(JIoVAL):
     """Pickle value payload subsystem driver supporting deep preservation of native Python objects graphs layouts."""
@@ -1444,7 +1445,7 @@ class JIoVAL_P(JIoVAL):
             return pickle_dumps(data)
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, PicklingError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         for _ in range(9):
@@ -1455,7 +1456,7 @@ class JIoVAL_P(JIoVAL):
             except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, PicklingError): # pragma: no cover
                 data = data + b'\n'
 
-        raise ValueError
+        raise JValueError
 
 class JIoVAL_Y(JIoVAL):
     """YAML values encoder subsystem driver generating multi-line clean configuration trees structures formats documents rows fields."""
@@ -1467,7 +1468,7 @@ class JIoVAL_Y(JIoVAL):
             return yaml.safe_dump(data, allow_unicode=True).encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError) as e: # pragma: no cover
-            raise ValueError from e
+            raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         if yaml is None: # pragma: no cover
@@ -1485,7 +1486,7 @@ class JIoVAL_Y(JIoVAL):
             except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError): # pragma: no cover
                 data = data + b'\n'
 
-        raise ValueError
+        raise JValueError
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1836,9 +1837,8 @@ class JIo(JIoBase):
         zip_type = self._zip_type
         try:
             fp = files_obj.KEY_open('rb')
-            header = fp.read(HEADER_SIZE)
-            _len = len(header)
-            if _len == HEADER_SIZE:
+            header = bytearray(HEADER_SIZE)
+            if fp.readinto(header) == HEADER_SIZE:
                 if header[0] == 91: # = '['
                     info = json_loads(header)
                 else: # pragma: no cover
@@ -2384,7 +2384,7 @@ class JIo(JIoBase):
         except (GZ_Error, BZ_Error, XZ_Error, ZS_Error, BR_Error, LZ_Error, \
                 ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError) as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!zip(bytes[{len(data)}]={data[-512:]}, zip_type={zip_type_i})\nexception:{e}', red=1))
-            raise ValueError from e
+            raise JValueError from e
 
     def unzip(self, data:Union[bytes,bytearray], zip_type:Optional[int]=None) -> Union[bytes,bytearray]:
         """Decompress data blocks sequences backward returning baseline raw serialization strings contents arrays.
@@ -2420,7 +2420,7 @@ class JIo(JIoBase):
                         ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, MemoryError, OSError):
                     data += pad
 
-            raise ValueError from e
+            raise JValueError from e
 
     def seek(self, fp:IO, row_id:int):
         """Reposition system storage stream pointer coordinates directly targeting selected index row boundaries blocks fields.
@@ -2515,9 +2515,7 @@ class JIo(JIoBase):
 
                 pad_size = index_size - data_size - 1
 
-        need_flush = False
         if pad_size < 0:
-            need_flush = True
             if row_id+1 >= self.n_lines:
                 _data = self.KEY_dumps('', 0, 0, 0, 0, 0, 0)
                 fp.seek(HEADER_SIZE + row_id * index_size)
@@ -2546,9 +2544,6 @@ class JIo(JIoBase):
                 _DEAD_rows.pop(next(iter(_DEAD_rows)), None)
 
         wr_size = fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
-        if need_flush and wr_size > 0:
-            fp.flush()
-
         return wr_size
 
     def read_key(self, fp:IO, row_id:int) -> Tuple[str, int, int, int, int, int, int]:
@@ -2684,7 +2679,6 @@ class JIo(JIoBase):
                 file_size += 1
                 fp.write(b'\n')
 
-        fp.flush()
         self.file_size = file_size
         return file_size
 
@@ -2698,9 +2692,8 @@ class JIo(JIoBase):
             JIo: The synchronized processing engine master instance context reference.
         """
         if fp.tell() != 0: fp.seek(0)
-        header = fp.read(HEADER_SIZE)
-        _len = len(header)
-        if _len == HEADER_SIZE:
+        header = bytearray(HEADER_SIZE)
+        if fp.readinto(header) == HEADER_SIZE:
             sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver = self.HEAD_loads(header)
         else:
             n_records = n_lines = sync_id = swap_id = remv_id = 0
@@ -2710,7 +2703,6 @@ class JIo(JIoBase):
             api_ver     = self.api_ver
 
         if self.file_size > 0:
-            # pylint: disable=too-many-boolean-expressions
             if index_size != self.index_size \
                     or n_records != self.n_records \
                     or n_lines != self.n_lines \
@@ -2810,7 +2802,21 @@ class JIo(JIoBase):
             Any: Unpacked deserialized Python data structure.
         """
         fp.seek(pos)
-        val_bytes, zip_type = (fp.read(val_size), -(self.zip_type+1)) if val_size > 0 else (fp.read(row_size), self.zip_type)
+        zip_type = self.zip_type
+        if val_size > 0:
+            val_bytes = fp.read(val_size)
+            if zip_type == NO_ZIP:
+                try:
+                    return self.VAL_loads(val_bytes)
+
+                except ValueError as e: # pragma: no cover
+                    # print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!loads_with_unzip(val_bytes[{len(val_bytes)}]={val_bytes[-512:]}, zip_type={zip_type})\nexception:{e}', red=1))
+                    raise JValueError from e
+
+            zip_type = -(self.zip_type+1)
+        else:
+            val_bytes = fp.read(row_size)
+
         if not val_bytes:
             return None
 
@@ -2832,7 +2838,7 @@ class JIo(JIoBase):
 
         except ValueError as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!dumps_with_zip(data={type(data)}, zip_type={zip_type})\nexception:{e}', red=1))
-            raise ValueError from e
+            raise JValueError from e
 
     def loads_with_unzip(self, val_bytes:Union[bytes,bytearray,memoryview], zip_type:Optional[int]=None) -> Any:
         """Unpack and decompress values blocks sequences backward reconstructing original Python structures layout instances profiles models parameters data fields fields.
@@ -2860,7 +2866,7 @@ class JIo(JIoBase):
 
         except ValueError as e: # pragma: no cover
             print(Style(f'!!!!!!!!!!! [???|{hex(id(self))[-5:-1]}|{self.sync_id%10000}|{self.key_limit_str}|{self.files_obj.get_KEY()}|{self.data_type_str}({self.zip_type_str})] ERROR!loads_with_unzip(val_bytes[{len(val_bytes)}]={val_bytes[-512:]}, zip_type={zip_type})\nexception:{e}', red=1))
-            raise ValueError from e
+            raise JValueError from e
 
     def update_file_table(self) -> None:
         """Scan all VAL files and update the max size for each VAL file.
@@ -3144,7 +3150,6 @@ class JIo(JIoBase):
         dst_io.n_lines = n_lines
         n_records = self.n_records
         src_read_key = self.read_key
-        fp.flush()
         if size_diff > 0:
             table_size = min(n_lines, int(n_lines * size_diff / self.index_size) + 8)
             fp.seek(HEADER_SIZE)

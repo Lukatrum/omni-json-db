@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines
+# pylint: disable=too-many-lines,unused-import,pointless-statement,too-few-public-methods,consider-using-with,unnecessary-pass
 from __future__ import annotations
 from collections import defaultdict
 from contextlib import contextmanager
@@ -28,10 +28,10 @@ class JTypeError(JError, TypeError):
 
 #-----------------------------------------------------------------------------
 try:
-    from bitarray import bitarray # pylint: disable=unused-import
+    from bitarray import bitarray
 except ImportError: # pragma: no cover
     try:
-        (0).bit_count #pylint: disable=pointless-statement
+        (0).bit_count
         def _popcount(buf: bytearray) -> int:
             return int.from_bytes(buf, 'little').bit_count()
 
@@ -113,11 +113,9 @@ except ImportError: # pragma: no cover
 
 #-----------------------------------------------------------------------------
 
-# pylint: disable=too-few-public-methods
 class JDbBase(metaclass=ABCMeta): # pragma: no cover
     pass
 
-# pylint: disable=too-few-public-methods
 class JIoBase(metaclass=ABCMeta): # pragma: no cover
     pass
 
@@ -401,7 +399,7 @@ class FileLockException(BlockingIOError):
     * A lock acquisition is attempted after the :class:`FileLock` has
       been closed or is being destroyed (mode ``'x'``).
     """
-    pass # pylint: disable=unnecessary-pass
+    pass
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -508,7 +506,7 @@ class FileLock:
             shutdown sequence completed.  ``False`` if the mutex itself
             could not be acquired (should not happen in practice).
         """
-        if not self._lock.acquire(): # pylint: disable=consider-using-with
+        if not self._lock.acquire():
             return False
 
         try:
@@ -689,7 +687,7 @@ class FileLock:
                 another thread or process, or if the lock has been closed
                 (mode ``'x'``).
         """
-        if not self._lock.acquire(): # pylint: disable=consider-using-with
+        if not self._lock.acquire():
             raise RuntimeError
 
         try:
@@ -792,7 +790,7 @@ class FileLock:
                         os_err = ex
 
                     finally:
-                        self._lock.acquire() # pylint: disable=consider-using-with
+                        self._lock.acquire()
                         if self._mode == 'p': # pragma: no cover
                             self._mode = ''
 
@@ -843,7 +841,7 @@ class FileLock:
         Raises:
             RuntimeError: If the internal threading mutex cannot be acquired.
         """
-        if not self._lock.acquire(): # pylint: disable=consider-using-with
+        if not self._lock.acquire():
             raise RuntimeError
 
         try:

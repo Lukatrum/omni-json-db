@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines, multiple-imports
+# pylint: disable=too-many-lines, multiple-imports, W0640, cell-var-from-loop
 import unittest, time, random, threading, inspect, re, os, io
 import datetime as dt
 import sqlite3
@@ -1627,7 +1627,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(user._date.not_in({prev_date3, prev_date1}), with_value=True)
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
-            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1)) # pylint: disable=W0640
+            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1))
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
             # -------------------------------------
@@ -1763,7 +1763,7 @@ class TestJDb(unittest.TestCase):
             res = jdb.find(user._date.not_in({prev_date3, prev_date1}), with_value=True)
             self.assertEqual(set(res), {'user_1', 'user_3'})
 
-            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1)) # pylint: disable=W0640
+            res = jdb.find(user._date.test(lambda cdate,mdate: cdate < today and mdate >= prev_date1))
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
             #------------------------------------
@@ -2435,10 +2435,10 @@ class TestJDb(unittest.TestCase):
             res1 = jmem.show(vals={'$date': {'$and':[{'$ne': dt_2005}, {'$ne': dt_2015}]}}, with_date=True)
             self.assertEqual({f'users:::{kk}':vv for kk,vv in res.items()}, res1)
 
-            res = jdb.find(date=lambda cdate,mdate: cdate < today and mdate >= prev_date1) # pylint: disable=W0640
+            res = jdb.find(date=lambda cdate,mdate: cdate < today and mdate >= prev_date1)
             self.assertEqual(set(res), {'user_1', 'user_2'})
 
-            res2 = jdb.find(date={'$func': lambda cdate,mdate: mdate >= prev_date1}) # pylint: disable=W0640
+            res2 = jdb.find(date={'$func': lambda cdate,mdate: mdate >= prev_date1})
             self.assertEqual(res, res2)
 
             #------------------------------------
@@ -3395,7 +3395,7 @@ class TestJDb(unittest.TestCase):
                 return val
 
             # add 'database' to tags for matched records
-            jdb[matches_2] = lambda key,val: add_tag(key, val, 'database') #pylint: disable=cell-var-from-loop
+            jdb[matches_2] = lambda key,val: add_tag(key, val, 'database')
             matches = jdb.find(ANY={'$2': 'database'})
             self.assertEqual({vv['name'] for vv in matches.values()}, {'Charlie'})
             # --------------------------------------
@@ -5030,7 +5030,7 @@ class TestJDb(unittest.TestCase):
             _vals = ['x', 'b', 'c', 'd']
             chg = jdb.insert_vals(_vals)
             self.assertEqual(_size+len(chg), len(jdb))
-            self.assertEqual(len(jdb[lambda k,v:v in _vals]), len(chg)) # pylint: disable=W0640
+            self.assertEqual(len(jdb[lambda k,v:v in _vals]), len(chg))
 
             sync_id = jdb.sync_id
             expect = {f'{kk}':'Hello' for kk in range(100, 120)}
@@ -8619,8 +8619,8 @@ class TestJDb(unittest.TestCase):
             for key,info in jdb.keys.item_iter(re.compile(r'k[34]$')):
                 self.assertEqual(info[-2], str(yesterday))
 
-            matches = jdb.keys[lambda key,info:info[-1] == str(yesterday)]  # pylint: disable=W0640
-            jdb.keys[lambda key,info:info[-2] == str(yesterday)] = today  # pylint: disable=W0640
+            matches = jdb.keys[lambda key,info:info[-1] == str(yesterday)]
+            jdb.keys[lambda key,info:info[-2] == str(yesterday)] = today
             for key,info in jdb.keys.item_iter(lambda key:key.endswith(('k3', 'k4'))):
                 self.assertEqual(info[-2], str(today))
 

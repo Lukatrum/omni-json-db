@@ -1,4 +1,4 @@
-# pylint: disable=ungrouped-imports,too-many-lines,W1514,R1732
+# pylint: disable=ungrouped-imports,too-many-lines,chained-comparison,too-few-public-methods,W1514,R1732,W0201
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from io import RawIOBase
@@ -118,7 +118,7 @@ except ImportError:
     _LOCK_BYTES_LOW   = 0x00000001
     _LOCK_BYTES_HIGH  = 0x00000000
 
-    class _OVERLAPPED(ctypes.Structure): # pylint: disable=too-few-public-methods
+    class _OVERLAPPED(ctypes.Structure):
         _fields_ = [
             ('Internal',     ctypes.c_void_p),
             ('InternalHigh', ctypes.c_void_p),
@@ -153,8 +153,8 @@ except ImportError:
     def _win_overlapped() -> _OVERLAPPED:
         """Build an OVERLAPPED struct pointing at the fixed lock region (offset 0)."""
         ov = _OVERLAPPED()
-        ov.Offset = _LOCK_OFFSET_LOW        # pylint: disable=W0201
-        ov.OffsetHigh = _LOCK_OFFSET_HIGH   # pylint: disable=W0201
+        ov.Offset = _LOCK_OFFSET_LOW
+        ov.OffsetHigh = _LOCK_OFFSET_HIGH
         return ov
 
     def _win_lock(fd:int, exclusive:bool, block:bool):
@@ -372,7 +372,7 @@ class JBytesIO(RawIOBase):
                 break
             lines.append(line)
             total_read += len(line)
-            if hint is not None and hint > 0 and total_read >= hint: # pylint: disable=chained-comparison
+            if hint is not None and hint > 0 and total_read >= hint:
                 break
 
         return lines
