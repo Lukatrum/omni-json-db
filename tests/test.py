@@ -7224,7 +7224,7 @@ class TestJDb(unittest.TestCase):
             jdb.clear()
             self.assertEqual(jdb, expect)
 
-            jdb.clear(agree='yes', wait_sec=0.1)
+            jdb.clear(agree='yes', wait_sec=1)
             self.assertNotEqual(jdb, expect)
             self.assertEqual(len(jdb.file_table), 0)
             self.assertEqual(len(jdb), 0)
