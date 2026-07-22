@@ -5,6 +5,8 @@ from io import RawIOBase
 from struct import Struct
 from socket import socket, AF_INET, SOCK_STREAM
 from threading import RLock
+from re import match as re_match
+from sys import is_finalizing as sys_is_finalizing
 from typing import Optional, Union, Tuple, IO
 #-----------------------------------------------------------------------------
 from msgpack import packb as msg_dumps, unpackb as msg_loads
@@ -128,7 +130,7 @@ class JNetIO(RawIOBase):
         if not hasattr(sock, 'getsockname'): # pragma: no cover
             raise TypeError
 
-        if not isinstance(file, str) or not file[:4] in {'KEY', 'LCK', 'VAL.'}: # pragma: no cover
+        if not isinstance(file, str) or not file.partition('@')[0][:4] in {'KEY', 'LCK', 'VAL.'}: # pragma: no cover
             raise TypeError
 
         super().__init__()
@@ -198,12 +200,15 @@ class JNetIO(RawIOBase):
         """Disconnect and release the remote file handle on the server."""
         with self.lock:
             if self.closed or self.not_found: return # pragma: no cover
-            try:
-                self.__exec('close', pre_check=False)
-            except FileNotFoundError: # pragma: no cover
-                self.not_found = True
-            except ValueError: # pragma: no cover
-                pass
+            # during interpreter shutdown the server's daemon handler threads
+            # may already be frozen; a remote round-trip would block forever
+            if not sys_is_finalizing():
+                try:
+                    self.__exec('close', pre_check=False)
+                except FileNotFoundError: # pragma: no cover
+                    self.not_found = True
+                except (ValueError, OSError): # pragma: no cover
+                    pass
 
             super().close()
 
@@ -471,20 +476,34 @@ class JNetFiles(JFilesBase):
 
     Routes file system operations to a remote `ThreadedTCPServer` database instance.
     """
-    __slots__ = ('server_addr', 'sock')
+    __slots__ = ('server_addr', 'sock', 'group_path')
 
-    def __init__(self, address:Tuple[str,int]=('127.0.0.1', 59898)):
+    def __init__(self, address:Tuple[str,int]=('127.0.0.1', 59898), group_path:Union[str,Tuple[str,...]]=()):
         """Initialize the network database client.
 
         Args:
             address (Tuple[str, int], optional): A tuple containing the host IP and port. 
                 Defaults to ``('127.0.0.1', 59898)``.
+            group_path (str | Tuple[str, ...], optional): The nested group namespace this
+                client operates on, e.g. ``('group_a',)`` or ``'group_a/group_b'``.
+                An empty tuple targets the server's root database. Defaults to ``()``.
 
         Raises:
+            KeyError: If a group name violates the ``[0-9A-Za-z_]+`` constraint.
             RuntimeError: If the socket connection fails.
         """
+        if isinstance(group_path, str):
+            group_path = tuple(part for part in group_path.split('/') if part)
+        else:
+            group_path = tuple(group_path)
+
+        for part in group_path:
+            if not re_match(r'^[0-9A-Za-z_]+$', part):
+                raise KeyError(part)
+
         self.lock = RLock()
         self.server_addr = address
+        self.group_path = group_path
         self.sock = None
         try:
             sock = socket(AF_INET, SOCK_STREAM)
@@ -507,18 +526,31 @@ class JNetFiles(JFilesBase):
         except:
             local_port = -1
 
-        return f'<{type(self).__name__} {local_port} <-> s:{self.server_addr} at {hex(id(self))}>'
+        group_s = f' grp:{"/".join(self.group_path)}' if self.group_path else ''
+        return f'<{type(self).__name__} {local_port} <-> s:{self.server_addr}{group_s} at {hex(id(self))}>'
 
     def __eq__(self, obj:JNetFiles) -> bool:
-        """Check if two network clients point to the same server address.
+        """Check if two network clients point to the same server address and group.
 
         Args:
             obj (Any): The candidate client to compare.
 
         Returns:
-            bool: ``True`` if the server addresses match exactly.
+            bool: ``True`` if the server addresses and group paths match exactly.
         """
-        return isinstance(obj, JNetFiles) and self.server_addr == obj.server_addr
+        return isinstance(obj, JNetFiles) and self.server_addr == obj.server_addr and self.group_path == obj.group_path
+
+    def _remote_file(self, name:str) -> str:
+        """Build the remote file identity for this client's group namespace.
+
+        Args:
+            name (str): Base file identity (``'KEY'``, ``'VAL.0'``, ``'LCK'``).
+
+        Returns:
+            str: ``name`` for the root database, or ``'name@grp_a/grp_b'`` for groups.
+        """
+        group_path = self.group_path
+        return f'{name}@{"/".join(group_path)}' if group_path else name
 
     def get_KEY(self) -> str:
         """Get the primary identifier path for the remote database index.
@@ -532,7 +564,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_KEY', (), {}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'get_KEY', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -554,7 +586,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_folder', (), {}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'get_folder', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -576,7 +608,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_name', (), {}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'get_name', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -601,7 +633,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'get_path', (), {'folder':folder}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'get_path', (), {'folder':folder}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -621,7 +653,7 @@ class JNetFiles(JFilesBase):
             IOError: If the original socket is closed.
         """
         if self.sock and not self.sock._closed:
-            return JNetFiles(self.server_addr)
+            return JNetFiles(self.server_addr, group_path=self.group_path)
 
         raise IOError
 
@@ -637,7 +669,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'fsync', (), {'fd':fd}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'fsync', (), {'fd':fd}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -661,10 +693,16 @@ class JNetFiles(JFilesBase):
             IOError: If the network socket is disconnected.
             ValueError: If the remote command fails.
         """
+        if isinstance(KEY_file, JNetFiles):
+            # resolve locally: a child is this database's group when it targets
+            # the same server and its group path extends ours by exactly `name`
+            return KEY_file.server_addr == self.server_addr and \
+                    KEY_file.group_path == self.group_path + (name,)
+
         with self.lock:
             if self.sock and not self.sock._closed:
                 KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
-                dump_and_send(self.sock, ('KEY', 'is_group', (), {'KEY_file':KEY_file, 'name':name}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'is_group', (), {'KEY_file':KEY_file, 'name':name}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -674,19 +712,26 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
-    def create_group(self, name:str) -> JFilesBase:
-        """Attempt to spawn a child group over the network.
+    def create_group(self, name:str) -> JNetFiles:
+        """Create a network client bound to a child group on the remote server.
+
+        The group's physical files are created lazily by the server (via its
+        own backend's ``create_group``) the first time they are accessed.
 
         Args:
-            name (str): The group namespace.
+            name (str): The group namespace; must match ``[0-9A-Za-z_]+``.
+
+        Returns:
+            JNetFiles: A new client whose commands target the child group.
 
         Raises:
-            RuntimeError: Always raised, as remote multi-group creation is disallowed.
+            KeyError: If ``name`` violates the group naming constraints.
             IOError: If the network socket is disconnected.
+            RuntimeError: If the new socket connection fails.
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                raise RuntimeError
+                return JNetFiles(self.server_addr, group_path=self.group_path + (name,))
 
             raise IOError
 
@@ -706,7 +751,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                return JNetIO(self.sock, 'KEY', mode=mode, buffering=buffering, lock=self.lock, **kwargs)
+                return JNetIO(self.sock, self._remote_file('KEY'), mode=mode, buffering=buffering, lock=self.lock, **kwargs)
 
             raise IOError
 
@@ -727,7 +772,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                return JNetIO(self.sock, f'VAL.{file_id}', mode=mode, buffering=buffering, lock=self.lock, **kwargs)
+                return JNetIO(self.sock, self._remote_file(f'VAL.{file_id}'), mode=mode, buffering=buffering, lock=self.lock, **kwargs)
 
             raise IOError
 
@@ -746,7 +791,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'remove', (), {}))
+                dump_and_send(self.sock, (self._remote_file(f'VAL.{file_id}'), 'remove', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -771,7 +816,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'exist', (), {}))
+                dump_and_send(self.sock, (self._remote_file(f'VAL.{file_id}'), 'exist', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -796,7 +841,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (f'VAL.{file_id}', 'size', (), {}))
+                dump_and_send(self.sock, (self._remote_file(f'VAL.{file_id}'), 'size', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -818,7 +863,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'size', (), {}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'size', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -840,7 +885,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('KEY', 'date', (), {}))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'date', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -862,7 +907,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'rlock', (block,), {}))
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'rlock', (block,), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -884,7 +929,7 @@ class JNetFiles(JFilesBase):
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'wlock', (block,), {}))
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'wlock', (block,), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -901,9 +946,12 @@ class JNetFiles(JFilesBase):
             BlockingIOError: If the unlock command is rejected.
             RuntimeError: If a general connection or internal state error occurs.
         """
+        if sys_is_finalizing(): # pragma: no cover
+            return
+
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'unlock', (), {}))
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'unlock', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
@@ -915,10 +963,15 @@ class JNetFiles(JFilesBase):
 
     def LCK_close(self): # pragma: no cover
         """Safely close lock channels to prevent remote resource starvation."""
+        if sys_is_finalizing():
+            # server daemon threads are frozen during interpreter shutdown;
+            # a remote round-trip would block forever (e.g. via FileLock.__del__)
+            return
+
         with self.lock:
             if self.sock and not self.sock._closed:
                 try:
-                    dump_and_send(self.sock, ('LCK', 'close', (), {}))
+                    dump_and_send(self.sock, (self._remote_file('LCK'), 'close', (), {}))
                     resp = recv_and_load(self.sock)
 
                     if resp.get('ok'):
@@ -933,9 +986,12 @@ class JNetFiles(JFilesBase):
         Raises:
             RuntimeError: If the network socket is disconnected or fails.
         """
+        if sys_is_finalizing():
+            return
+
         with self.lock:
             if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, ('LCK', 'remove', (), {}))
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'remove', (), {}))
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):

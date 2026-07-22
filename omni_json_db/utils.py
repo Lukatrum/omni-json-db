@@ -296,7 +296,6 @@ class INT_Handler:
     def __init__(self):
         """Set up the deferred SIGINT handler and install it as the process SIGINT handler."""
         self.count = 0
-        self.count = 0
         self.lock = Lock()
         self.call_flag = Event()
         signal(SIGINT, self.handler)

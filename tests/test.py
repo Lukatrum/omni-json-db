@@ -1465,19 +1465,17 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb - {'server/host', 'server/port'}, {'/app_name', 'network/ip', 'network/port'})
             self.assertEqual(jdb['network/port'], 8181)
 
-            if not isinstance(jdb.files_obj, JNetFiles):
-                # JNetFiles does not support group
-                jdb.from_sqlite(db_path)
-                project_jdb = jdb.get_group('projects')
-                log_jdb = jdb.get_group('project_logs')
-                self.assertEqual(project_jdb, jdb['projects'])
-                self.assertEqual(log_jdb, jdb['project_logs'])
-                self.assertEqual(len(log_jdb), 4, Style(f'{filename}:{jdb}', red=1))
-                self.assertEqual(len(project_jdb), 3)
-                self.assertEqual(project_jdb[3]['name'], 'coding')
-                self.assertEqual(project_jdb[3]['name'], 'coding')
-                logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
-                self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
+            jdb.from_sqlite(db_path)
+            project_jdb = jdb.get_group('projects')
+            log_jdb = jdb.get_group('project_logs')
+            self.assertEqual(project_jdb, jdb['projects'])
+            self.assertEqual(log_jdb, jdb['project_logs'])
+            self.assertEqual(len(log_jdb), 4, Style(f'{filename}:{jdb}', red=1))
+            self.assertEqual(len(project_jdb), 3)
+            self.assertEqual(project_jdb[3]['name'], 'coding')
+            self.assertEqual(project_jdb[3]['name'], 'coding')
+            logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
+            self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -3617,10 +3615,6 @@ class TestJDb(unittest.TestCase):
             jmem['1st'] = jdb
             jmem.files_obj.is_group(jdb1.files_obj, '1st')
             jdb.files_obj.is_group(jmem.files_obj, '1st')
-            if isinstance(jdb.files_obj, JNetFiles):
-                with self.assertRaises(RuntimeError):
-                    gp_a = jdb.add_group('group_a')
-                continue
 
             jdb0 = jmem.pop('1st', None)
             self.assertEqual(jdb0, jdb)

@@ -585,6 +585,7 @@ class JBytesIO(RawIOBase):
         return bytes(self.buf)
 
     def fileno(self) -> int:
+        """Return -1 (no real OS file descriptor backs this in-memory stream)."""
         return -1
 
 #---------------------------------------------------------------------
@@ -643,7 +644,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
 class JMemFiles(JFilesBase):
     """In-memory virtual filesystem backend for transient database operations.
 
-    Manages layout matrices and dataset segments entirely within RAM using 
+    Manages the KEY index and VAL data entirely within RAM using
     mutable bytearrays, bypassing physical storage devices.
     """
     __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond')
@@ -708,7 +709,7 @@ class JMemFiles(JFilesBase):
         """Generate a string representation of the memory file state.
 
         Returns:
-            str: Diagnostic telemetry regarding memory allocations.
+            str: A diagnostic summary of the in-memory buffers.
         """
         return f'<{type(self).__name__} KEY{self.get_KEY()}:{len(self.KEY_file)}@{hex(id(self.KEY_file))} +{len(self.VAL_table)} at {hex(id(self))}>'
 
@@ -716,10 +717,10 @@ class JMemFiles(JFilesBase):
         """Check if two memory instances share the exact same underlying key buffer.
 
         Args:
-            obj (Any): Target entity evaluation candidate.
+            obj (Any): The object to compare against.
 
         Returns:
-            bool: ``True`` if both objects wrap the identical in-memory bytearray.
+            bool: ``True`` if ``obj`` is a :class:`JMemFiles` with the same ``KEY_file`` contents.
         """
         return isinstance(obj, JMemFiles) and obj.KEY_file == self.KEY_file
 
@@ -751,7 +752,7 @@ class JMemFiles(JFilesBase):
         """Resolve the path mapping for the file.
 
         Args:
-            folder (str, optional): Target layer customization. Defaults to ``''``.
+            folder (str, optional): Ignored (kept for interface parity). Defaults to ``''``.
 
         Returns:
             str: Always an empty string ``''`` in transient memory environments.
@@ -937,7 +938,7 @@ class JMemFiles(JFilesBase):
                 If ``False``, raise immediately. Defaults to ``False``.
     
         Raises:
-            BlockingIOError: If active transaction records indicate overlapping activities.
+            BlockingIOError: If a reader or writer lock is currently held by another thread.
             RuntimeError: If the lock file has been marked as closed/removed.
         """
         current_id = id(self)
@@ -1048,7 +1049,7 @@ class JDiskFiles(JFilesBase):
         """Generate string descriptions summarizing the active driver configuration.
 
         Returns:
-            str: Identity properties presenting the target file layout.
+            str: A diagnostic summary including the target file path.
         """
         return f'<{type(self).__name__} KEY:{self.file_name} at {hex(id(self))}>'
 
@@ -1056,10 +1057,10 @@ class JDiskFiles(JFilesBase):
         """Evaluate if two disk drivers point to the same physical file.
 
         Args:
-            obj (Any): Candidate comparison storage manager instance.
+            obj (Any): The object to compare against.
 
         Returns:
-            bool: ``True`` if path coordinates precisely match.
+            bool: ``True`` if ``obj`` is a :class:`JDiskFiles` pointing to the same KEY file path.
         """
         return isinstance(obj, JDiskFiles) and obj.KEY_file == self.KEY_file
 
@@ -1243,10 +1244,10 @@ class JDiskFiles(JFilesBase):
             raise
 
     def KEY_size(self) -> int:
-        """Extract baseline UNIX timestamp marking index file creation/modification.
+        """Get the size, in bytes, of the KEY index file.
 
         Returns:
-            int: The integer timestamp log from the file system metadata.
+            int: The file size in bytes, or 0 if the file doesn't exist.
         """
         if path_exists(self.KEY_file):
             file_stat = os_stat(self.KEY_file)
@@ -1255,10 +1256,10 @@ class JDiskFiles(JFilesBase):
         return 0
 
     def KEY_date(self) -> int:
-        """Extract baseline system epoch unix registration modification timelines indices numbers from files metadata fields layers.
+        """Get the UNIX timestamp (ctime) of the KEY index file.
 
         Returns:
-            int: Numerical sequence timestamp logging phase alteration points timelines historical shifts.
+            int: The timestamp, or 0 if the file doesn't exist.
         """
         if path_exists(self.KEY_file):
             file_stat = os_stat(self.KEY_file)

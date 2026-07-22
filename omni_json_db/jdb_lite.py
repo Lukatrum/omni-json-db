@@ -1010,7 +1010,7 @@ class JDbReader(JDbBase):
             min_value_size (Optional[int], optional): Minimum byte size for value padding.
             index_size (Optional[int], optional): Fixed byte size for the key index records.
             reserved_rate (Optional[float], optional): Expansion buffer rate for data rows.
-            api_ver (Optional[int], optional): API structural version limit.
+            api_ver (Optional[int], optional): API version to use.
                 
                 - 0 = oldest version.
                 - None = latest version. (default)
