@@ -81,15 +81,17 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 | Network mode (incl. groups)      | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Relative speed 500K records [a]_ | 1.00x (baseline)  | 41.47x    | 60.95x    |  4.28x  | 0.94x      | 0.45x     | 0.13x     | 0.21x     |
+| Relative speed 500K records [x]_ | 1.00x (baseline)  | 41.47x    | 60.95x    |  4.28x  | 0.94x      | 0.45x     | 0.13x     | 0.21x     |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Relative speed 10M records [a]_  | 1.00x (baseline)  | N/A [b]_  | N/A [b]_  | 24.07x  | 1.31x      | 0.55x     | 0.16x     | 0.05x     |
+| Relative speed 10M records [x]_  | 1.00x (baseline)  | N/A [y]_  | N/A [y]_  | 24.07x  | 1.31x      | 0.55x     | 0.16x     | 0.05x     |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 
-**omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
+.. [x] Lower is faster
+.. [y] Impractically slow
 
-.. [1] Lower is faster
-.. [b] Impractically slow
+..
+
+   **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
 
  
 🚀 Features
