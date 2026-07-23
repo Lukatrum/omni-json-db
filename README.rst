@@ -106,7 +106,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network. [refer to `In-memory Mode`_ + `Network Mode`_ ]
 
-*  **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
+* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
 
 * **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, INI, and TOML with simple commands. [refer to `CSV Import / Export`_ + `SQLite Import`_ + `INI / TOML Import`_]
 
@@ -137,7 +137,7 @@ Basic
 
    from omni_json_db import JDb
    # Initialize the database from file
-   # Key-Value is Json+mSgpack without compression
+   # Key-Value is Json+MsgPack without compression
    jdb = JDb("example.jdb")
 
    # Store data
@@ -156,7 +156,7 @@ In-Memory Mode
 
    from omni_json_db import JDb
    # Initialize the database in memory
-   # Key-Value is Json+mSgpack without compression
+   # Key-Value is Json+MsgPack without compression
    jdb1 = JDb()
 
    # Store data
@@ -206,7 +206,7 @@ Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, 
 
 Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``, ``NEG``, ``STR``, ``AVG``, ``STD``, ``MAX``, ``MID``, ``MIN``, ``SUM``, ``FIRST``, ``LAST``, ``LEN``, ``SORT``, ``UNIQUE``, ``LOWER``, ``UPPER``, ``STRIP``.
 
-Know `More Query Examples`_ or `Pythonic Query Examples`_
+See `More Query Examples`_ or `Pythonic Query Examples`_
 
 Unremove & Unmodify
 -------------------
@@ -243,7 +243,7 @@ Backup & Restore
 
    from omni_json_db import JDb
    # Initialize the database from file
-   # Key-Value is mSgpack+Json with Bzip2 compression
+   # Key-Value is MsgPack+Json with Bzip2 compression
    jdb = JDb("fruit.jdb", data_type="S+J", zip_type='bz')
 
    # Add fruit to jdb
@@ -270,7 +270,7 @@ Groups Mode
 
    from omni_json_db import JDb
    # Initialize the database from file
-   # Key-Value is Json+mSgpack with no compression
+   # Key-Value is Json+MsgPack with no compression
    jdb = JDb('fruit_group.jdb')
 
    # add red group
@@ -623,7 +623,7 @@ Operator
 
    from omni_json_db import JDb
    # Initialize the database in memory
-   # Key+Value is mSgpack+mSgpack with lz4 compression
+   # Key+Value is MsgPack+MsgPack with lz4 compression
    jdb = JDb(data_type="S+S(lz)")
 
    # [1] KEY+VAL operators
@@ -1420,7 +1420,7 @@ Advanced
 
    from omni_json_db import JDb
    # Initialize the database in memory
-   # Key-Value is Json+mSgpack with no compression
+   # Key-Value is Json+MsgPack with no compression
    jdb = JDb()
 
    fruits = {'apple':'red', 'banana':'yellow', 'mango':'yellow', 'lemon':'yellow', 'tomato':'red'}

@@ -87,7 +87,7 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
             **kwargs: Extra arguments passed through to :class:`socketserver.TCPServer`.
 
         Raises:
-            TypeError: If ``files_obj`` is not a :class:`JFilesBase`.
+            TypeError: If ``jdb`` is not a :class:`JDbReader`.
         """
         super().__init__(server_address, ServerHandler if RequestHandlerClass is None else RequestHandlerClass, bind_and_activate, **kwargs)
 
@@ -408,7 +408,7 @@ class ServerHandler(BaseRequestHandler):
                             resp['ret'] = False
 
                     elif fp is None or fp.closed:
-                        if cmd not in ('close', 'flush'):
+                        if cmd not in ('close', 'flush'): # pragma: no cover
                             if verbose >= 1:
                                 print(Style(f'[FAIL|{client}]{file}: no file object: {packet}', yellow=1))
                             resp.update(ok=False, err=JErrCode.INVALID_VAL) # ValueError

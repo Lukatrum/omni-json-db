@@ -21,56 +21,66 @@ Python syntax — slicing, lambdas, regex, and ``set`` operations — to query a
 manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
 engine, and pluggable serialization/compression.
 
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-|                                   | **omni-json-db**  | TinyDB    | SQLite    | DuckDB    |
-+===================================+===================+===========+===========+===========+
-| No schema (Schema-less)           | ✅                | ✅        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Pythonic queries                  | ✅                | ✅        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Deep nested search                | ✅                | ❌        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Graph database engine             | ✅                | ❌        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Undo / Redo (Time-Travel)         | ✅                | ❌        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Network mode                      | ✅                | ❌        | ❌        | ❌        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Compression built-in              | ✅ (6 algorithms) | ❌        | ❌        | ✅ (Auto) |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
-| Thread-safe concurrency           | ✅ (MR/SW)        | ❌        | ✅        | ✅        |
-+-----------------------------------+-------------------+-----------+-----------+-----------+
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+|                                  | **omni-json-db**  | TinyDB    | DiskCache | UnQLite | LMDB       | RocksDict | SQLite    | DuckDB    |
++==================================+===================+===========+===========+=========+============+===========+===========+===========+
+| Transactions / ACID              | ⚠️ (atomic ops)   | ❌        | ❌        | ❌      | ✅         | ✅        | ✅        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Thread-safe concurrency          | ✅ (MR/SW)        | ❌        | ✅        | ✅      | ✅         | ✅        | ✅        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Multi-process access             | ✅ (file lock)    | ❌        | ✅        | ✅      | ✅         | ⚠️ (RO)   | ✅        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| In-memory mode                   | ✅                | ✅        | ❌        | ✅      | ❌         | ❌        | ✅        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| CSV / SQLite migration built-in  | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ⚠️ (CLI)  | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Compression built-in             | ✅                | ❌        | ✅        | ❌      | ❌         | ✅        | ❌        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| No schema (Schema-less)          | ✅                | ✅        | ✅        | ✅      | ✅         | ✅        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Groups / Namespaces              | ✅                | ✅        | ⚠️        | ✅      | ✅         | ✅        | ✅        | ✅        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Nested groups + fan-out queries  | ✅                | ⚠️ (flat) | ❌        | ⚠️      | ⚠️ (flat)  | ⚠️ (CF)   | ⚠️ (SQL)  | ⚠️ (SQL)  |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Pure Python (PyPy-friendly)      | ✅                | ✅        | ✅        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Pythonic queries (Lambda/Regex)  | ✅                | ✅        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Deep nested search               | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Graph database engine            | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Undo / Redo (Time-Travel)        | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Time-series date slicing         | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+| Network mode (incl. groups)      | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
++----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 
  **omni-json-db** has been tested with Python 3.7+ and PyPy3.
 
 
 Features
 --------
-* **Native Graph Database Engine**: Transform your Key-Value store into a powerful Property Graph! The new ``GraphDb`` layer provides seamless node and edge management, O(1) adjacency indexing, and built-in classic graph algorithms (BFS/Dijkstra shortest paths, DFS traversal, cycle detection, topological sorting, and connected components) without compromising the extreme speed of the underlying engine.
+* **Native Graph Engine**: Transform your Key-Value store into a Property Graph. The ``GraphDb`` layer supports O(1) adjacency indexing and classic algorithms (BFS, Dijkstra, DFS, cycle detection) without sacrificing performance.
 
-* **Deeply Pythonic**: Forget SQL! Interact with your database using standard Python ``dict`` methods, slicing, and even ``set`` operations. 
+* **Pythonic Interaction**: Interact with data using familiar Python ``dict`` methods, list slicing, and set operations, avoiding complex SQL queries.
 
-* **Dynamic Serialization & Advanced Compression**: Mix and match JSON(*orjson*), MsgPack(*ormsgpack*), Marshal, Pickle and YAML with advanced compression algorithms like LZ4, Zstandard (z1/z2/zs), Brotli, and Bzip2 to perfectly balance I/O speed and disk footprint.
+* **Advanced Serialization & Compression**: Combine formats (JSON, MsgPack, Pickle, YAML) with algorithms like LZ4, Zstandard, or Brotli to optimize your I/O and disk usage.
 
-* **Powerful Query Engine**: Powerful Query Engine: Search effortlessly using Regular Expressions (Regex), Lambda filters (``jdb[lambda k, v: v > 10]``), and rich condition operators (``EQ``, ``NE``, ``GT``, ``GTE`` ``LT``, ``LTE``, ``IN``, ``HAS``, ``RE``, ``RE2``, ``SIZE``, ``FUNC``, ``ANY``).
+* **Powerful Query Engine**: Execute searches via Regex, Lambda filters, and rich operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``, ...).
+
+* **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network.
+
+* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``).
+
+* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, INI, and TOML with simple commands.
+
+* **Time-Series Ready**: Native timestamping allows for efficient date-based slicing (e.g., ``jdb[yesterday:now]``).
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed.
 
-* **Network Mode** (``JNetFiles``): Transform a local **omni-json-db** instance into a networked service with a single command using ``run_files_server()``.
-
-* **In-Memory Mode** (``JMemFiles``): Run the entire database in RAM for high performance (ideal for real-time caches or volatile session storage).
-
-* **"Time-Travel" & Rollbacks**: The database tracks internal states, allowing you to undo modifications (``unmodify()``) or recover deleted data (``unremove()``). Accidentally deleted a record? One line of code brings it back.
-
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups.
 
-* **Native CSV Support**: Built-in hooks for ``DictReader`` and ``DictWriter`` allow you to import massive datasets from *CSV* files or export your **omni-json-db** collections for analysis in *Excel* or *Pandas*.
-
-* **Seamless Data Migration**: Import and export with a single line of code! The built-in conversion engine effortlessly transforms relational databases (*SQLite*) into *NoSQL* grouped structures. It also natively supports parsing structured configuration files (*INI*, *TOML*) and handling complex *CSV* datasets, making data migration and integration a breeze.
-
-* **Time-Series Support:**: Every record is timestamped, unlocking powerful date-based slicing. For example, grab all records modified since yesterday with ``jdb[yesterday:now]``.
-
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism.
-
-* **~100% test coverage**
 

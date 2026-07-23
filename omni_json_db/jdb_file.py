@@ -1295,7 +1295,7 @@ class JDiskFiles(JFilesBase):
         Args:
             block (bool, optional): If ``True``, block until the lock becomes available. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
-    
+
         Raises:
             BlockingIOError: If an exclusive writer is currently active.
         """
@@ -1307,7 +1307,7 @@ class JDiskFiles(JFilesBase):
         Args:
             block (bool, optional): If ``True``, block until the lock becomes available. 
                 If ``False``, attempt non-blocking mode. Defaults to ``False``.
-    
+
         Raises:
             BlockingIOError: If existing active transactions (readers or writers) overlap.
         """

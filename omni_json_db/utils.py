@@ -859,7 +859,7 @@ class FileLock:
                         self._unlock()
                     except OSError as e1: # pragma: no cover
                         print(e1)
-                    self._mode =  ''
+                    self._mode = ''
                     self._cond.notify_all()
 
             return ident

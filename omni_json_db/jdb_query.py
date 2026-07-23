@@ -71,7 +71,7 @@ QUERY_OPS = frozenset({
     'SW',           # {'$sw': chk}                          # Value.startswith(chk)
                     # {'$sw': (...)}                        # Value.startswith((...))
     'EW',           # {'$ew': chk}                          # Value.endswith(chk)
-                    # {'$sw': (...)}                        # Value.endswith((...))
+                    # {'$ew': (...)}                        # Value.endswith((...))
     'ANYIN',        # {'$anyin': {...}}                     # any(kk in Value for kk in {...})
     'NAND',         # {'$nand': [A, B, ..]}                 # not (A and B and ..)
                     # {'!$and': [A, B, ..]}

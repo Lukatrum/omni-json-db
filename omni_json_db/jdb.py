@@ -62,7 +62,7 @@ class JDbKey2(JDbKey):
             is_matched = key
             k_arg_cnt = is_matched.__code__.co_argcount
             if not 2 >= k_arg_cnt >= 1:
-                raise TypeError('invalid function {k_arg_cnt}')
+                raise TypeError(f'invalid function {k_arg_cnt}')
 
         else:
             is_matched = None
@@ -5002,7 +5002,7 @@ class JDb(JDbReader):
             # network parent: push the child into a server-side group so that
             # other clients and the server share the same storage
             group_jdb = self.create_jdb(self.files_obj.create_group(name))
-            for _key in child:
+            for _key in child: # pragma: no cover
                 group_jdb[_key] = child[_key]
 
             jio.groups[name] = group_jdb
