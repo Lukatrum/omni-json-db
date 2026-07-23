@@ -39,11 +39,11 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
         >>> server.shutdown()
     """
     if files is None or isinstance(files, bytearray):
-        files_obj = JMemFiles(files)
+        jdb = JDb(JMemFiles(files))
     elif isinstance(files, JDbReader): # pragma: no cover
-        files_obj = files.files_obj
+        jdb = files
     elif isinstance(files, JFilesBase): # pragma: no cover
-        files_obj = files
+        jdb = JDb(files)
     elif isinstance(files, str):
         if re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', files): # pragma: no cover
             server_ip, server_port = files.split(':')
@@ -51,17 +51,17 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
             if not 65535 >= server_port > 0 or not all(255 > int(vv) >= 0 for vv in server_ip.split('.')):
                 raise TypeError
 
-            files_obj = JNetFiles((server_ip, server_port))
+            jdb = JDb(JNetFiles((server_ip, server_port)))
         else:
-            files_obj = JDiskFiles(files) if files else JMemFiles()
+            jdb = JDb(JDiskFiles(files) if files else JMemFiles())
     else:
         raise TypeError
 
-    if not isinstance(files_obj, JFilesBase):
+    if not isinstance(jdb, JDbReader):
         raise TypeError
 
-    print(f'starting server at {host}:{port} -> {files_obj} (files={type(files)})')
-    server = ThreadedTCPServer((host, port), ServerHandler, files_obj=files_obj, verbose=verbose)
+    print(f'starting server at {host}:{port} (JDb={jdb})')
+    server = ThreadedTCPServer((host, port), ServerHandler, jdb=jdb, verbose=verbose)
     thd = Thread(target=server.serve_forever, daemon=True)
     thd.start()
     return server
@@ -75,14 +75,14 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, server_address:str='127.0.0.1', RequestHandlerClass:Optional[BaseRequestHandler]=None, bind_and_activate:bool=True, files_obj:Optional[JFilesBase]=None, verbose:int=0, **kwargs):
+    def __init__(self, server_address:str='127.0.0.1', RequestHandlerClass:Optional[BaseRequestHandler]=None, bind_and_activate:bool=True, jdb:Optional[JDbReader]=None, verbose:int=0, **kwargs):
         """Initialize the TCP server.
 
         Args:
             server_address (Tuple[str, int]): The ``(host, port)`` to bind to. Defaults to ``'127.0.0.1'`` (no port).
             RequestHandlerClass (Optional[BaseRequestHandler], optional): Handler class used per connection. Defaults to :class:`ServerHandler`.
             bind_and_activate (bool, optional): If True, bind and activate the socket immediately. Defaults to True.
-            files_obj (Optional[JFilesBase], optional): The backend to serve. Required.
+            jdb (Optional[JDbReader], optional): The backend to serve. Required.
             verbose (int, optional): Verbosity level for logging. Defaults to 0.
             **kwargs: Extra arguments passed through to :class:`socketserver.TCPServer`.
 
@@ -91,10 +91,10 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
         """
         super().__init__(server_address, ServerHandler if RequestHandlerClass is None else RequestHandlerClass, bind_and_activate, **kwargs)
 
-        if not isinstance(files_obj, JFilesBase):
-            raise TypeError('invalid files_obj type')
+        if not isinstance(jdb, JDbReader):
+            raise TypeError('must be JDb/JDbReader/GraphDb object')
 
-        self.jdb = JDb(files_obj)
+        self.jdb = jdb
         self.active_cnt = 0
         self.verbose = verbose
         # shared registry of group backends so every connection resolves the
@@ -105,6 +105,18 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
     def get_group_files(self, group_path:str) -> JFilesBase:
         """Resolve (and lazily create) the shared backend for a nested group path.
 
+        Resolution order per path segment:
+
+        1. Peek the server-side database's live registries (``jdb.childs`` and
+           ``jdb.io.groups``) so children/groups created directly on the server
+           (e.g. ``server.jdb['child1'] = JDb()`` or ``server.jdb.add_group()``)
+           are served to network clients as-is. The peek takes no database
+           locks, since the requesting client may currently hold the parent's
+           write lock (taking it here would deadlock).
+        2. Fall back to the shared ``group_files`` cache (groups first
+           materialized by a network client).
+        3. Create the backend via ``create_group`` and cache it.
+
         Args:
             group_path (str): Slash-separated group names, e.g. ``'grp_a/grp_b'``.
                 An empty string resolves to the root database backend.
@@ -113,26 +125,43 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
             JFilesBase: The shared backend files object serving that group.
 
         Raises:
-            KeyError: If a group name violates the ``[0-9A-Za-z_]+`` constraint.
+            KeyError: If a group name violates the constraint.
         """
         if not group_path:
             return self.jdb.files_obj
 
         with self.group_lock:
-            files_obj = self.group_files.get(group_path, None)
-            if files_obj is None:
-                files_obj = self.jdb.files_obj
-                _path = ''
-                for part in group_path.split('/'):
-                    if not re_match(r'^[0-9A-Za-z_]+$', part):
-                        raise KeyError(part)
+            cur_jdb = self.jdb
+            files_obj = self.jdb.files_obj
+            _path = ''
+            for part in group_path.split('/'):
+                if not re_match(r'^\w+$', part):
+                    raise KeyError(part)
 
-                    _path = f'{_path}/{part}' if _path else part
-                    _obj = self.group_files.get(_path, None)
-                    if _obj is None:
-                        self.group_files[_path] = _obj = files_obj.create_group(part)
+                _path = f'{_path}/{part}' if _path else part
 
-                    files_obj = _obj
+                # 1) live server-side child/group registry (authoritative)
+                _sub_jdb = None
+                if cur_jdb is not None:
+                    _sub_jdb = cur_jdb.childs.get(part, None)
+                    if _sub_jdb is None:
+                        _io = cur_jdb.io
+                        if _io is not None:
+                            _sub_jdb = _io.groups.get(part, None)
+
+                if _sub_jdb is not None:
+                    self.group_files[_path] = files_obj = _sub_jdb.files_obj
+                    cur_jdb = _sub_jdb
+                    continue
+
+                # 2) shared cache of client-materialized groups
+                _obj = self.group_files.get(_path, None)
+                if _obj is None:
+                    # 3) lazily create the backend
+                    self.group_files[_path] = _obj = files_obj.create_group(part)
+
+                files_obj = _obj
+                cur_jdb = None
 
             return files_obj
 
@@ -379,9 +408,10 @@ class ServerHandler(BaseRequestHandler):
                             resp['ret'] = False
 
                     elif fp is None or fp.closed:
-                        if verbose >= 1:
-                            print(Style(f'[FAIL|{client}]{file}: no file object: {packet}', yellow=1))
-                        resp.update(ok=False, err=JErrCode.INVALID_VAL) # ValueError
+                        if cmd not in ('close', 'flush'):
+                            if verbose >= 1:
+                                print(Style(f'[FAIL|{client}]{file}: no file object: {packet}', yellow=1))
+                            resp.update(ok=False, err=JErrCode.INVALID_VAL) # ValueError
 
                     else:
                         try:

@@ -489,7 +489,7 @@ class JNetFiles(JFilesBase):
                 An empty tuple targets the server's root database. Defaults to ``()``.
 
         Raises:
-            KeyError: If a group name violates the ``[0-9A-Za-z_]+`` constraint.
+            KeyError: If a group name violates the constraint.
             RuntimeError: If the socket connection fails.
         """
         if isinstance(group_path, str):
@@ -498,7 +498,7 @@ class JNetFiles(JFilesBase):
             group_path = tuple(group_path)
 
         for part in group_path:
-            if not re_match(r'^[0-9A-Za-z_]+$', part):
+            if not re_match(r'^\w+$', part):
                 raise KeyError(part)
 
         self.lock = RLock()
@@ -719,7 +719,7 @@ class JNetFiles(JFilesBase):
         own backend's ``create_group``) the first time they are accessed.
 
         Args:
-            name (str): The group namespace; must match ``[0-9A-Za-z_]+``.
+            name (str): The group namespace; must match contraint.
 
         Returns:
             JNetFiles: A new client whose commands target the child group.

@@ -3600,11 +3600,101 @@ class TestJDb(unittest.TestCase):
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_group_key(self):
+        tmp_data = {f'key{v}':list(range(v+1)) for v in range(32)}
+        tmp_jdb = JDb('db/tmp.jdb')
+        tmp_jdb -= tmp_jdb
+        tmp_jdb += tmp_data
+        self.server2.jdb['tmp'] = tmp_jdb
+        jdb = JDb(JNetFiles(self.server2.server_address))
+        self.assertEqual(jdb['tmp'], tmp_data)
+
         for config in self.jdb_configs:
             st_time = time.perf_counter()
             filename = config['KEY_file']
             cache_limit = config['cache_limit']
             jdb = self.jdbs[filename]
+            jdb['root_key'] = 'local'
+            self.assertEqual(jdb['root_key'], 'local')
+            if isinstance(jdb.files_obj, JNetFiles):
+                server = None
+                for r_jdb in (self.server1.jdb, self.server2.jdb):
+                    r_jdb -= r_jdb
+                    if len(jdb) == 0:
+                        server = r_jdb
+                    r_jdb['root_key'] = 'remote0'
+                    r_jdb['child1'] = child1 = JDb()
+                    r_jdb['child1']['key1'] = 'remote1'
+                    child2 = r_jdb.add_group('child2')
+                    child2['key2'] = 'remote2'
+                    self.assertEqual(r_jdb['root_key'], 'remote0')
+                    self.assertEqual(r_jdb['child1']['key1'], child1['key1'])
+                    self.assertEqual(child1['key1'], 'remote1')
+                    self.assertEqual(r_jdb['child2']['key2'], child2['key2'])
+                    self.assertEqual(child2['key2'], 'remote2')
+
+                self.assertTrue(server is not None)
+                self.assertEqual(server.keys[:], jdb.keys[:])
+                self.assertEqual(server, jdb)
+                self.assertEqual(server.data_type, jdb.data_type)
+                self.assertEqual(server.zip_type, jdb.zip_type)
+                self.assertTrue(not isinstance(server.files_obj, JNetFiles))
+                self.assertTrue(isinstance(jdb.files_obj, JNetFiles))
+
+                tmp_jdb += tmp_data
+                server['child0'] = tmp_jdb
+                self.assertEqual(tmp_jdb, tmp_data, filename)
+                self.assertEqual(server['child0'], tmp_data)
+                self.assertEqual(jdb['child0'], tmp_jdb)
+                self.assertEqual(jdb['child0'], tmp_data)
+                self.assertTrue(isinstance(jdb['child0'].files_obj, JNetFiles))
+
+                self.assertEqual(jdb['root_key'], 'remote0')
+                self.assertEqual(jdb['child1']['key1'], 'remote1')
+                self.assertEqual(jdb['child2']['key2'], 'remote2')
+                jdb['root_key'] = 'local'
+                self.assertEqual(server['root_key'], 'local')
+                self.assertTrue('child3' not in jdb)
+                server['child3'] = JDb()
+                server['child3']['key3'] = 'remote3'
+                self.assertEqual(jdb['child3']['key3'], 'remote3')
+
+                jdb1 = JDb(jdb)
+                jdb1['child4'] = JDb()
+                jdb1['child4']['key4'] = 'local4'
+                self.assertTrue(isinstance(jdb1.files_obj, JNetFiles))
+
+                self.assertEqual(jdb1['child4']['key4'], 'local4')
+                self.assertEqual(jdb['child4']['key4'], 'local4')
+                self.assertEqual(server['child4']['key4'], 'local4')
+                self.assertTrue(isinstance(jdb['child4'].files_obj, JNetFiles))
+                self.assertTrue(isinstance(jdb1['child4'].files_obj, JNetFiles))
+                self.assertTrue(not isinstance(server['child4'].files_obj, JNetFiles))
+
+                child5 = jdb1.add_group('child5')
+                child5['key5'] = 'local5'
+                self.assertTrue(isinstance(child5.files_obj, JNetFiles))
+                self.assertEqual(jdb1['child5']['key5'], 'local5')
+                self.assertEqual(jdb['child5']['key5'], 'local5')
+                self.assertEqual(server['child5']['key5'], 'local5')
+                self.assertTrue(not isinstance(server['child5'].files_obj, JNetFiles))
+
+                server['child4']['key4'] = 'remote4'
+                server['child5']['key5'] = 'remote5'
+                self.assertEqual(jdb['child4']['key4'], 'remote4')
+                self.assertEqual(jdb['child5']['key5'], 'remote5')
+                self.assertEqual(child5['key5'], 'remote5')
+                server2 = JDb(JNetFiles(self.server1.server_address if server == self.server2.jdb else self.server2.server_address))
+                server['child6'] = server2
+                server2['key6'] = 'remote6'
+                self.assertEqual(jdb['child6']['key6'], 'remote6')
+                self.assertTrue(isinstance(jdb['child6'].files_obj, JNetFiles))
+                jdb['child6']['key6'] = 'local6'
+                self.assertEqual(server['child6']['key6'], 'local6')
+                self.assertEqual(server2['key6'], 'local6')
+                self.assertEqual(jdb1['child0'], tmp_jdb)
+                server.info()
+                jdb.info()
+
             jdb.clear(agree='yes', wait_sec=0, **config)
             self.assertIsNotNone(jdb)
             self.assertEqual(len(jdb), 0)

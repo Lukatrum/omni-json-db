@@ -647,9 +647,9 @@ class JMemFiles(JFilesBase):
     Manages the KEY index and VAL data entirely within RAM using
     mutable bytearrays, bypassing physical storage devices.
     """
-    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond')
+    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond', 'group_table')
 
-    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None):
+    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None, group_table:Optional[dict]=None):
         """Initialize a volatile in-memory storage manager.
 
         Args:
@@ -660,6 +660,11 @@ class JMemFiles(JFilesBase):
             cond (Condition, optional): Condition variable for blocking concurrency.
             timestamp (float, optional): Baseline creation timestamp.
             name (str, optional): The virtual file object name.
+            group_table (dict, optional): Shared registry mapping group names to
+                their :class:`JMemFiles` instances, so repeated ``create_group``
+                calls (from any copy of this object) resolve to the same
+                in-memory buffers — mirroring the path-determinism of
+                :class:`JDiskFiles` groups. Defaults to a new dict.
 
         Raises:
             TypeError: If input parameters do not match required native types.
@@ -682,6 +687,9 @@ class JMemFiles(JFilesBase):
         if timestamp is None:
             timestamp = datetime.now().timestamp()
 
+        if group_table is None:
+            group_table = {}
+
         name = '' if not name else name
         if not isinstance(KEY_file, bytearray):
             raise TypeError
@@ -692,6 +700,8 @@ class JMemFiles(JFilesBase):
         if not isinstance(timestamp, float):
             raise TypeError
         if not isinstance(name, str):
+            raise TypeError
+        if not isinstance(group_table, dict):
             raise TypeError
 
         if len(LCK_file) != 17:
@@ -704,6 +714,7 @@ class JMemFiles(JFilesBase):
         self.cond = cond
         self.timestamp = timestamp
         self.name = name
+        self.group_table = group_table
 
     def __repr__(self) -> str:
         """Generate a string representation of the memory file state.
@@ -765,7 +776,7 @@ class JMemFiles(JFilesBase):
         Returns:
             JMemFiles: A replicated virtual storage controller.
         """
-        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name)
+        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name, group_table=self.group_table)
 
     def fsync(self, fd:int) -> None: # pragma: no cover
         """Mock file synchronization. Does nothing in memory mode.
@@ -793,15 +804,26 @@ class JMemFiles(JFilesBase):
         return KEY_file.startswith('<MEM.') and KEY_file[-1] == '>'
 
     def create_group(self, name:str) -> JMemFiles:
-        """Create a child dataset partition in memory.
+        """Create (or resolve) a child dataset partition in memory.
+
+        Repeated calls with the same ``name`` — from this instance or any of
+        its copies — return the same shared :class:`JMemFiles` instance,
+        mirroring how :class:`JDiskFiles` groups always resolve to the same
+        file path. This keeps every view of the database (multiple ``JDb``
+        wrappers, server connections, etc.) attached to the same group buffers.
 
         Args:
             name (str): The cluster group name.
 
         Returns:
-            JMemFiles: A new empty memory storage manager.
+            JMemFiles: The shared memory storage manager for that group.
         """
-        return JMemFiles(name=f'{self.name}.{name}' if self.name else name)
+        files_obj = self.group_table.get(name, None)
+        if files_obj is None:
+            # dict.setdefault keeps concurrent creators consistent
+            files_obj = self.group_table.setdefault(name, JMemFiles(name=f'{self.name}.{name}' if self.name else name))
+
+        return files_obj
 
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO:
         """Initialize an in-memory file stream for a specific value block.

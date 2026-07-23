@@ -86,7 +86,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 | Relative speed 10M records [x]_  | 1.00x (baseline)  | N/A [y]_  | N/A [y]_  | 24.07x  | 1.31x      | 0.55x     | 0.16x     | 0.05x     |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 
-.. [x] Lower is faster
+.. [x] Lower is faster. (see the `benchmark <https://github.com/lukatrum/omni-json-db/blob/main/benchmark/report.txt>`_ for the full breakdown and methodology)
 .. [y] Impractically slow
 
 ..

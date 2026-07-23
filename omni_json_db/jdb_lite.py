@@ -3060,6 +3060,7 @@ class JDbReader(JDbBase):
 
         else:
             with self.KEY_fopen('r') as key_fp:
+                fp = {-1:key_fp}
                 io = self.io.read_header(key_fp)
                 api_ver = io.api_ver
                 zip_str = io.zip_type_str
@@ -3088,7 +3089,7 @@ class JDbReader(JDbBase):
 
                 print(prefix+f'[v{api_ver}|{type_str}|{zip_str}|{limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] {key} | {self.files_obj.get_name()} | {io.n_records:,}+{io.n_lines-io.n_records:,} |{data_size} s:{io.sync_id}/{io.swap_id}/{io.remv_id} ')
                 for _key in sorted(io.groups): # pragma: no cover
-                    jdb = self.f_get_group(key_fp, _key)
+                    jdb = self.f_get_group(fp, _key)
                     if isinstance(jdb, JDbReader):
                         jdb.info(prefix + '  ', key=_key)
 
@@ -4286,14 +4287,14 @@ class JDbReader(JDbBase):
         sub-database whose files live alongside the parent's files.
 
         Args:
-            key (str): Group name; must match ``[0-9A-Za-z_]+`` or ``KeyError``
+            key (str): Group name; must match contraint or ``KeyError``
                 is raised.
 
         Returns:
             Optional[JDbReader]: The group database, or ``None`` if ``key`` is
             not a group.
         """
-        if not re_match(r'^[0-9A-Za-z_]+$', key):
+        if not re_match(r'^\w+$', key):
             raise KeyError
 
         with self.open(read_only=True) as fp:
@@ -4328,19 +4329,13 @@ class JDbReader(JDbBase):
             Optional[JDbReader]: The group database, or ``None`` if ``key`` is
             not a group.
         """
-        io = self.io
-        key_fp = fp_dict[-1]
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
         row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
             jdb = io.groups[key]
             if jdb is not None:
                 return jdb
-
-            if not isinstance(fp_dict, dict): # pragma: no cover
-                key_fp = fp_dict
-            else:
-                io, fp_dict, key_fp = self.f_get_fp(fp_dict)
 
             _key, file_id, offset, row_size, val_size, _ver, _old_days = io.read_key(key_fp, row)
             if row_size == 0 and file_id == 0x10:

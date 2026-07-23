@@ -16,6 +16,7 @@ from .jdb_io import JIo, KeyTable, \
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy
 from .jdb_file import JFilesBase
+from .jdb_net import JNetFiles
 from .jdb_query import Condition
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
@@ -3723,7 +3724,7 @@ class JDb(JDbReader):
         Raises:
             KeyError: If ``key`` contains characters other than letters, digits, or underscores.
         """
-        if not re_match(r'^[0-9A-Za-z_]+$', key):
+        if not re_match(r'^\w+$', key):
             raise KeyError
 
         with self.open(read_only=True) as fp:
@@ -4978,6 +4979,12 @@ class JDb(JDbReader):
     def _set_child(self, name:str, child:JDbReader) -> None:
         """Add child JDb to JDb
 
+        For a network-backed parent (:class:`JNetFiles`), a child that is not
+        already a group of this database is materialized as a server-side
+        group and its content cloned into it. A locally-held child would be
+        invisible to other connections and to the server itself, so the data
+        must live in the server's storage.
+
         Args:
             name (str): child name.
             child (JDbReader): JDbReader object
@@ -4990,6 +4997,17 @@ class JDb(JDbReader):
 
         elif name not in self.childs and self.files_obj.is_group(child.files_obj, name): # pragma: no cover
             jio.groups[name] = child
+
+        elif isinstance(self.files_obj, JNetFiles) and isinstance(child, JDbReader):
+            # network parent: push the child into a server-side group so that
+            # other clients and the server share the same storage
+            group_jdb = self.create_jdb(self.files_obj.create_group(name))
+            for _key in child:
+                group_jdb[_key] = child[_key]
+
+            jio.groups[name] = group_jdb
+            self.childs.pop(name, None)
+
         else:
             self.childs[name] = child
 
