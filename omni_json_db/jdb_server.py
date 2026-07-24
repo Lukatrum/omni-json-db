@@ -146,8 +146,7 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
                     _sub_jdb = cur_jdb.childs.get(part, None)
                     if _sub_jdb is None:
                         _io = cur_jdb.io
-                        if _io is not None:
-                            _sub_jdb = _io.groups.get(part, None)
+                        _sub_jdb = _io.groups.get(part, None)
 
                 if _sub_jdb is not None:
                     self.group_files[_path] = files_obj = _sub_jdb.files_obj

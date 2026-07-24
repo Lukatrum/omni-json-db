@@ -4889,6 +4889,11 @@ class TestJDb(unittest.TestCase):
                             val = jmem.f_read(dst_fp, key)
                             self.assertEqual(val, jdb.f_read(src_fp, key))
 
+                    with jmem.file_lock.wlock():
+                        for key in jdb.key_table:
+                            val = jmem.f_read(dst_fp, key)
+                            self.assertEqual(val, jdb.f_read(src_fp, key))
+
             self.assertEqual(jdb, jmem)
 
             jmem.remove_fast(jmem)
@@ -7306,6 +7311,45 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(chg, expect)
             self.assertEqual(jdb, expect)
             self.assertGreater(len(jdb.file_table), 0)
+            with jdb.open(read_only=False) as fp:
+                jio, fp, key_fp = jdb.f_get_fp(fp)
+                self.assertTrue(key_fp.readable())
+                self.assertTrue(key_fp.writable())
+                self.assertTrue(key_fp.seekable())
+                index_size = jio.index_size
+                idx = jio.seek(key_fp, 0)
+                self.assertTrue(idx >= 128)
+                self.assertEqual(idx, key_fp.tell())
+                line = key_fp.read(index_size)
+                self.assertEqual(len(line), index_size)
+                idx2 = jio.seek(key_fp, 0)
+                self.assertEqual(idx, idx2)
+                if jdb.data_type.startswith('J+'):
+                    line2 = key_fp.readline()
+                    self.assertEqual(line, line2)
+                    line3 = key_fp.readline()
+                    self.assertEqual(len(line3), index_size)
+                    idx3 = key_fp.tell()
+                    key_fp.seek(idx2)
+                    key_fp.writelines([line2, line3])
+                    self.assertEqual(key_fp.tell(), idx3)
+                    key_fp.seek(idx2)
+                    _lines = key_fp.readlines(index_size)
+                    self.assertEqual(key_fp.tell(), idx3)
+                    self.assertEqual(len(_lines), 2)
+                    self.assertEqual(_lines, [line2, line3])
+                else:
+                    _lines = bytearray(index_size * 2)
+                    rd_size = key_fp.readinto(_lines)
+                    idx3 = key_fp.tell()
+                    self.assertEqual(line, _lines[:index_size])
+                    self.assertEqual(rd_size, index_size * 2)
+                    key_fp.seek(idx2)
+                    key_fp.write(_lines)
+                    self.assertEqual(key_fp.tell(), idx3)
+
+                for key in jio.key_table:
+                    self.assertEqual(expect[key], jdb.f_read(fp, key, copy=False))
 
             jdb2 = JDb(jdb)
             self.assertFalse(jdb2.is_latest())
@@ -7813,6 +7857,14 @@ class TestJDb(unittest.TestCase):
                     jdb.file_lock.release()
                     self.assertEqual(jdb.file_lock.get_count(ident1), 1)
 
+                with jdb.file_lock.rlock():
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 2)
+                    with jdb.file_lock.wlock():
+                        self.assertEqual(jdb.file_lock.get_count(ident1), 3)
+
+                    self.assertEqual(jdb.file_lock.get_count(ident1), 2)
+
+                self.assertEqual(jdb.file_lock.get_count(ident1), 1)
                 self.assertEqual(jdb.file_lock.mode, 'w')
             finally:
                 jdb.file_lock.release()
@@ -7828,6 +7880,7 @@ class TestJDb(unittest.TestCase):
             error = jdb.check_error()
             self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
 
+            jdb.file_lock.reset_lock()
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')

@@ -2021,7 +2021,7 @@ class JDb(JDbReader):
         target_jdb = JDb(path if path else None, zip_type=zip_type, data_type=data_type, **kwargs)
         return self.clone_to(target_jdb, data_type=data_type,  zip_type=zip_type, fast_mode=fast_mode, **kwargs)
 
-    def clone_to(self, target:Union[JDb,JFilesBase,str], signal:str='.', fast_mode:bool=True, max_file_size:Optional[int]=None, min_value_size:Optional[int]=None, index_size:Optional[int]=None, reserved_rate:Optional[float]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, cache_limit:int=0, api_ver:Optional[int]=None, **kwargs) -> JDb:
+    def clone_to(self, target:Union[JDb,JFilesBase,str], signal:str='.', fast_mode:bool=True, max_file_size:Optional[int]=None, min_value_size:Optional[int]=None, index_size:Optional[int]=None, reserved_rate:Optional[float]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, cache_limit:int=0, api_ver:Optional[int]=None, val_codec:Optional[Any]=None, key_codec:Optional[Any]=None, **kwargs) -> JDb:
         """Copy the entire database to a new target with optional format/config changes.
         
         ``target`` can be a file path, a :class:`JFilesBase` object, or an existing :class:`JDb` to overwrite.
@@ -2063,6 +2063,13 @@ class JDb(JDbReader):
 
             cache_limit (int, optional): Maximum number of records cached in memory in the destination. Defaults to 0.
             api_ver (Optional[int], optional): API version to use for the destination. Defaults to None.
+            val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec for 'U' data types
+                (J+U, S+U, U+U), e.g. a different encryption key per JDb instance. Must already
+                be registered via ``JIoVAL_U().register(dumps, loads)``. Defaults to the
+                process-wide codec set by ``register_user_val_codec()``.
+            key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U'
+                data type. Analogous to ``val_codec`` but for the row index. Defaults to the
+                process-wide codec set by ``register_user_key_codec()``.
             **kwargs: Extra settings passed through to the destination :class:`JIo`.
 
         Returns:
@@ -2111,6 +2118,9 @@ class JDb(JDbReader):
                     zip_type = dst_io._zip_type if zip_type is None else zip_type
                     data_type = dst_io._data_type if data_type is None else data_type
                     api_ver = dst_io.api_ver if api_ver is None else api_ver
+                    val_codec = dst_io._val_codec if val_codec is None else val_codec
+                    key_codec = dst_io._key_codec if key_codec is None else key_codec
+
                 else:
                     max_file_size = src_io.max_file_size if max_file_size is None else max_file_size
                     min_value_size = src_io.min_value_size if min_value_size is None else min_value_size
@@ -2119,6 +2129,8 @@ class JDb(JDbReader):
                     zip_type = src_io._zip_type if zip_type is None else zip_type
                     data_type = src_io._data_type if data_type is None else data_type
                     api_ver = src_io.api_ver if api_ver is None else api_ver
+                    val_codec = src_io._val_codec if val_codec is None else val_codec
+                    key_codec = src_io._key_codec if key_codec is None else key_codec
 
                 old_file_table = dst_io.file_table.copy()
 
@@ -2144,7 +2156,9 @@ class JDb(JDbReader):
                             remv_id=remv_id,
                             max_file_size=max_file_size,
                             min_value_size=min_value_size,
-                            reserved_rate=reserved_rate)
+                            reserved_rate=reserved_rate,
+                            key_codec=key_codec,
+                            val_codec=val_codec)
 
                 dst_io.change_APIs(api_ver, dst_io._data_type, dst_io._zip_type)
                 dst_io.write_header(key_fp_d, truncate=True)
@@ -2696,7 +2710,7 @@ class JDb(JDbReader):
                         csv_row['__1__'] = str(val)
 
                     writer.writerow(csv_row)
-                    if (row_id % 1000) == 0:
+                    if (row_id % 1000) == 0: # pragma: no cover
                         print('.', end='', flush=True)
 
             finally:
@@ -4967,10 +4981,9 @@ class JDb(JDbReader):
         """
         sync_id = self.io.sync_id
         file_lock = self.file_lock
-        if file_lock.is_locked:
-            if file_lock.mode == 'w':
-                io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-                return io, fp_dict, key_fp, sync_id != io.sync_id
+        if file_lock.mode == 'w':
+            io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+            return io, fp_dict, key_fp, sync_id != io.sync_id
 
         ident = file_lock.acquire(read_only=False, switch=True)
         if ident is None: # pragma: no cover
@@ -5120,7 +5133,9 @@ class JDb(JDbReader):
                 sync_id=0,
                 min_value_size=src_io.min_value_size,
                 max_file_size=src_io.max_file_size,
-                reserved_rate=src_io.reserved_rate)
+                reserved_rate=src_io.reserved_rate,
+                key_codec=src_io._key_codec,
+                val_codec=src_io._val_codec)
 
             dst_io.change_APIs(API_LATEST, dst_io._data_type, dst_io._zip_type) # use latest API
             dst_io.sync_id      = (src_io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -5302,4 +5317,3 @@ class JDb(JDbReader):
         return loads(data)
 
 #
-

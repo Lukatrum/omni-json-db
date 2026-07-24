@@ -485,30 +485,7 @@ class FileLock:
 
     def __del__(self):
         """Clean up on garbage collection: release all pending locks and close the lock file."""
-        self.release_all()
-        self._close()
-
-    def release_all(self) -> bool: # pragma: no cover
-        """Wait for all threads to release their locks, then mark the lock as destroyed.
- 
-        Blocks until ``_idents`` is empty (every thread has called
-        :meth:`release` enough times to drop its count to zero).  Once
-        drained, the mode is set to ``'x'`` to prevent any new
-        :meth:`acquire` calls from succeeding.  If a write lock was
-        active, the SIGINT handler is re-enabled before closing.
- 
-        This method is called by :meth:`__del__` and should not normally
-        be called directly.
- 
-        Returns:
-            bool: ``True`` if the internal mutex was acquired and the
-            shutdown sequence completed.  ``False`` if the mutex itself
-            could not be acquired (should not happen in practice).
-        """
-        if not self._lock.acquire():
-            return False
-
-        try:
+        with self._lock:
             while self._idents:
                 self._cond.wait()
 
@@ -519,12 +496,9 @@ class FileLock:
             self._idents.clear()
             self._cond.notify_all()
 
-        finally:
-            self._lock.release()
+        self._close()
 
-        return True
-
-    def reset_lock(self) -> None: # pragma: no cover
+    def reset_lock(self) -> None:
         """Delete the lock file from disk, ignoring the error if it does not exist.
  
         Use this to clean up a stale lock file left behind by a crashed
@@ -562,7 +536,7 @@ class FileLock:
         return self._mode
 
     @contextmanager
-    def rlock(self): # pragma: no cover
+    def rlock(self):
         """Context manager that acquires a shared read lock and releases it on exit.
  
         Yields:
@@ -574,14 +548,14 @@ class FileLock:
                 with file_lock.rlock():
                     data = read_from_file()
         """
-        self.acquire(read_only=True)
+        self.acquire(read_only=True, block=True, switch=False)
         try:
             yield
         finally:
             self.release()
 
     @contextmanager
-    def wlock(self): # pragma: no cover
+    def wlock(self):
         """Context manager that acquires an exclusive write lock and releases it on exit.
  
         SIGINT (``Ctrl+C``) is deferred while the write lock is held and
@@ -596,7 +570,7 @@ class FileLock:
                 with file_lock.wlock():
                     write_to_file(data)
         """
-        self.acquire(read_only=False)
+        self.acquire(read_only=False, block=True, switch=False)
         try:
             yield
 

@@ -1043,7 +1043,7 @@ class GraphDb(JDb):
                         current_node = queue.popleft()
                         component.append(current_node)
                         for entry in f_get_adj(fp, current_node):
-                            _direction, neighbor = entry[0], entry[1:]
+                            neighbor = entry[1:]
                             if neighbor not in visited:
                                 visited.add(neighbor)
                                 queue.append(neighbor)
@@ -1644,9 +1644,9 @@ class GraphDb(JDb):
                         for b in range(n):
                             if a == b: continue
                             v, w2 = nbs[a], nbs[b]
-                            if w2 not in out_set.get(v, set()): continue
-                            cube = edge_w(nid, v) * edge_w(nid, w2) * edge_w(v, w2)
-                            total += cube ** (1.0 / 3.0)
+                            if w2 in out_set.get(v, set()):
+                                cube = edge_w(nid, v) * edge_w(nid, w2) * edge_w(v, w2)
+                                total += cube ** (1.0 / 3.0)
                     result[nid] = total / (k * (k - 1))
         else:
             # directed (Fagiolo formula); weight is not supported for
@@ -2755,13 +2755,13 @@ class GraphDb(JDb):
             n_nodes = f_read(fp_dict, n_nid, 0)
             u_key = f'N:{u}:'
             if u_key not in key_table:
-                if f_write(fp_dict, u_key, {}, overwrite=True, max_wsize=0):
-                    n_nodes += 1
+                f_write(fp_dict, u_key, {}, overwrite=True, max_wsize=0)
+                n_nodes += 1
 
             v_key = f'N:{v}:'
             if v_key not in key_table:
-                if f_write(fp_dict, v_key, {}, overwrite=True, max_wsize=0):
-                    n_nodes += 1
+                f_write(fp_dict, v_key, {}, overwrite=True, max_wsize=0)
+                n_nodes += 1
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'

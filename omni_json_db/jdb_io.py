@@ -519,7 +519,7 @@ class KeyTable:
                 self.clear()
 
             finally:
-                if key_fp is not None and fp is None:
+                if key_fp is not None and fp is None: # pragma: no cover
                     key_fp.close()
 
         if not is_sync:

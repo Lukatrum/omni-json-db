@@ -212,7 +212,7 @@ class JNetIO(RawIOBase):
 
             super().close()
 
-    def readline(self, size:Optional[int]= -1) -> bytes:
+    def readline(self, size:Optional[int]= -1) -> bytes: # pragma: no cover
         """Read a single line from the remote stream.
 
         Args:
@@ -291,7 +291,7 @@ class JNetIO(RawIOBase):
 
             return True
 
-    def readable(self) -> bool: # pragma: no cover
+    def readable(self) -> bool:
         """Determine if the stream supports reading.
 
         Returns:
@@ -306,7 +306,7 @@ class JNetIO(RawIOBase):
 
             return True
 
-    def writable(self) -> bool: # pragma: no cover
+    def writable(self) -> bool:
         """Determine if the stream supports writing.
 
         Returns:
@@ -354,7 +354,7 @@ class JNetIO(RawIOBase):
         with self.lock:
             return self.__exec('truncate', (size,)).get('ret', 0)
 
-    def writelines(self, lines): # pragma: no cover
+    def writelines(self, lines):
         """Write an iterable list of lines to the remote server.
 
         Args:
@@ -492,11 +492,7 @@ class JNetFiles(JFilesBase):
             KeyError: If a group name violates the constraint.
             RuntimeError: If the socket connection fails.
         """
-        if isinstance(group_path, str):
-            group_path = tuple(part for part in group_path.split('/') if part)
-        else:
-            group_path = tuple(group_path)
-
+        group_path = tuple(part for part in group_path.split('/') if part) if isinstance(group_path, str) else tuple(group_path)
         for part in group_path:
             if not re_match(r'^\w+$', part):
                 raise KeyError(part)
@@ -574,7 +570,7 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
-    def get_folder(self) -> str: # pragma: no cover
+    def get_folder(self) -> str:
         """Get the parent directory path of the remote database.
 
         Returns:
@@ -961,43 +957,40 @@ class JNetFiles(JFilesBase):
 
             raise RuntimeError
 
-    def LCK_close(self): # pragma: no cover
+    def LCK_close(self):
         """Safely close lock channels to prevent remote resource starvation."""
+
+        # server daemon threads are frozen during interpreter shutdown;
+        # a remote round-trip would block forever (e.g. via FileLock.__del__)
         if sys_is_finalizing():
-            # server daemon threads are frozen during interpreter shutdown;
-            # a remote round-trip would block forever (e.g. via FileLock.__del__)
-            return
+            with self.lock:
+                if self.sock and not self.sock._closed:
+                    try:
+                        dump_and_send(self.sock, (self._remote_file('LCK'), 'close', (), {}))
+                        resp = recv_and_load(self.sock)
 
-        with self.lock:
-            if self.sock and not self.sock._closed:
-                try:
-                    dump_and_send(self.sock, (self._remote_file('LCK'), 'close', (), {}))
-                    resp = recv_and_load(self.sock)
+                        if resp.get('ok'):
+                            return
 
-                    if resp.get('ok'):
+                    except OSError: # pragma: no cover
                         return
 
-                except OSError:
-                    return
-
-    def LCK_remove(self): # pragma: no cover
+    def LCK_remove(self):
         """Delete the lock file physically from the remote server.
 
         Raises:
             RuntimeError: If the network socket is disconnected or fails.
         """
-        if sys_is_finalizing():
-            return
+        if not sys_is_finalizing():
+            with self.lock:
+                if self.sock and not self.sock._closed:
+                    dump_and_send(self.sock, (self._remote_file('LCK'), 'remove', (), {}))
+                    resp = recv_and_load(self.sock)
 
-        with self.lock:
-            if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (self._remote_file('LCK'), 'remove', (), {}))
-                resp = recv_and_load(self.sock)
+                    if resp.get('ok'):
+                        return
 
-                if resp.get('ok'):
-                    return
-
-            raise RuntimeError
+                raise RuntimeError
 
 #---------------------------------------------------------------------
 #

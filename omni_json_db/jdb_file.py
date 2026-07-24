@@ -308,7 +308,7 @@ class JBytesIO(RawIOBase):
 
         return True
 
-    def readline(self, size:Optional[int]=-1) -> bytes:
+    def readline(self, size:Optional[int]=-1) -> bytes: # pragma: no cover
         """Read and return one line from the stream.
 
         Reads until a newline (``\\n``) is found or the stream ends.
@@ -372,7 +372,7 @@ class JBytesIO(RawIOBase):
                 break
             lines.append(line)
             total_read += len(line)
-            if hint is not None and hint > 0 and total_read >= hint:
+            if hint is not None and hint > 0 and total_read > hint:
                 break
 
         return lines
@@ -454,7 +454,7 @@ class JBytesIO(RawIOBase):
 
         return size
 
-    def writable(self) -> bool: # pragma: no cover
+    def writable(self) -> bool:
         """Determine if the stream supports writing.
 
         Returns:
@@ -468,7 +468,7 @@ class JBytesIO(RawIOBase):
 
         return True
 
-    def writelines(self, lines): # pragma: no cover
+    def writelines(self, lines):
         """Write a list of lines to the stream.
 
         Args:
@@ -743,7 +743,7 @@ class JMemFiles(JFilesBase):
         """
         return f'<MEM.{self.name}>' if self.name else '<MEM>'
 
-    def get_folder(self) -> str: # pragma: no cover
+    def get_folder(self) -> str:
         """Get the parent directory path.
 
         Returns:
@@ -778,7 +778,7 @@ class JMemFiles(JFilesBase):
         """
         return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name, group_table=self.group_table)
 
-    def fsync(self, fd:int) -> None: # pragma: no cover
+    def fsync(self, fd:int) -> None:
         """Mock file synchronization. Does nothing in memory mode.
 
         Args:
@@ -1005,11 +1005,10 @@ class JMemFiles(JFilesBase):
 
             self.cond.notify_all()
 
-    def LCK_close(self): # pragma: no cover
+    def LCK_close(self):
         """Placeholder system stream shutdown routine. Does nothing in memory mode."""
-        return
 
-    def LCK_remove(self): # pragma: no cover
+    def LCK_remove(self):
         """Reset concurrency tracker values, clearing the lock bytes structure."""
         with self.lock:
             LCK_file = self.LCK_file
@@ -1050,9 +1049,7 @@ class JDiskFiles(JFilesBase):
 
         file_name = basename(KEY_file)
         dir_name = dirname(KEY_file)
-        if dir_name == '': # pragma: no cover
-            dir_name = getcwd()
-
+        dir_name = getcwd() if dir_name == '' else dir_name
         if dir_name != '' and not path_exists(dir_name):
             makedirs(dir_name)
 
@@ -1094,7 +1091,7 @@ class JDiskFiles(JFilesBase):
         """
         return self.KEY_file
 
-    def get_folder(self) -> str: # pragma: no cover
+    def get_folder(self) -> str:
         """Extract the absolute workspace parent directory path.
 
         Returns:
@@ -1319,19 +1316,16 @@ class JDiskFiles(JFilesBase):
             file_unlock(self.LCK_fp)
             self.LCK_fp = None
 
-    def LCK_close(self): # pragma: no cover
+    def LCK_close(self):
         """Disengage isolation streams and safely close the lock file descriptor."""
         self.LCK_unlock()
 
-    def LCK_remove(self): # pragma: no cover
+    def LCK_remove(self):
         """Purge system lock indicators physically from disk storage."""
         self.LCK_close()
         try:
             os_remove(self.LCK_file)
 
-        except FileNotFoundError as e: # pragma: no cover
-            print(e)
-
-        except PermissionError as e: # pragma: no cover
+        except (FileNotFoundError,PermissionError) as e: # pragma: no cover
             print(e)
 #
