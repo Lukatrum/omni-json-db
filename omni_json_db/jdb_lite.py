@@ -950,7 +950,9 @@ class JDbReader(JDbBase):
                 api_ver:Optional[int]=None,\
                 write_hook:Optional[Callable[[str,Any],bool]]=None,\
                 max_wsize:Optional[int]=None,\
-                flags:Optional[JFlag]=None, **kwargs):
+                flags:Optional[JFlag]=None, \
+                val_codec:Optional[Any]=None, \
+                key_codec:Optional[Any]=None, **kwargs):
         """
         Initialize the JDbReader instance with specific backend storage and formatting options.
 
@@ -973,13 +975,16 @@ class JDbReader(JDbBase):
                 - "J+P" | KEY=JSON    | VAL=Pickle
                 - "J+S" | KEY=JSON    | VAL=msgpack (default)
                 - "J+Y" | KEY=JSON    | VAL=YAML
+                - "J+U" | KEY=JSON    | VAL=User
                 - "S+J" | KEY=Msgpack | VAL=JSON
                 - "S+M" | KEY=Msgpack | VAL=Marshal
                 - "S+P" | KEY=Msgpack | VAL=Pickle
                 - "S+S" | KEY=Msgpack | VAL=msgpack
                 - "S+Y" | KEY=Msgpack | VAL=YAML
+                - "S+U" | KEY=Msgpack | VAL=User
                 - "L+J" | KEY=split   | VAL=Json
                 - "M+M" | KEY=Marshal | VAL=Marshal
+                - "U+U" | KEY=User    | VAL=User
 
             zip_type (Union[str, int, None], optional): Compression algorithm to use.
                 
@@ -1018,6 +1023,13 @@ class JDbReader(JDbBase):
             write_hook (Optional[Callable[[str, Any], bool]], optional): Callback triggered before writing.
             max_wsize (Optional[int], optional): Search window for dead lines. Defaults to 4.
             flags (Optional[JFlag], optional): Enum flags for modifying revert/split behavior.
+            val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec for 'U' data types
+                (J+U, S+U, U+U), e.g. a different encryption key per JDb instance. Must already
+                be registered via ``JIoVAL_U().register(dumps, loads)``. Defaults to the
+                process-wide codec set by ``register_user_val_codec()``.
+            key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U'
+                data type. Analogous to ``val_codec`` but for the row index. Defaults to the
+                process-wide codec set by ``register_user_key_codec()``.
             **kwargs: Extra arguments passed to internal components.
         
         Raises:
@@ -1042,6 +1054,12 @@ class JDbReader(JDbBase):
 
             if flags is None:
                 flags = jdb.flags
+
+            if val_codec is None:
+                val_codec = jio._val_codec
+
+            if key_codec is None:
+                key_codec = jio._key_codec
 
             # override
             api_ver = jio.api_ver
@@ -1112,7 +1130,9 @@ class JDbReader(JDbBase):
                 index_size=index_size,
                 min_value_size=min_value_size,
                 max_file_size=max_file_size,
-                reserved_rate=reserved_rate)
+                reserved_rate=reserved_rate,
+                val_codec=val_codec,
+                key_codec=key_codec)
 
     def __del__(self):
         """

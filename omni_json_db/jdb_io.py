@@ -255,20 +255,23 @@ CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)
 KEY_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE * 8
 VAL_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE
 
-DEF_TYPE = 0 # default data type
-L_J_TYPE = 1 # split+Json                   | readable
-M_M_TYPE = 2 # Marshal+Marshal              | unreadable, full type
-J_J_TYPE = 3 # Json+Json                    | readable
-J_M_TYPE = 4 # Json+Marshal                 | half-readable, full type
-J_P_TYPE = 5 # Json+Pickle                  | half-readable, full type
-S_S_TYPE = 6 # Msgpack+Msgpack              | smallest size
-J_S_TYPE = 7 # Json+Msgpack                 | readable, small size
-S_M_TYPE = 8 # Msgpack+Marshal              | unreadable, full type
-S_J_TYPE = 9 # Msgpack+Json                 | half-readable
-S_P_TYPE = 10# Msgpack+Pickle               | unreadable, full type
-J_Y_TYPE = 11# Json+Yaml                    | readable, full type
-S_Y_TYPE = 12# Msgpack+Yaml                 | half-readable
-LAST_DATA_TYPE = S_Y_TYPE
+DEF_TYPE = 0  # default data type
+L_J_TYPE = 1  # split+Json                  | readable
+M_M_TYPE = 2  # Marshal+Marshal             | unreadable, full type
+J_J_TYPE = 3  # Json+Json                   | readable
+J_M_TYPE = 4  # Json+Marshal                | half-readable, full type
+J_P_TYPE = 5  # Json+Pickle                 | half-readable, full type
+S_S_TYPE = 6  # Msgpack+Msgpack             | smallest size
+J_S_TYPE = 7  # Json+Msgpack                | readable, small size
+S_M_TYPE = 8  # Msgpack+Marshal             | unreadable, full type
+S_J_TYPE = 9  # Msgpack+Json                | half-readable
+S_P_TYPE = 10 # Msgpack+Pickle              | unreadable, full type
+J_Y_TYPE = 11 # Json+Yaml                   | readable, full type
+S_Y_TYPE = 12 # Msgpack+Yaml                | half-readable
+J_U_TYPE = 13 # Json+User                   | KEY=readable, VAL=developer-defined codec (e.g. encryption)
+S_U_TYPE = 14 # Msgpack+User                | KEY=small,    VAL=developer-defined codec (e.g. encryption)
+U_U_TYPE = 15 # User+User                   | KEY and VAL both developer-defined codecs
+LAST_DATA_TYPE = U_U_TYPE
 
 DEF_ZIP = -1 # default zip type
 NO_ZIP = 0 # no zip mode                    | fastest
@@ -310,7 +313,6 @@ UNZIP_lut = (
     lambda pad,data : lz4_decompress(data.rstrip(pad) + b'\0\0\0\0'),
 )
 
-
 UNZIP_lut0 = (
     lambda data: data,
     gzip_decompress,
@@ -323,8 +325,23 @@ UNZIP_lut0 = (
     lz4_decompress,
 )
 
+def _pad_byte_v0(mode:int) -> bytes:
+    """Select the NO_ZIP padding byte for a given data_type.
+
+    Msgpack-only combos use ``0xc1`` (msgpack's unused "never occurs" byte).
+    User-defined VAL codecs (J+U / S+U / U+U) use whatever pad byte the
+    developer registered via ``register_user_val_codec()`` (defaults to
+    ``b'\\n'``), since the library cannot know the byte distribution of a
+    developer-supplied encoding (e.g. encrypted payloads).
+    """
+    if mode in (S_S_TYPE, J_S_TYPE):
+        return b'\xc1'
+    if mode in (J_U_TYPE, S_U_TYPE, U_U_TYPE):
+        return g_VAL_U.pad_byte
+    return b'\n'
+
 PAD_lut = (
-    lambda mode : b'\n' if mode not in {S_S_TYPE, J_S_TYPE} else b'\xc1',
+    _pad_byte_v0,
     lambda mode : b'\0',
     lambda mode : b'\0',
     lambda mode : b'\xff',
@@ -1154,6 +1171,9 @@ class JIoHEAD:
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
+class UserCodecNotRegisteredError(RuntimeError):
+    """Raised when a 'U' (developer-defined) data_type is used before its codec was registered."""
+
 class JIoKEY(metaclass=ABCMeta): # pragma: no cover
     """Abstract codec for one KEY index row.
 
@@ -1388,6 +1408,126 @@ class JIoKEY_L(JIoKEY):
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
             raise JValueError from e
 
+class JIoKEY_U(JIoKEY):
+    """Pluggable KEY (row index) codec ("U+U" data_type).
+
+    Like :class:`JIoVAL_U`, but for the KEY row metadata
+    ``(key, file_id, offset, row_size, val_size, ver, days)``. Most developers
+    only need to customize the VAL codec (``J+U`` / ``S+U``); this exists for
+    the rarer case where the KEY row itself must be transformed too (e.g. to
+    obfuscate record keys on disk).
+
+    If only ``dumps``/``loads`` are registered, they are reused for both the
+    legacy (v0) and current (v1) on-disk layouts. Register ``dumps_v0``/
+    ``loads_v0`` separately only if v0-file compatibility with a different
+    wire layout is required.
+    """
+    __slots__ = ('_dumps', '_loads', '_dumps_v0', '_loads_v0')
+
+    def __init__(self):
+        self._dumps: Optional[Callable[..., bytes]] = None
+        self._loads: Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int]]] = None
+        self._dumps_v0: Optional[Callable[..., bytes]] = None
+        self._loads_v0: Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int]]] = None
+
+    def register(self, dumps:Callable[..., bytes], loads:Callable[[bytes], Tuple[str,int,int,int,int,int,int]],
+                 dumps_v0:Optional[Callable[..., bytes]]=None, loads_v0:Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int]]]=None) -> None:
+        """Register the developer-defined KEY codec.
+
+        Args:
+            dumps (Callable): Receives a single packed row tuple
+                ``(key, file_id, offset, row_size, val_size, ver, days)`` (API v1 layout)
+                and returns ``bytes``. Called with *one* tuple argument, not 7 separate
+                positional arguments.
+            loads (Callable[[bytes], Tuple]): ``bytes -> (key, file_id, offset, row_size, val_size, ver, days)``.
+            dumps_v0 (Callable, optional): Same as ``dumps`` but for the legacy v0 layout (no separate val_size).
+                Defaults to reusing ``dumps``.
+            loads_v0 (Callable, optional): Same as ``loads`` but for the legacy v0 layout. Defaults to ``loads``.
+
+        Raises:
+            TypeError: If any provided argument is not callable, or if the dumps/loads
+                round-trip self-test fails.
+        """
+        for fn in (dumps, loads) + tuple(f for f in (dumps_v0, loads_v0) if f is not None):
+            if not callable(fn):
+                raise TypeError('dumps/loads must be callable')
+
+        # test_val mirrors the real call convention: dumps() always receives ONE
+        # packed 7-tuple (key, file_id, offset, row_size, val_size, ver, days).
+        test_val = ('key', 1, 2, 3, 4, 5, 6)
+        try:
+            if tuple(loads(dumps(test_val))) != test_val:
+                raise TypeError
+        except Exception as e:
+            raise TypeError('dumps/loads cannot work correctly') from e
+
+        self._dumps = dumps
+        self._loads = loads
+        self._dumps_v0 = dumps_v0 or dumps
+        self._loads_v0 = loads_v0 or loads
+
+    def unregister(self) -> None:
+        """Clear a previously registered codec, e.g. between tests."""
+        self._dumps = self._loads = self._dumps_v0 = self._loads_v0 = None
+
+    @property
+    def is_registered(self) -> bool:
+        """bool: Whether a developer codec has been registered yet."""
+        return self._dumps is not None and self._loads is not None
+
+    def _missing(self):
+        raise UserCodecNotRegisteredError(
+            "data_type 'U+U' (KEY) is selected but no codec is registered. "
+            "Call register_user_key_codec(dumps, loads) before opening the JDb.")
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
+        """Serialize a KEY row (v1 layout) using the registered developer codec."""
+        if self._dumps is None:
+            self._missing()
+        try:
+            return self._dumps((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
+        """Parse a KEY row (v1 layout) using the registered developer codec."""
+        if self._loads is None:
+            self._missing()
+        try:
+            args = self._loads(data)
+            if isinstance(args, (list, tuple)):
+                return args
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
+        """Serialize a KEY row (v0 layout) using the registered developer codec."""
+        if self._dumps_v0 is None:
+            self._missing()
+        try:
+            return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
+        """Parse a KEY row (v0 layout) using the registered developer codec."""
+        if self._loads_v0 is None:
+            self._missing()
+        try:
+            args = self._loads_v0(data)
+            if isinstance(args, (list, tuple)):
+                return args
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1528,6 +1668,89 @@ class JIoVAL_Y(JIoVAL):
 
         raise JValueError
 
+class JIoVAL_U(JIoVAL):
+    """Pluggable VAL codec ("U+..." / "...+U" data types).
+
+    Ships with no encoding logic of its own. A developer registers a
+    ``dumps``/``loads`` pair once (typically at application start-up) via
+    :meth:`register` or the module-level :func:`register_user_val_codec`
+    helper, and every ``JDb`` opened with a 'U' VAL data_type (``J+U``,
+    ``S+U``, ``U+U``) routes every value through that pair. This is the
+    extension point for encryption, custom compression, protobuf, etc.,
+    without needing to fork the library.
+    """
+    __slots__ = ('_dumps', '_loads', 'pad_byte')
+
+    def __init__(self):
+        self._dumps: Optional[Callable[[Any], bytes]] = None
+        self._loads: Optional[Callable[[bytes], Any]] = None
+        self.pad_byte: bytes = b'\n'
+
+    def register(self, dumps:Callable[[Any], bytes], loads:Callable[[bytes], Any], pad_byte:bytes=b'\n') -> None:
+        """Register the developer-defined VAL codec.
+
+        Args:
+            dumps (Callable[[Any], bytes]): Encode a Python value into bytes.
+            loads (Callable[[bytes], Any]): Decode bytes back into the Python value.
+            pad_byte (bytes, optional): Single byte guaranteed to never occur as the
+                first/last byte of ``dumps()`` output; used only when zip_type=NO_ZIP
+                to pad small values inline in the KEY row. Defaults to ``b'\\n'``.
+
+        Raises:
+            TypeError: If dumps/loads are not callable, pad_byte is not a single byte,
+                or the dumps/loads round-trip self-test fails.
+        """
+        if not callable(dumps) or not callable(loads):
+            raise TypeError('dumps and loads must be callable')
+        if not (isinstance(pad_byte, bytes) and len(pad_byte) == 1):
+            raise TypeError('pad_byte must be a single byte, e.g. b"\\n"')
+
+        test_val = {'key1':0, 'key2':[True,2.,'3']}
+        try:
+            if loads(dumps(test_val)) != test_val:
+                raise TypeError
+
+        except Exception as e:
+            raise TypeError('dumps/loads cannot work correctly') from e
+
+        self._dumps = dumps
+        self._loads = loads
+        self.pad_byte = pad_byte
+
+    def unregister(self) -> None:
+        """Clear a previously registered codec, e.g. between tests."""
+        self._dumps = self._loads = None
+        self.pad_byte = b'\n'
+
+    @property
+    def is_registered(self) -> bool:
+        """bool: Whether a developer codec has been registered yet."""
+        return self._dumps is not None and self._loads is not None
+
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value using the registered developer codec."""
+        if self._dumps is None:
+            raise UserCodecNotRegisteredError(
+                "data_type 'U' (VAL) is selected but no codec is registered. "
+                "Call register_user_val_codec(dumps, loads) before opening the JDb.")
+        try:
+            return self._dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a value using the registered developer codec."""
+        if self._loads is None:
+            raise UserCodecNotRegisteredError(
+                "data_type 'U' (VAL) is selected but no codec is registered. "
+                "Call register_user_val_codec(dumps, loads) before opening the JDb.")
+        try:
+            return self._loads(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1541,7 +1764,69 @@ g_VAL_S = JIoVAL_S()
 g_VAL_M = JIoVAL_M()
 g_VAL_P = JIoVAL_P()
 g_VAL_Y = JIoVAL_Y()
+g_VAL_U = JIoVAL_U()
+g_KEY_U = JIoKEY_U()
 g_HEAD = JIoHEAD()
+
+def register_user_val_codec(dumps:Callable[[Any], bytes], loads:Callable[[bytes], Any], pad_byte:bytes=b'\n') -> None:
+    """Register the developer-defined VAL codec used by the 'U' VAL data types (J+U, S+U, U+U).
+
+    Call this once, before opening any JDb with a 'U' data_type. Typical use case
+    is layering encryption on top of the existing JSON/msgpack encoders:
+
+    Example:
+        >>> from cryptography.fernet import Fernet
+        >>> from omni_json_db.jdb_io import register_user_val_codec, json_dumps, json_loads
+        >>> fernet = Fernet(Fernet.generate_key())
+        >>> register_user_val_codec(
+        ...     dumps=lambda data: fernet.encrypt(json_dumps(data)),
+        ...     loads=lambda raw: json_loads(fernet.decrypt(raw)),
+        ... )
+        >>> jdb = JDb('secure.jdb', data_type='J+U')  # readable KEY, encrypted VAL
+
+    Args:
+        dumps (Callable[[Any], bytes]): Encode a Python value into bytes.
+        loads (Callable[[bytes], Any]): Decode bytes back into the Python value.
+        pad_byte (bytes, optional): Single byte guaranteed to never occur as the
+            first/last byte of ``dumps()`` output. Defaults to ``b'\\n'``.
+    """
+    g_VAL_U.register(dumps, loads, pad_byte)
+
+def unregister_user_val_codec():
+    """Clear the process-wide VAL codec registered via ``register_user_val_codec()``.
+
+    After this, opening a JDb with a 'U' VAL data_type (J+U, S+U, U+U) will raise
+    :class:`UserCodecNotRegisteredError` again unless a per-instance ``val_codec=``
+    is supplied instead. Mainly useful for tests.
+    """
+    g_VAL_U.unregister()
+
+def register_user_key_codec(dumps:Callable[..., bytes], loads:Callable[[bytes], Tuple[str,int,int,int,int,int,int]],
+                             dumps_v0:Optional[Callable[..., bytes]]=None, loads_v0:Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int]]]=None) -> None:
+    """Register the developer-defined KEY (row index) codec used by data_type 'U+U'.
+
+    Only needed if the KEY row itself (key string + file offsets) must also be
+    transformed. Most developers only need :func:`register_user_val_codec`.
+
+    Args:
+        dumps (Callable): Receives a single packed row tuple
+            ``(key, file_id, offset, row_size, val_size, ver, days)`` and returns ``bytes``.
+            (Note: unlike the KEY row's field names might suggest, this is called with
+            *one* tuple argument, not 7 separate positional arguments.)
+        loads (Callable[[bytes], Tuple]): ``bytes -> (key, file_id, offset, row_size, val_size, ver, days)``.
+        dumps_v0 (Callable, optional): Legacy v0-layout variant of ``dumps``. Defaults to ``dumps``.
+        loads_v0 (Callable, optional): Legacy v0-layout variant of ``loads``. Defaults to ``loads``.
+    """
+    g_KEY_U.register(dumps, loads, dumps_v0, loads_v0)
+
+def unregister_user_key_codec():
+    """Clear the process-wide KEY codec registered via ``register_user_key_codec()``.
+
+    After this, opening a JDb with data_type 'U+U' will raise
+    :class:`UserCodecNotRegisteredError` again unless a per-instance ``key_codec=``
+    is supplied instead. Mainly useful for tests.
+    """
+    g_KEY_U.unregister()
 
 class JIo(JIoBase):
     """Core processing engine linking pipeline translation modules and file handles."""
@@ -1555,7 +1840,8 @@ class JIo(JIoBase):
             'files_obj', 'key_table', 'window_size', 'min_value_size',\
             '_KEY_rows', '_DEAD_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
-            'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0')
+            'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0',\
+            '_val_codec', '_key_codec')
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
@@ -1608,6 +1894,9 @@ class JIo(JIoBase):
         if data_type == S_P_TYPE: return 'S+P'
         if data_type == J_Y_TYPE: return 'J+Y'
         if data_type == S_Y_TYPE: return 'S+Y'
+        if data_type == J_U_TYPE: return 'J+U'
+        if data_type == S_U_TYPE: return 'S+U'
+        if data_type == U_U_TYPE: return 'U+U'
 
         raise ValueError(f'unknown data type {data_type}')
 
@@ -1713,7 +2002,9 @@ class JIo(JIoBase):
             index_size:Optional[int]=None, \
             max_file_size:Optional[int]=None, \
             reserved_rate:Optional[float]=None, \
-            sync_id:int=0, swap_id:int=0, remv_id:int=0):
+            sync_id:int=0, swap_id:int=0, remv_id:int=0, \
+            val_codec:Optional['JIoVAL_U']=None, \
+            key_codec:Optional['JIoKEY_U']=None):
 
         """Initialize the IO engine that reads and writes the KEY/VAL files.
 
@@ -1733,6 +2024,9 @@ class JIo(JIoBase):
                 - 'S+P' | 10 = KEY=msgpack  | VAL=Pickle
                 - 'J+Y' | 11 = KEY=msgpack  | VAL=YAML
                 - 'S+Y' | 12 = KEY=msgpack  | VAL=YAML
+                - 'J+U' | 13 = KEY=msgpack  | VAL=User
+                - 'S+U' | 14 = KEY=msgpack  | VAL=User
+                - 'U+U' | 15 = KEY=User     | VAL=User
 
             zip_type (str | int, optional): Target row data level compression profile.
                 
@@ -1765,12 +2059,28 @@ class JIo(JIoBase):
             sync_id (int, optional): Synchronization sequence generation tracker. Defaults to 0.
             swap_id (int, optional): Rearrangement transaction milestone tracking index. Defaults to 0.
             remv_id (int, optional): Accumulative deletions sequence tracker. Defaults to 0.
+            val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec override for 'U' VAL
+                data types (J+U, S+U, U+U). Lets different JDb instances use different developer
+                codecs (e.g. per-tenant encryption keys) instead of sharing the process-wide
+                ``g_VAL_U`` registered via ``register_user_val_codec()``. Must already have a
+                codec registered (``JIoVAL_U().register(dumps, loads)``) before being passed in.
+            key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec override for the
+                'U+U' data type, analogous to ``val_codec`` but for the row index. Defaults to
+                the process-wide ``g_KEY_U``.
 
         Raises:
             TypeError: If input structural variables violate driver specifications.
         """
         if not isinstance(files_obj, JFilesBase):
             raise TypeError
+
+        if val_codec is not None:
+            if not isinstance(val_codec, JIoVAL_U) or not val_codec.is_registered:
+                raise TypeError('val_codec must be a registered JIoVAL_U instance')
+
+        if key_codec is not None:
+            if not isinstance(key_codec, JIoKEY_U) or not key_codec.is_registered:
+                raise TypeError('key_codec must be a registered JIoKEY_U instance')
 
         if index_size is None or index_size == 0:
             index_size = DEF_INDEX_SIZE
@@ -1798,6 +2108,8 @@ class JIo(JIoBase):
 
         self._KEY_rows      = OrderedDict()
         self._DEAD_rows     = {}
+        self._val_codec     = val_codec
+        self._key_codec     = key_codec
         self._data_type     = self._zip_type = self._key_limit = -1
         self.key_table      = DictKeyTable() # must before self.key_limit = key_limit
         self.sync_id        = sync_id
@@ -2040,6 +2352,12 @@ class JIo(JIoBase):
                     value = M_M_TYPE
                 elif value in {'L+J', 'L:J', 'SPLIT+JSON'}:
                     value = L_J_TYPE
+                elif value in {'J+U', 'J:U', 'JSON+USER'}:
+                    value = J_U_TYPE
+                elif value in {'S+U', 'S:U', 'MSGPACK+USER'}:
+                    value = S_U_TYPE
+                elif value in {'U+U', 'U:U', 'USER+USER'}:
+                    value = U_U_TYPE
                 else:
                     raise ValueError(f'invalid data string {value}')
 
@@ -2051,6 +2369,16 @@ class JIo(JIoBase):
 
         if value in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
+
+        if value in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered:
+            raise UserCodecNotRegisteredError(
+                "data_type requires a VAL codec. Pass val_codec=... to JDb()/JIo(), "
+                "or call register_user_val_codec(dumps, loads) to set a process-wide default.")
+
+        if value == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered:
+            raise UserCodecNotRegisteredError(
+                "data_type 'U+U' requires a KEY codec too. Pass key_codec=... to JDb()/JIo(), "
+                "or call register_user_key_codec(dumps, loads) to set a process-wide default.")
 
         self._data_type = value
 
@@ -2181,6 +2509,16 @@ class JIo(JIoBase):
         if data_type in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
+        if data_type in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered:
+            raise UserCodecNotRegisteredError(
+                "data_type requires a VAL codec. Pass val_codec=... to JDb()/JIo(), "
+                "or call register_user_val_codec(dumps, loads) to set a process-wide default.")
+
+        if data_type == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered:
+            raise UserCodecNotRegisteredError(
+                "data_type 'U+U' requires a KEY codec too. Pass key_codec=... to JDb()/JIo(), "
+                "or call register_user_key_codec(dumps, loads) to set a process-wide default.")
+
         if zip_type in {ZS_ZIP, Z1_ZIP, Z2_ZIP} and zstd_decompress is None: # pragma: no cover
             raise ModuleNotFoundError("zstandard is not installed. Please pip install zstandard.")
 
@@ -2199,6 +2537,10 @@ class JIo(JIoBase):
             self.VAL_unzip0     = UNZIP_lut0[zip_type]
             self.pad_byte       = PAD_lut[zip_type](data_type)
             self.pad0_byte      = PAD_lut[NO_ZIP](data_type)
+            if data_type in (J_U_TYPE, S_U_TYPE, U_U_TYPE) and self._val_codec is not None:
+                # per-instance codec may declare its own safe NO_ZIP pad byte
+                self.pad_byte  = self._val_codec.pad_byte if zip_type == NO_ZIP else self.pad_byte
+                self.pad0_byte = self._val_codec.pad_byte
             self.HEAD_dumps     = g_HEAD.dumps_v0
             self.HEAD_loads     = g_HEAD.loads_v0
             if data_type == L_J_TYPE:
@@ -2261,6 +2603,25 @@ class JIo(JIoBase):
                 self.KEY_dumps = g_KEY_S.dumps_v0
                 self.VAL_loads = g_VAL_Y.loads
                 self.VAL_dumps = g_VAL_Y.dumps
+            elif data_type == J_U_TYPE:
+                self.KEY_loads = g_KEY_J.loads_v0
+                self.KEY_dumps = g_KEY_J.dumps_v0
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
+            elif data_type == S_U_TYPE:
+                self.KEY_loads = g_KEY_S.loads_v0
+                self.KEY_dumps = g_KEY_S.dumps_v0
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
+            elif data_type == U_U_TYPE:
+                _key = self._key_codec or g_KEY_U
+                self.KEY_loads = _key.loads_v0
+                self.KEY_dumps = _key.dumps_v0
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
             else:
                 raise ValueError(f'invalid data type {self.api_ver}->{version} type:{data_type}')
 
@@ -2273,6 +2634,10 @@ class JIo(JIoBase):
             self.VAL_unzip0     = UNZIP_lut0[zip_type]
             self.pad_byte       = PAD_lut[zip_type](data_type)
             self.pad0_byte      = PAD_lut[NO_ZIP](data_type)
+            if data_type in (J_U_TYPE, S_U_TYPE, U_U_TYPE) and self._val_codec is not None:
+                # per-instance codec may declare its own safe NO_ZIP pad byte
+                self.pad_byte  = self._val_codec.pad_byte if zip_type == NO_ZIP else self.pad_byte
+                self.pad0_byte = self._val_codec.pad_byte
             self.HEAD_dumps     = g_HEAD.dumps_v1
             self.HEAD_loads     = g_HEAD.loads_v1
             if data_type == L_J_TYPE:
@@ -2335,11 +2700,43 @@ class JIo(JIoBase):
                 self.KEY_dumps = g_KEY_S.dumps_v1
                 self.VAL_loads = g_VAL_Y.loads
                 self.VAL_dumps = g_VAL_Y.dumps
+            elif data_type == J_U_TYPE:
+                self.KEY_loads = g_KEY_J.loads_v1
+                self.KEY_dumps = g_KEY_J.dumps_v1
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
+            elif data_type == S_U_TYPE:
+                self.KEY_loads = g_KEY_S.loads_v1
+                self.KEY_dumps = g_KEY_S.dumps_v1
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
+            elif data_type == U_U_TYPE:
+                _key = self._key_codec or g_KEY_U
+                self.KEY_loads = _key.loads_v1
+                self.KEY_dumps = _key.dumps_v1
+                _val = self._val_codec or g_VAL_U
+                self.VAL_loads = _val.loads
+                self.VAL_dumps = _val.dumps
             else:
                 raise ValueError(f'invalid data type {self.api_ver}->{version} type:{data_type}')
 
         else:
             raise ValueError(f'invalid version {self.api_ver}->{version} type:{data_type}')
+
+        try:
+            if tuple(self.KEY_loads(self.KEY_dumps('1',2,3,4,5,6,7))) != ('1',2,3,4,5,6,7): # pragma: no cover
+                raise TypeError
+        except Exception as e: # pragma: no cover
+            raise TypeError('invalid KEY_loads/KEY_dumps') from e
+
+        try:
+            test_val = {'key1':0, 'key2':[True,2.,'3']}
+            if self.VAL_loads(self.VAL_dumps(test_val)) != test_val: # pragma: no cover
+                raise TypeError
+        except Exception as e:
+            raise TypeError('invalid VAL_loads/VAL_dumps') from e
 
     def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False) -> Generator[Tuple[str,int], None, None]:
         """Iterate ``(key, row_id)`` pairs in row order.
@@ -3187,7 +3584,9 @@ class JIo(JIoBase):
                     data_type=self._data_type,
                     zip_type=self._zip_type,
                     api_ver=api_ver,
-                    index_size=index_size)
+                    index_size=index_size,
+                    val_codec=self._val_codec,
+                    key_codec=self._key_codec)
 
         table = {}
         src_row_id = dst_row_id = 0

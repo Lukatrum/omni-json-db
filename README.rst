@@ -46,6 +46,10 @@ Built for high throughput and thread safety, **omni-json-db** utilizes modern se
 
 Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query and manipulate data using native Python syntax—including slicing, lambdas, regex, and set operations. It also features built-in "Time-Travel" (undo/redo), a property-graph engine, and pluggable serialization.
 
+..
+
+   **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
+
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 |                                  | **omni-json-db**  | TinyDB    | DiskCache | UnQLite | LMDB       | RocksDict | SQLite    | DuckDB    |
 +==================================+===================+===========+===========+=========+============+===========+===========+===========+
@@ -89,10 +93,6 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 .. [x] Lower is faster. (see the `benchmark <https://github.com/lukatrum/omni-json-db/blob/main/benchmark/report.txt>`_ for the full breakdown and methodology)
 .. [y] Impractically slow
 
-..
-
-   **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
-
  
 🚀 Features
 ***********
@@ -101,6 +101,8 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 * **Pythonic Interaction**: Interact with data using familiar Python ``dict`` methods, list slicing, and set operations, avoiding complex SQL queries. [refer to `Basic`_ + `Operator`_]
 
 * **Advanced Serialization & Compression**: Combine formats (JSON, MsgPack, Pickle, YAML) with algorithms like LZ4, Zstandard, or Brotli to optimize your I/O and disk usage. [refer to `Change Type`_ + `Supported Data Formats`_ + `Supported Zip Formats`_]
+
+* **Pluggable Codec & Encryption**: Bring your own serialization or encryption logic via a simple ``dumps``/``loads`` interface — no forking required. Supports both a process-wide default and per-instance codecs (e.g. per-tenant encryption keys). [refer to `Pluggable User-Defined Codec (U)`_]
 
 * **Powerful Query Engine**: Execute searches via Regex, Lambda filters, and rich operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``, ...). [refer to `Query Engine`_ + `More Query Examples`_ + `Pythonic Query Examples`_]
 
@@ -1509,16 +1511,13 @@ Supported Data Formats
 
 Configure ``data_type`` during initialization:
 
-* ``J+J``: JSON Key + JSON Value
-* ``J+S``: JSON Key + MsgPack Value (default)
-* ``J+M``: JSON Key + Marshal Value
-* ``J+P``: JSON Key + Pickle Value
-* ``J+Y``: JSON Key + YAML Value
-* ``S+J``: MsgPack Key + JSON Value
-* ``S+S``: MsgPack Key + MsgPack Value
-* ``S+M``: MsgPack Key + Marshal Value
-* ``S+P``: MsgPack Key + Pickle Value
-* ``S+Y``: MsgPack Key + YAML Value
+* ``J+J`` or ``S+J``: JSON/MsgPack Key + JSON Value
+* ``J+S`` or ``S+S``: JSON/MsgPack Key + MsgPack Value (default)
+* ``J+M`` or ``S+M``: JSON/MsgPack Key + Marshal Value
+* ``J+P`` or ``S+P``: JSON/MsgPack Key + Pickle Value
+* ``J+Y`` or ``S+Y``: JSON/MsgPack Key + YAML Value
+* ``J+U`` or ``S+U``: JSON/MsgPack Key + User-Defined Value (pluggable codec, e.g. encryption)
+* ``U+U``: User-Defined Key + User-Defined Value (pluggable codec for both)
 
 *Data size = 70,840,580 bytes (MB = 1,000,000 bytes, no zip)*
 
@@ -1553,6 +1552,67 @@ Configure ``data_type`` during initialization:
 .. [b] convert to hex string
 .. [c] only support string key
 .. [d] all type = ``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
+
+Pluggable User-Defined Codec (U)
+----------------------------------
+
+``J+U``, ``S+U``, and ``U+U`` let you plug in your own codec instead of using a
+built-in format. This is the extension point for encryption, custom
+compression, protobuf, or any other serialization you want full control over.
+
+* ``J+U`` / ``S+U``: Key stays JSON/MsgPack (readable/small), only the Value
+  goes through your codec.
+* ``U+U``: Both the Key row and the Value go through your own codec.
+
+There are two ways to register a codec:
+
+1. **Process-wide default** — register once, every ``JDb`` opened with a
+   ``U`` data_type uses it.
+2. **Per-instance** — pass ``val_codec=`` (and optionally ``key_codec=``) to
+   ``JDb()`` so different instances (e.g. different tenants) can use
+   different codecs/keys at the same time.
+
+.. code-block:: python
+
+   from marshal import loads as marshal_loads, dumps as marshal_dumps
+   from omni_json_db import JDb, register_user_val_codec
+
+   # --- Process-wide default: encrypt every Value with Fernet ---
+   from cryptography.fernet import Fernet
+   fernet = Fernet(Fernet.generate_key())
+
+   register_user_val_codec(
+       dumps=lambda data: fernet.encrypt(marshal_dumps(data)),
+       loads=lambda raw: marshal_loads(fernet.decrypt(raw)),
+   )
+
+   # Key=JSON (readable), Value=encrypted
+   jdb = JDb("secure.jdb", data_type="J+U")
+   jdb["alice"] = {"ssn": "123-45-6789", "balance": 42.5}
+
+   # Re-open and decrypt transparently
+   jdb2 = JDb("secure.jdb", data_type="J+U")
+   assert jdb2["alice"] == {"ssn": "123-45-6789", "balance": 42.5}
+
+.. code-block:: python
+
+   from marshal import loads as marshal_loads, dumps as marshal_dumps
+   from omni_json_db import JDb, JIoVAL_U
+   from cryptography.fernet import Fernet
+
+   # --- Per-instance codec: each tenant gets its own encryption key ---
+   def make_codec(fernet):
+       codec = JIoVAL_U()
+       codec.register(
+           dumps=lambda data: fernet.encrypt(marshal_dumps(data)),
+           loads=lambda raw: marshal_loads(fernet.decrypt(raw)),
+       )
+       return codec
+
+   key_a = Fernet.generate_key()
+   key_b = Fernet.generate_key()
+   tenant_a = JDb("tenant_a.jdb", data_type="J+U", val_codec=make_codec(Fernet(key_a)))
+   tenant_b = JDb("tenant_b.jdb", data_type="S+U", val_codec=make_codec(Fernet(key_b)))
 
 Supported Zip Formats
 ---------------------
@@ -1722,3 +1782,4 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
+   

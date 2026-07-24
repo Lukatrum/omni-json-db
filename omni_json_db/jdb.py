@@ -9,10 +9,10 @@ from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, IO
 from random import randint, randrange
 from collections import OrderedDict
 #-----------------------------------------------------------------------------
-from .jdb_io import JIo, KeyTable, \
-        MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, \
+from .jdb_io import JIo, KeyTable, MAX_INDEX_SIZE, \
+        MIN_INDEX_SIZE, VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, NEW_DAY_SHIFT, \
         MAX_KEY_SIZE, API_LATEST, CHG_DAY_FLAG, NEW_DAY_MASK, OLD_DAY_MASK, \
-        MAX_INDEX_SIZE, g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, NEW_DAY_SHIFT
+        g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_lite import JDbReader, JDbKey, JFlag, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy
 from .jdb_file import JFilesBase
@@ -233,7 +233,9 @@ class JDb(JDbReader):
             api_ver:Optional[int]=None,\
             write_hook:Optional[Callable[[str,Any],bool]]=None,\
             max_wsize:Optional[int]=None,\
-            flags:Optional[JFlag]=None, **kwargs):
+            flags:Optional[JFlag]=None, \
+            val_codec:Optional[Any]=None, \
+            key_codec:Optional[Any]=None, **kwargs):
         """
         Initialize the transactional JDb controller object mapping configurations sheets models.
 
@@ -301,6 +303,13 @@ class JDb(JDbReader):
             write_hook (Optional[Callable[[str, Any], bool]], optional): Callback triggered before writing.
             max_wsize (Optional[int], optional): Search window for dead lines. Defaults to 4.
             flags (Optional[JFlag], optional): Enum flags for modifying revert/split behavior.
+            val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec for 'U' data types
+                (J+U, S+U, U+U) — e.g. a distinct encryption key per JDb instance instead of one
+                process-wide codec. Must already be registered:
+                ``JIoVAL_U().register(dumps, loads)``. Defaults to the process-wide codec set by
+                ``register_user_val_codec()``.
+            key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U' data
+                type. Defaults to the process-wide codec set by ``register_user_key_codec()``.
             **kwargs: Extra arguments passed to internal components.
         
         Raises:
@@ -311,6 +320,12 @@ class JDb(JDbReader):
             >>> jdb = JDb('192.168.0.1:8181') # Network mode
             >>> jdb = JDb('file.jdb') # file mode
             >>> jdb = JDb('example.jdb', data_type='J+J', zip_type='gz')
+            >>> # Per-tenant encryption: each JDb gets its own key, unlike the
+            >>> # process-wide register_user_val_codec() default.
+            >>> from omni_json_db.jdb_io import JIoVAL_U
+            >>> codec = JIoVAL_U()
+            >>> codec.register(dumps=my_dumps, loads=my_loads)
+            >>> jdb = JDb('tenant42.jdb', data_type='J+U', val_codec=codec)
         
         """
         super().__init__(KEY_file=KEY_file,
@@ -327,6 +342,8 @@ class JDb(JDbReader):
             write_hook=write_hook,
             max_wsize=max_wsize,
             flags=flags,
+            val_codec=val_codec,
+            key_codec=key_codec,
             **kwargs)
 
     def __setitem__(self, key:Union[str,Any], val:Any):
@@ -1671,27 +1688,31 @@ class JDb(JDbReader):
     def change_KEY(self, KEY_type:str, api_ver:Optional[int]=None) -> bool:
         """Rebuild the KEY file with a different serialization format.
         
-        ``KEY_type`` is a code like ``'J'`` (JSON), ``'S'`` (msgpack), ``'M'`` (MessagePack), ``'P'`` (pickle), or ``'Y'`` (YAML).
+        ``KEY_type`` is a code like ``'J'`` (JSON), ``'S'`` (msgpack), ``'M'`` (MessagePack), ``'P'`` (pickle), or ``'Y'`` (YAML) or ``'U'`` (user codec)
 
         Args:
             KEY_type (str): The new KEY serialization code (e.g. ``'J'``, ``'L'``, ``'M'``, ``'S'``).
+                ``'U'`` is only valid when the VAL codec is already ``'U'`` (i.e. the current
+                data_type is ``J+U``, ``S+U``, or ``U+U``), since ``'U+<other>'`` combinations
+                (e.g. ``'U+S'``) don't exist as a data_type.
             api_ver (Optional[int], optional): API version to use. Defaults to None (use current).
 
         Returns:
             bool: True if the KEY file was rebuilt, False otherwise.
 
         Raises:
-            ValueError: If ``KEY_type`` is not a supported code.
+            ValueError: If ``KEY_type`` is not a supported code, or if ``'U'`` is requested
+                while the current VAL codec isn't already ``'U'``.
 
         Example:
-            >>> jdb = JDb(date_type='J+J')
+            >>> jdb = JDb(data_type='J+J')
             >>> jdb.change_KEY('S')
             >>> print(jdb.data_type)
             S+J
         """
         KEY_type_u = KEY_type.upper()
-        if KEY_type_u not in 'LMJS':
-            raise ValueError('KEY_type must be J|L|M|S')
+        if KEY_type_u not in 'JUMLS':
+            raise ValueError('KEY_type must be J|U|M|L|S')
 
         with self.open(read_only=True) as fp:
             io, fp, key_fp = self.f_get_fp(fp)
@@ -1705,6 +1726,11 @@ class JDb(JDbReader):
             if api_ver == io.api_ver and old_data_type_s.startswith(KEY_type_u):
                 # same KEY type
                 return False
+
+            if KEY_type_u == 'U' and not old_data_type_s.endswith('+U'):
+                raise ValueError(
+                    "KEY_type 'U' requires the VAL codec to already be 'U' "
+                    f"(data_type must already be J+U/S+U/U+U, got {old_data_type_s})")
 
             io, fp, key_fp, _chg = self.f_get_write_fp(fp)
             n_lines = io.n_lines
@@ -1777,13 +1803,16 @@ class JDb(JDbReader):
                 - "J+P" | KEY=JSON    | VAL=Pickle
                 - "J+S" | KEY=JSON    | VAL=msgpack (default)
                 - "J+Y" | KEY=JSON    | VAL=YAML
+                - "J+U" | KEY=JSON    | VAL=User
                 - "S+J" | KEY=Msgpack | VAL=JSON
                 - "S+M" | KEY=Msgpack | VAL=Marshal
                 - "S+P" | KEY=Msgpack | VAL=Pickle
                 - "S+S" | KEY=Msgpack | VAL=msgpack
                 - "S+Y" | KEY=Msgpack | VAL=YAML
+                - "S+U" | KEY=Msgpack | VAL=User
                 - "L+J" | KEY=split   | VAL=Json
                 - "M+M" | KEY=Marshal | VAL=Marshal
+                - "U+U" | KEY=User    | VAL=User
             
             zip_type (Union[str, int, None], optional): New VAL compression type. Defaults to None (unchanged).
                 
@@ -5191,10 +5220,11 @@ class JDb(JDbReader):
             ret_type (str, optional): return format                
                 
                 - "J" = JSON format (default)
+                - "U" = User format
                 - "M" = Marshal format
                 - "P" = Pickle format
                 - "S" = Msgpack format
-                - "Y" = YAML format
+                - "Y" = YAML format                
 
         Returns:
             bytes: converted data 
@@ -5217,10 +5247,11 @@ class JDb(JDbReader):
             ret_type = 'J'
 
         ret_type_u = ret_type.upper()
-        if ret_type_u not in 'JMPSY':
-            raise ValueError('date_type must be (J)son/(M)arshal/(P)ickle/M(S)gpack/(Y)aml')
+        if ret_type_u not in 'JUMPSY':
+            raise ValueError('date_type must be (J)son/(M)arshal/(P)ickle/M(S)gpack/(Y)aml/(U)ser')
 
         dumps = g_VAL_J.dumps if ret_type_u == 'J' else \
+            g_VAL_U.dumps if ret_type_u == 'U' else \
             g_VAL_M.dumps if ret_type_u == 'M' else \
             g_VAL_P.dumps if ret_type_u == 'P' else \
             g_VAL_S.dumps if ret_type_u == 'S' else \
@@ -5238,10 +5269,11 @@ class JDb(JDbReader):
             ret_type (str, optional): return format
 
                 - "J" = JSON format
+                - "U" = User format
                 - "M" = Marshal format
                 - "P" = Pickle format
                 - "S" = Msgpack format
-                - "Y" = YAML format
+                - "Y" = YAML format                
 
         Returns:
             bytes: Python data
@@ -5257,10 +5289,11 @@ class JDb(JDbReader):
             >>> loads(dumps([1,2], 'Y'), 'J') # Output: [1,2]
         """
         ret_type_u = ret_type.upper()
-        if ret_type_u not in 'JMPSY':
-            raise ValueError('date_type must be (J)son/(M)arshal/(P)ickle/M(S)gpack/(Y)aml')
+        if ret_type_u not in 'JUMPSY':
+            raise ValueError('date_type must be (J)son/(M)arshal/(P)ickle/M(S)gpack/(Y)aml/(U)ser')
 
         loads = g_VAL_J.loads if ret_type_u == 'J' else \
+            g_VAL_U.loads if ret_type_u == 'U' else \
             g_VAL_M.loads if ret_type_u == 'M' else \
             g_VAL_P.loads if ret_type_u == 'P' else \
             g_VAL_S.loads if ret_type_u == 'S' else \
@@ -5269,3 +5302,4 @@ class JDb(JDbReader):
         return loads(data)
 
 #
+

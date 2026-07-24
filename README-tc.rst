@@ -4,7 +4,7 @@
 
 ..
 
-	靈巧的小松鼠迅速地收集森林的金色橡子！
+   靈巧的小松鼠迅速地收集森林的金色橡子！
 
 |Build Status| |readthedocs| |Pylint| |Codacy| |Coverage|
 
@@ -52,6 +52,8 @@
 * **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]
 
 * **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
+
+* **可插拔編碼與加密**：透過簡單的 ``dumps``/``loads`` 介面，帶入您自己的序列化或加密邏輯——無需修改函式庫原始碼。同時支援全域預設編碼與個別實例編碼（例如每個租戶各自使用不同的加密金鑰）。[參考 `使用者自訂編碼（U）`_]
 
 * **強大的查詢引擎**：使用正則表達式 (Regex)、Lambda 過濾器（如 ``jdb[lambda k, v: v > 10]``）及豐富的條件運算子（``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``）輕鬆搜尋。 [參考 `查詢引擎`_ + `更多查詢示範`_ + `Pythonic 查詢範例`_]
 
@@ -1406,6 +1408,9 @@ Pythonic 查詢範例
 * ``S+M``: MsgPack 鍵 + Marshal 值
 * ``S+P``: MsgPack 鍵 + Pickle 值
 * ``S+Y``: MsgPack 鍵 + YAML 值
+* ``J+U``: JSON 鍵 + 使用者自訂值（可插拔編碼，例如加密）
+* ``S+U``: MsgPack 鍵 + 使用者自訂值（可插拔編碼，例如加密）
+* ``U+U``: 使用者自訂鍵 + 使用者自訂值（鍵與值皆可插拔）
 
 *Data size = 70,840,580 (MB = 1,000,000B, no zip)*
 
@@ -1440,6 +1445,65 @@ Pythonic 查詢範例
 .. [b] 用 hex string 取代
 .. [c] 只支援 string key
 .. [d] 所有type = ``str``, ``bytes``, ``bool``, ``int``, ``float``, ``list``, ``tuple``, ``set``, ``dict``, ``None``
+
+使用者自訂編碼（U）
+----------------------------------
+
+``J+U``、``S+U`` 與 ``U+U`` 讓您使用自己的編碼取代內建格式。這是加密、自訂壓縮、
+protobuf，或任何您想要完全掌控的序列化方式的擴充點。
+
+* ``J+U`` / ``S+U``：鍵（Key）維持 JSON/MsgPack 格式（可讀／體積小），只有值（Value）
+  會經過您的自訂編碼。
+* ``U+U``：鍵（Key）與值（Value）皆會經過您自己的編碼。
+
+有兩種方式可以註冊編碼：
+
+1. **全域預設**——只需註冊一次，所有以 ``U`` 開頭的 data_type 開啟的 ``JDb`` 都會
+   使用它。
+2. **個別實例**——在 ``JDb()`` 傳入 ``val_codec=``（也可搭配 ``key_codec=``），讓
+   不同的實例（例如不同租戶）可以同時使用各自不同的編碼／金鑰。
+
+.. code-block:: python
+
+   from marshal import loads as marshal_loads, dumps as marshal_dumps
+   from omni_json_db import JDb, register_user_val_codec
+
+   # --- 全域預設：使用 Fernet 加密每一筆 Value ---
+   from cryptography.fernet import Fernet
+   fernet = Fernet(Fernet.generate_key())
+
+   register_user_val_codec(
+       dumps=lambda data: fernet.encrypt(marshal_dumps(data)),
+       loads=lambda raw: marshal_loads(fernet.decrypt(raw)),
+   )
+
+   # Key=JSON（可讀）, Value=已加密
+   jdb = JDb("secure.jdb", data_type="J+U")
+   jdb["alice"] = {"ssn": "123-45-6789", "balance": 42.5}
+
+   # 重新開啟資料庫，會自動解密
+   jdb2 = JDb("secure.jdb", data_type="J+U")
+   assert jdb2["alice"] == {"ssn": "123-45-6789", "balance": 42.5}
+
+.. code-block:: python
+
+   from marshal import loads as marshal_loads, dumps as marshal_dumps
+   from omni_json_db import JDb, JIoVAL_U
+   from cryptography.fernet import Fernet
+
+   # --- 個別實例編碼：每個租戶擁有各自的加密金鑰 ---
+   def make_codec(fernet):
+       codec = JIoVAL_U()
+       codec.register(
+           dumps=lambda data: fernet.encrypt(marshal_dumps(data)),
+           loads=lambda raw: marshal_loads(fernet.decrypt(raw)),
+       )
+       return codec
+
+   key_a = Fernet.generate_key()
+   key_b = Fernet.generate_key()
+   tenant_a = JDb("tenant_a.jdb", data_type="J+U", val_codec=make_codec(Fernet(key_a)))
+   tenant_b = JDb("tenant_b.jdb", data_type="S+U", val_codec=make_codec(Fernet(key_b)))
 
 壓縮種類
 ---------------------

@@ -8,6 +8,10 @@ from .utils import JError, JKeyError, JValueError, JTypeError
 from .jdb_file import JDiskFiles, JMemFiles, JBytesIO
 from .jdb_net import JNetFiles
 from .jdb_lite import JDbReader, SEP_SYM, JFlag
+from .jdb_io import UserCodecNotRegisteredError, JIoVAL_U, JIoKEY_U, \
+                    register_user_key_codec, unregister_user_key_codec, \
+                    register_user_val_codec, unregister_user_val_codec
+
 from .jdb import JDb
 from .jdb_server import run_files_server
 from .jdb_query import Query
@@ -18,7 +22,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful KV JSON database with compression/Time-travel/Concurrency. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.14.30'
+__version__         = '2.14.31'
 
 __all__ = (
     'GraphDb',
@@ -30,6 +34,8 @@ __all__ = (
     'JValueError', 
     'JFlag',
     'JBytesIO',
+    'JIoVAL_U',
+    'JIoKEY_U',
     'JDiskFiles',
     'JMemFiles',
     'JNetFiles',
@@ -38,6 +44,10 @@ __all__ = (
     'dumps',
     'loads',
     'run_files_server',
+    'register_user_key_codec',
+    'register_user_val_codec',
+    'unregister_user_key_codec',
+    'unregister_user_val_codec',
 )
 
 loads = JDb.z_loads
