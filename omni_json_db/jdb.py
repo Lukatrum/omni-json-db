@@ -2719,7 +2719,7 @@ class JDb(JDbReader):
 
         return True
 
-    def from_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, **kwargs) -> JDb:
+    def from_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, **kwargs) -> JDb:
         """Import records from a CSV file.
         
         If ``key`` is given, the CSV columns become a nested dict under that key; otherwise each CSV row becomes a top-level record.
@@ -2727,8 +2727,6 @@ class JDb(JDbReader):
         Args:
             csv_file (Union[str, IO]): Source file path, or an open file-like object.
             key (Optional[str], optional): If given, import as a single nested record under this key. Defaults to None.
-            flags (Optional[JFlag], optional): strategic operational behavioral modifiers flags. Defaults to None.
-            max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
             **kwargs: Extra arguments passed through to ``csv.DictReader``.
 
         Returns:
@@ -2758,13 +2756,71 @@ class JDb(JDbReader):
                     if fix_it or isinstance(row, OrderedDict):
                         row = dict(row)
 
-                    self.f_write(fp, key_id, row, flags=flags, max_wsize=max_wsize)
+                    self.f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True)
                     if (ii % 1000) == 0:
                         print('.', end='', flush=True)
 
         finally:
             if owns_it and csv_fp is not None:
                 csv_fp.close()
+
+        return self
+
+    def from_parquet(self, parquet_file:Union[str,IO], key:Optional[str]=None, columns:Optional[List[str]]=None, batch_size:int=65536, **kwargs) -> JDb:
+        """Import records from a Parquet file.
+
+        Rows are streamed via ``pyarrow``'s ``RecordBatch`` reader instead of being loaded
+        fully into memory, so large files import with a small, constant memory footprint.
+        Mirrors :meth:`from_csv`'s key semantics: if ``key`` is not given, the first column
+        in the schema becomes the record key.
+
+        Args:
+            parquet_file (Union[str, IO]): Source file path, or an open file-like/``pyarrow.NativeFile`` object.
+            key (Optional[str], optional): Column to use as the record key. Defaults to the first schema column.
+            columns (Optional[List[str]], optional): Subset of columns to read (column pruning); reads all columns if None.
+            flags (Optional[JFlag], optional): strategic operational behavioral modifiers flags. Defaults to None.
+            max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
+            batch_size (int, optional): Rows fetched per ``RecordBatch`` while streaming. Defaults to 65536.
+            **kwargs: Extra arguments passed through to ``pyarrow.parquet.ParquetFile``.
+
+        Returns:
+            JDb: This database, after the import.
+
+        Raises:
+            ImportError: If the optional ``pyarrow`` dependency is not installed.
+        """
+        try:
+            from pyarrow.parquet import ParquetFile
+        except ImportError as err: # pragma: no cover
+            raise ImportError("from_parquet() requires the 'pyarrow' package; install it with: pip install pyarrow") from err
+
+        if columns is not None and key is not None and key not in columns:
+            columns = [key, *columns]
+
+        pf = ParquetFile(parquet_file, **kwargs)
+        try:
+            with self.open(read_only=False) as fp:
+                has_SIGINT = self.file_lock.has_SIGINT
+                f_write = self.f_write
+                key_col = key
+                ii = 0
+                for batch in pf.iter_batches(batch_size=batch_size, columns=columns):
+                    for row in batch.to_pylist():
+                        if has_SIGINT(): break
+
+                        if key_col is None:
+                            key_col = next(iter(row))
+
+                        key_id = row.pop(key_col)
+                        f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True)
+                        ii += 1
+                        if (ii % 1000) == 0: # pragma: no cover
+                            print('.', end='', flush=True)
+
+        finally:
+            close = getattr(pf, 'close', None)
+            if callable(close): # pragma: no cover
+                close()
 
         return self
 
@@ -2824,7 +2880,7 @@ class JDb(JDbReader):
                         for row in rows:
                             val = {col: row[col] for col in val_cols}
                             key = '|'.join(str(row[col]) for col in pk_cols) if pk_cols else str(jio.sync_id)
-                            child_jdb.f_write(fp, key, val)
+                            child_jdb.f_write(fp, key, val, flags=0, max_wsize=0, overwrite=True)
 
             return self
 
@@ -2852,9 +2908,10 @@ class JDb(JDbReader):
             parser.read_file(src)
 
         with self.open(read_only=False) as fp:
+            f_write = self.f_write
             for section in parser.sections():
                 for key,val in parser.items(section):
-                    self.f_write(fp, f'{section}/{key}', val)
+                    f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True)
 
             return self
 
@@ -2889,12 +2946,13 @@ class JDb(JDbReader):
 
         data = toml_loads(content)
         with self.open(read_only=False) as fp:
+            f_write = self.f_write
             for section,attributes in data.items():
                 if isinstance(attributes, dict):
                     for key,val in attributes.items():
-                        self.f_write(fp, f'{section}/{key}', val)
+                        f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True)
                 else:
-                    self.f_write(fp, f'/{section}', attributes)
+                    f_write(fp, f'/{section}', attributes, flags=0, max_wsize=0, overwrite=True)
 
             return self
 

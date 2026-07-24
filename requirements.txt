@@ -10,3 +10,4 @@ pyyaml
 zstandard
 tomli
 networkx
+pyarrow

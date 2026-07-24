@@ -1501,6 +1501,51 @@ class TestJDb(unittest.TestCase):
             logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
             self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
 
+            try:
+                import pyarrow as pa
+                import pyarrow.parquet as pq
+            except ImportError:
+                pa = None
+
+            if pa is None: # pragma: no cover
+                print(Style(f'{filename}: pyarrow not installed, skipping from_parquet test', yellow=1))
+            else:
+                parquet_path = 'db/sample.parquet'
+                table = pa.table({
+                    '_id': ['p1', 'p2', 'p3', 'p4'],
+                    'name': ['Alice', 'Bob', 'Charlie', 'Diana'],
+                    'age': [30, 25, 35, 28],
+                    'active': [True, False, True, True],
+                })
+                pq.write_table(table, parquet_path)
+
+                before = len(jdb)
+                jdb.from_parquet(parquet_path)
+                self.assertEqual(len(jdb), before + 4)
+                self.assertEqual(jdb['p1'], {'name': 'Alice', 'age': 30, 'active': True})
+                self.assertEqual(jdb['p3']['name'], 'Charlie')
+
+                matches = jdb.find(ANY={'name': 'Diana'})
+                self.assertEqual(len(matches), 1)
+
+                jdb.remove(['p1', 'p2', 'p3', 'p4'])
+                self.assertEqual(len(jdb), before)
+
+                # explicit key column + column pruning (only 'name' imported)
+                jdb.from_parquet(parquet_path, key='_id', columns=['name'])
+                self.assertEqual(jdb['p2'], {'name': 'Bob'})
+                self.assertNotIn('age', jdb['p2'])
+
+                jdb.remove(['p1', 'p2', 'p3', 'p4'])
+                self.assertEqual(len(jdb), before)
+
+                # streaming with a tiny batch_size still yields correct results
+                jdb.from_parquet(parquet_path, batch_size=1)
+                self.assertEqual(len(jdb), before + 4)
+
+                jdb.remove(['p1', 'p2', 'p3', 'p4'])
+                self.assertEqual(len(jdb), before)
+
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])

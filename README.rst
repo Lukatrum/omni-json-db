@@ -61,7 +61,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 | In-memory mode                   | ✅                | ✅        | ❌        | ✅      | ❌         | ❌        | ✅        | ✅        |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| CSV / SQLite migration built-in  | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ⚠️ (CLI)  | ✅        |
+| CSV / SQLite / Parquet built-in  | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ⚠️ (CLI)  | ✅        |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 | Compression built-in             | ✅                | ❌        | ✅        | ❌      | ❌         | ✅        | ❌        | ✅        |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
@@ -110,7 +110,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
 
-* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, INI, and TOML with simple commands. [refer to `CSV Import / Export`_ + `SQLite Import`_ + `INI / TOML Import`_]
+* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem. [refer to `CSV Import / Export`_ + `Parquet Import`_ + `SQLite Import`_ + `INI / TOML Import`_]
 
 * **Time-Series Ready**: Native timestamping allows for efficient date-based slicing (e.g., ``jdb[yesterday:now]``). [refer to `Time-Series`_]
 
@@ -483,6 +483,41 @@ Step 2: Import to ``JDb``
 
    # Combine with powerful Lambda queries to find logs for a specific project
    project_3_logs = logs.find(FUNC=lambda val: val['project_id'] == 3)
+
+Parquet Import
+--------------
+
+Requires the optional ``pyarrow`` dependency (``pip install pyarrow``).
+
+.. code-block:: python
+
+   import pyarrow as pa
+   import pyarrow.parquet as pq
+
+   # write a sample Parquet file
+   table = pa.table({
+       '_id':   ['p1', 'p2', 'p3'],
+       'name':  ['Alice', 'Bob', 'Charlie'],
+       'age':   [30, 25, 35],
+   })
+   pq.write_table(table, 'sample.parquet')
+
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+   jdb = JDb()
+
+   # by default, the first column ('_id') becomes the record key
+   jdb.from_parquet('sample.parquet')
+   print(jdb['p1'])  # Output: {'name': 'Alice', 'age': 30}
+
+   # rows stream in via pyarrow RecordBatches, so multi-GB files
+   # import with a small, constant memory footprint
+   jdb.from_parquet('sample.parquet', batch_size=65536)
+
+   # pick a different key column, and prune to only the columns you need
+   jdb.from_parquet('sample.parquet', key='_id', columns=['name'])
 
 Network Mode
 ------------
@@ -1783,4 +1818,3 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
-   
