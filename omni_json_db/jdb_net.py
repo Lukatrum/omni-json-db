@@ -509,7 +509,7 @@ class JNetFiles(JFilesBase):
             sock = socket(AF_INET, SOCK_STREAM)
             sock.connect(address)
             self.sock = sock
-        except Exception as e: # pragma: no cover
+        except Exception as e:
             raise RuntimeError from e
 
     def __del__(self):

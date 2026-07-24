@@ -1703,7 +1703,7 @@ def match_DATE_rules(cdate:dt_date, mdate:dt_date, rules:Any, level:int=0) ->boo
                 if callable(rule):
                     try:
                         is_matched = (not rule(cdate, mdate)) if reverse_it else rule(cdate, mdate)
-                    except Exception as e: # pragma: no cover
+                    except Exception as e:
                         print(e)
 
             elif cmd == '$not':
@@ -1972,7 +1972,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
 
                         is_matched = (not is_matched) if reverse_it else is_matched
 
-                    except Exception as e: # pragma: no cover
+                    except Exception as e:
                         print(e)
 
             elif cmd == '$func':
@@ -1982,7 +1982,7 @@ def match_VAL_rules(key:str, val:Any, rules:Any, cdate:dt_date, mdate:dt_date, l
                         is_matched = rule(key, val) if arg_cnt == 2 else rule(val)
                         is_matched = (not is_matched) if reverse_it else is_matched
 
-                    except Exception as e: # pragma: no cover
+                    except Exception as e:
                         print(e)
 
             elif cmd == '$size':

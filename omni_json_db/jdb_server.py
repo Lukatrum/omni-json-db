@@ -202,7 +202,7 @@ class ServerHandler(BaseRequestHandler):
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', yellow=1, bright=1))
                     continue
 
-                except Exception as e: # pragma: no cover
+                except Exception as e:
                     if verbose >= 0:
                         print(Style(f'[ERROR|{client}|{hex(thread_id)}|{files_obj}] exception:{e}', red=1, bright=1))
                     raise
@@ -463,7 +463,7 @@ class ServerHandler(BaseRequestHandler):
                                     print(Style(f'[FAIL|{client}]{file}:cannot find command: {packet}', yellow=1))
                                 resp.update(ok=False, err=JErrCode.INVALID_CMD)
 
-                        except Exception as e: # pragma: no cover
+                        except Exception as e:
                             if verbose >= 1:
                                 print(Style(f'[FAIL|{client}]{file}:{cmd}(fp={fp}, {_args}, {_kwargs}) err:{e}', yellow=1))
                             resp.update(ok=False, err=JErrCode.FAIL_CALL)

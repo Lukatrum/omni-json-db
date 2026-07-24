@@ -1040,26 +1040,13 @@ class JDbReader(JDbBase):
         if isinstance(KEY_file, JDbReader):
             jdb = KEY_file
             jio = jdb.io
-            if index_size is None:
-                index_size = jio.index_size
-
-            if reserved_rate is None:
-                reserved_rate = jio.reserved_rate
-
-            if write_hook is None:
-                write_hook = jdb.write_hook
-
-            if max_wsize is None:
-                max_wsize = jdb.max_wsize
-
-            if flags is None:
-                flags = jdb.flags
-
-            if val_codec is None:
-                val_codec = jio._val_codec
-
-            if key_codec is None:
-                key_codec = jio._key_codec
+            index_size = jio.index_size if index_size is None else index_size
+            reserved_rate = jio.reserved_rate if reserved_rate is None else reserved_rate
+            write_hook = jdb.write_hook if write_hook is None else write_hook
+            max_wsize = jdb.max_wsize if max_wsize is None else max_wsize
+            flags = jdb.flags if flags is None else flags
+            val_codec = jio._val_codec if val_codec is None else val_codec
+            key_codec = jio._key_codec if key_codec is None else key_codec
 
             # override
             api_ver = jio.api_ver
@@ -4685,7 +4672,7 @@ class JDbReader(JDbBase):
             try:
                 val = io.read_value(val_fp, offset, row_size, val_size)
 
-            except Exception as e: # pragma: no cover
+            except Exception as e:
                 raise JValueError from e
 
         if self._cache_limit == 0:
@@ -5008,7 +4995,7 @@ class JDbReader(JDbBase):
                 val_fp, __i, __o  = f_get_val_fp(fp_dict, file_id)
                 try:
                     yield key, io_read_value(val_fp, offset, row_size, val_size)
-                except Exception as e: # pragma: no cover
+                except Exception as e:
                     raise JValueError from e
 
     def _init_KEY(self) -> Tuple[JIo,IO]:

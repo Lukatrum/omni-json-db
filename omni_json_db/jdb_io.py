@@ -1475,14 +1475,14 @@ class JIoKEY_U(JIoKEY):
         """bool: Whether a developer codec has been registered yet."""
         return self._dumps is not None and self._loads is not None
 
-    def _missing(self):
+    def _missing(self): # pragma: no cover
         raise UserCodecNotRegisteredError(
             "data_type 'U+U' (KEY) is selected but no codec is registered. "
             "Call register_user_key_codec(dumps, loads) before opening the JDb.")
 
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         """Serialize a KEY row (v1 layout) using the registered developer codec."""
-        if self._dumps is None:
+        if self._dumps is None: # pragma: no cover
             self._missing()
         try:
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days))
@@ -1492,7 +1492,7 @@ class JIoKEY_U(JIoKEY):
 
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         """Parse a KEY row (v1 layout) using the registered developer codec."""
-        if self._loads is None:
+        if self._loads is None: # pragma: no cover
             self._missing()
         try:
             args = self._loads(data)
@@ -1506,7 +1506,7 @@ class JIoKEY_U(JIoKEY):
 
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int) -> bytes:
         """Serialize a KEY row (v0 layout) using the registered developer codec."""
-        if self._dumps_v0 is None:
+        if self._dumps_v0 is None: # pragma: no cover
             self._missing()
         try:
             return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days))
@@ -1516,7 +1516,7 @@ class JIoKEY_U(JIoKEY):
 
     def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int]:
         """Parse a KEY row (v0 layout) using the registered developer codec."""
-        if self._loads_v0 is None:
+        if self._loads_v0 is None: # pragma: no cover
             self._missing()
         try:
             args = self._loads_v0(data)
@@ -1729,7 +1729,7 @@ class JIoVAL_U(JIoVAL):
 
     def dumps(self, data:Any) -> bytes:
         """Serialize a value using the registered developer codec."""
-        if self._dumps is None:
+        if self._dumps is None: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type 'U' (VAL) is selected but no codec is registered. "
                 "Call register_user_val_codec(dumps, loads) before opening the JDb.")
@@ -1741,7 +1741,7 @@ class JIoVAL_U(JIoVAL):
 
     def loads(self, data:bytes) -> Any:
         """Deserialize a value using the registered developer codec."""
-        if self._loads is None:
+        if self._loads is None: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type 'U' (VAL) is selected but no codec is registered. "
                 "Call register_user_val_codec(dumps, loads) before opening the JDb.")
@@ -2728,7 +2728,7 @@ class JIo(JIoBase):
         try:
             if tuple(self.KEY_loads(self.KEY_dumps('1',2,3,4,5,6,7))) != ('1',2,3,4,5,6,7): # pragma: no cover
                 raise TypeError
-        except Exception as e: # pragma: no cover
+        except Exception as e:
             raise TypeError('invalid KEY_loads/KEY_dumps') from e
 
         try:

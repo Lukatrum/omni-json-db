@@ -1568,9 +1568,6 @@ There are two ways to register a codec:
 
 1. **Process-wide default** — register once, every ``JDb`` opened with a
    ``U`` data_type uses it.
-2. **Per-instance** — pass ``val_codec=`` (and optionally ``key_codec=``) to
-   ``JDb()`` so different instances (e.g. different tenants) can use
-   different codecs/keys at the same time.
 
 .. code-block:: python
 
@@ -1593,6 +1590,10 @@ There are two ways to register a codec:
    # Re-open and decrypt transparently
    jdb2 = JDb("secure.jdb", data_type="J+U")
    assert jdb2["alice"] == {"ssn": "123-45-6789", "balance": 42.5}
+
+2. **Per-instance** — pass ``val_codec=`` (and optionally ``key_codec=``) to
+   ``JDb()`` so different instances (e.g. different tenants) can use
+   different codecs/keys at the same time.
 
 .. code-block:: python
 
