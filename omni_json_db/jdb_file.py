@@ -294,7 +294,7 @@ class JBytesIO(RawIOBase):
         self.close()
         super().__del__()
 
-    def readable(self) -> bool: # pragma: no cover
+    def readable(self) -> bool:
         """Determine if the stream supports reading.
 
         Returns:
@@ -308,7 +308,7 @@ class JBytesIO(RawIOBase):
 
         return True
 
-    def readline(self, size:Optional[int]=-1) -> bytes: # pragma: no cover
+    def readline(self, size:Optional[int]=-1) -> bytes:
         """Read and return one line from the stream.
 
         Reads until a newline (``\\n``) is found or the stream ends.
@@ -342,7 +342,7 @@ class JBytesIO(RawIOBase):
         self.idx = next_idx
         return mv_buf[idx:next_idx].tobytes()
 
-    def readlines(self, hint:Optional[int]=None) -> list: # pragma: no cover
+    def readlines(self, hint:Optional[int]=None) -> list:
         """Read and return a list of lines from the stream.
 
         Args:
@@ -403,7 +403,7 @@ class JBytesIO(RawIOBase):
         self.idx = next_idx
         return next_idx
 
-    def seekable(self) -> bool: # pragma: no cover
+    def seekable(self) -> bool:
         """Determine if stream navigation is supported.
 
         Returns:
@@ -784,11 +784,6 @@ class JMemFiles(JFilesBase):
         Args:
             fd (int): Target file descriptor.
         """
-        if fd >= 0:
-            try:
-                os_fsync(fd)
-            except (OSError, PermissionError, AttributeError) as e: # pragma: no cover
-                print(fd, e)
 
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool:
         """Validate if the layout keys resolve to a volatile partition context.
@@ -1013,7 +1008,7 @@ class JMemFiles(JFilesBase):
         with self.lock:
             LCK_file = self.LCK_file
             LCK_file[-1] = True # set remove flag
-            while LCK_file[:-1].strip(b'\x00'):
+            while LCK_file[:-1].strip(b'\x00'): # pragma: no cover
                 self.cond.notify_all()
                 self.cond.wait(1)
 

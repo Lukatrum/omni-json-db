@@ -942,27 +942,25 @@ class JNetFiles(JFilesBase):
             BlockingIOError: If the unlock command is rejected.
             RuntimeError: If a general connection or internal state error occurs.
         """
-        if sys_is_finalizing(): # pragma: no cover
-            return
+        if not sys_is_finalizing():
+            with self.lock:
+                if self.sock and not self.sock._closed:
+                    dump_and_send(self.sock, (self._remote_file('LCK'), 'unlock', (), {}))
+                    resp = recv_and_load(self.sock)
 
-        with self.lock:
-            if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (self._remote_file('LCK'), 'unlock', (), {}))
-                resp = recv_and_load(self.sock)
+                    if resp.get('ok'):
+                        return
 
-                if resp.get('ok'):
-                    return
+                    raise BlockingIOError
 
-                raise BlockingIOError
-
-            raise RuntimeError
+                raise RuntimeError
 
     def LCK_close(self):
         """Safely close lock channels to prevent remote resource starvation."""
 
         # server daemon threads are frozen during interpreter shutdown;
         # a remote round-trip would block forever (e.g. via FileLock.__del__)
-        if sys_is_finalizing():
+        if not sys_is_finalizing():
             with self.lock:
                 if self.sock and not self.sock._closed:
                     try:

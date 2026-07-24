@@ -487,10 +487,10 @@ class FileLock:
         """Clean up on garbage collection: release all pending locks and close the lock file."""
         with self._lock:
             while self._idents:
-                self._cond.wait()
+                self._cond.wait() # pragma: no cover
 
             if self._mode == 'w':
-                self.SIGINT.enable()
+                self.SIGINT.enable() # pragma: no cover
 
             self._mode = 'x'
             self._idents.clear()

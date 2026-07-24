@@ -2299,18 +2299,17 @@ class JDb(JDbReader):
                                 val_fp.close()
 
                 for key,s_jdb in src_io.groups.items():
-                    if not isinstance(s_jdb, JDb): continue
-                    d_jdb = jdb.f_get_group(dst_fp, key)
-                    #pass;0;assert isinstance(d_jdb, JDb)
-                    s_jdb.clone_to(d_jdb,
-                        signal=signal,
-                        data_type=data_type,
-                        zip_type=zip_type,
-                        max_file_size=max_file_size,
-                        min_value_size=min_value_size,
-                        index_size=index_size,
-                        reserved_rate=reserved_rate,
-                        cache_limit=cache_limit, **kwargs)
+                    if isinstance(s_jdb, JDb):
+                        d_jdb = jdb.f_get_group(dst_fp, key)
+                        s_jdb.clone_to(d_jdb,
+                            signal=signal,
+                            data_type=data_type,
+                            zip_type=zip_type,
+                            max_file_size=max_file_size,
+                            min_value_size=min_value_size,
+                            index_size=index_size,
+                            reserved_rate=reserved_rate,
+                            cache_limit=cache_limit, **kwargs)
 
                 if src_io.swap_id == dst_io.swap_id:
                     dst_io.swap_id += (rand_id + 1)

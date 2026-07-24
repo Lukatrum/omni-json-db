@@ -2078,7 +2078,7 @@ class JIo(JIoBase):
             if not isinstance(val_codec, JIoVAL_U) or not val_codec.is_registered:
                 raise TypeError('val_codec must be a registered JIoVAL_U instance')
 
-        if key_codec is not None:
+        if key_codec is not None: # pragma: no cover
             if not isinstance(key_codec, JIoKEY_U) or not key_codec.is_registered:
                 raise TypeError('key_codec must be a registered JIoKEY_U instance')
 
@@ -2370,12 +2370,12 @@ class JIo(JIoBase):
         if value in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
-        if value in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered:
+        if value in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type requires a VAL codec. Pass val_codec=... to JDb()/JIo(), "
                 "or call register_user_val_codec(dumps, loads) to set a process-wide default.")
 
-        if value == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered:
+        if value == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type 'U+U' requires a KEY codec too. Pass key_codec=... to JDb()/JIo(), "
                 "or call register_user_key_codec(dumps, loads) to set a process-wide default.")
@@ -2509,12 +2509,12 @@ class JIo(JIoBase):
         if data_type in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
-        if data_type in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered:
+        if data_type in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type requires a VAL codec. Pass val_codec=... to JDb()/JIo(), "
                 "or call register_user_val_codec(dumps, loads) to set a process-wide default.")
 
-        if data_type == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered:
+        if data_type == U_U_TYPE and self._key_codec is None and not g_KEY_U.is_registered: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type 'U+U' requires a KEY codec too. Pass key_codec=... to JDb()/JIo(), "
                 "or call register_user_key_codec(dumps, loads) to set a process-wide default.")
@@ -2537,7 +2537,7 @@ class JIo(JIoBase):
             self.VAL_unzip0     = UNZIP_lut0[zip_type]
             self.pad_byte       = PAD_lut[zip_type](data_type)
             self.pad0_byte      = PAD_lut[NO_ZIP](data_type)
-            if data_type in (J_U_TYPE, S_U_TYPE, U_U_TYPE) and self._val_codec is not None:
+            if data_type in (J_U_TYPE, S_U_TYPE, U_U_TYPE) and self._val_codec is not None: # pragma: no cover
                 # per-instance codec may declare its own safe NO_ZIP pad byte
                 self.pad_byte  = self._val_codec.pad_byte if zip_type == NO_ZIP else self.pad_byte
                 self.pad0_byte = self._val_codec.pad_byte

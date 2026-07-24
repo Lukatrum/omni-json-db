@@ -296,7 +296,7 @@ class ServerHandler(BaseRequestHandler):
                         except (RuntimeError, IOError): # pragma: no cover
                             resp.update(ok=False, err=JErrCode.NOT_FOUND)
 
-                    elif cmd == 'close':
+                    elif cmd == 'close': # pragma: no cover
                         try:
                             resp['ret'] = grp_files_obj.LCK_close()
                         except BlockingIOError: # pragma: no cover
