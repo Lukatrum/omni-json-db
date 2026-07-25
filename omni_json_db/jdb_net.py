@@ -935,6 +935,7 @@ class JNetFiles(JFilesBase):
 
             raise RuntimeError
 
+
     def LCK_unlock(self):
         """Release any held locks on the remote server.
 
@@ -942,53 +943,58 @@ class JNetFiles(JFilesBase):
             BlockingIOError: If the unlock command is rejected.
             RuntimeError: If a general connection or internal state error occurs.
         """
-        if not sys_is_finalizing():
-            with self.lock:
-                if self.sock and not self.sock._closed:
-                    dump_and_send(self.sock, (self._remote_file('LCK'), 'unlock', (), {}))
+        if sys_is_finalizing(): # pragma: no cover
+            return
+
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'unlock', (), {}))
+                resp = recv_and_load(self.sock)
+
+                if resp.get('ok'):
+                    return
+
+                raise BlockingIOError
+
+            raise RuntimeError
+
+    def LCK_close(self): # pragma: no cover
+        """Safely close lock channels to prevent remote resource starvation."""
+        if sys_is_finalizing(): # pragma: no cover
+            # server daemon threads are frozen during interpreter shutdown;
+            # a remote round-trip would block forever (e.g. via FileLock.__del__)
+            return
+
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                try:
+                    dump_and_send(self.sock, (self._remote_file('LCK'), 'close', (), {}))
                     resp = recv_and_load(self.sock)
 
                     if resp.get('ok'):
                         return
 
-                    raise BlockingIOError
+                except OSError:
+                    return
 
-                raise RuntimeError
-
-    def LCK_close(self):
-        """Safely close lock channels to prevent remote resource starvation."""
-
-        # server daemon threads are frozen during interpreter shutdown;
-        # a remote round-trip would block forever (e.g. via FileLock.__del__)
-        if not sys_is_finalizing():
-            with self.lock:
-                if self.sock and not self.sock._closed:
-                    try:
-                        dump_and_send(self.sock, (self._remote_file('LCK'), 'close', (), {}))
-                        resp = recv_and_load(self.sock)
-
-                        if resp.get('ok'):
-                            return
-
-                    except OSError: # pragma: no cover
-                        return
-
-    def LCK_remove(self):
+    def LCK_remove(self): # pragma: no cover
         """Delete the lock file physically from the remote server.
 
         Raises:
             RuntimeError: If the network socket is disconnected or fails.
         """
-        if not sys_is_finalizing():
-            with self.lock:
-                if self.sock and not self.sock._closed:
-                    dump_and_send(self.sock, (self._remote_file('LCK'), 'remove', (), {}))
-                    resp = recv_and_load(self.sock)
+        if sys_is_finalizing(): # pragma: no cover
+            return
 
-                    if resp.get('ok'):
-                        return
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (self._remote_file('LCK'), 'remove', (), {}))
+                resp = recv_and_load(self.sock)
 
-                raise RuntimeError
+                if resp.get('ok'):
+                    return
+
+            raise RuntimeError
 
 #---------------------------------------------------------------------
 #
