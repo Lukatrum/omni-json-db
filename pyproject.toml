@@ -7,7 +7,7 @@ exclude = ["artwork", "tests", "benchmark", "db", "docs"]
 
 [project]
 name = "omni_json_db"
-version = "2.14.36"
+version = "2.14.37"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -65,6 +65,7 @@ keywords = [
 	"toml",
 	"query",
 	"yaml",
+	"zero-dependency",
 ]
 classifiers = [
 	"Programming Language :: Python :: 3",
@@ -91,24 +92,44 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-dependencies = [
-	"msgpack>=1.0.5",
-	"orjson>=3.9.7; platform_python_implementation != 'PyPy'",	
-]
+
+# Zero required third-party dependencies: omni-json-db runs on a clean Python
+# install using built-in pure-Python fallbacks (msgpack, JSON, bitarray, ...).
+# Everything below is optional and only makes it faster or adds extra formats.
+dependencies = []
+
 license="MIT"
 license-files = ["LICEN[CS]E*"]
 
 [project.optional-dependencies]
-full = [
-	"bitarray>=3.8.0",	
-	"brotli>=1.2.0",
-	"BTrees>=5.2",
-	"lz4>=4.3.2",
+# --- Faster drop-in accelerators (pure-Python fallbacks are built in) --------
+# No new features; these just speed up the default code paths. On PyPy the
+# pure-Python paths are already fast, so orjson/ormsgpack are skipped there.
+speed = [
+	"orjson>=3.9.7;    platform_python_implementation != 'PyPy'",
 	"ormsgpack>=1.2.6; platform_python_implementation != 'PyPy'",
-	"PyYAML>=6.0.3; python_version != '3.7'",
-	"tomli>=2.0.1",
-	"zstandard>=0.21.0",	
+	"msgpack>=1.0.5",
+	"bitarray>=3.8.0",
 ]
+
+# --- Extra compression codecs for stored values -----------------------------
+compression = [
+	"zstandard>=0.21.0",
+	"lz4>=4.3.2",
+	"brotli>=1.2.0",
+]
+
+# --- Extra value (de)serialization formats ----------------------------------
+yaml = ["PyYAML>=6.0.3; python_version != '3.7'"]
+
+# --- Alternative on-disk key-index backend ----------------------------------
+btree = ["BTrees>=5.2"]
+
+# --- Convenience bundles -----------------------------------------------------
+# Self-referencing extras (needs pip >= 21.2). See README note for the
+# explicit-list alternative if you must support very old pip on Python 3.7.
+full = ["omni_json_db[speed,compression,yaml,btree]"]
+all  = ["omni_json_db[full]"]
 
 [project.urls]
 Homepage = "https://github.com/lukatrum"

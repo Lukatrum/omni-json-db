@@ -12,6 +12,7 @@ Built for ultra-high throughput and thread-safety, **omni-json-db** leverages mo
 
 * **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
 
+* **Dependency-LESS**: Runs on a clean Python install with **zero required third-party packages** — optional C-accelerators and extra formats are one ``pip install "omni-json-db[full]"`` away.
 
 🤔 Why omni-json-db?
 ********************
@@ -20,6 +21,10 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** lets you use native
 Python syntax — slicing, lambdas, regex, and ``set`` operations — to query and
 manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
 engine, and pluggable serialization/compression.
+
+..
+
+   **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
 
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 |                                  | **omni-json-db**  | TinyDB    | DiskCache | UnQLite | LMDB       | RocksDict | SQLite    | DuckDB    |
@@ -57,8 +62,6 @@ engine, and pluggable serialization/compression.
 | Network mode (incl. groups)      | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
 +----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
 
- **omni-json-db** has been tested with Python 3.7+ and PyPy3.
-
 
 Features
 --------
@@ -67,6 +70,8 @@ Features
 * **Pythonic Interaction**: Interact with data using familiar Python ``dict`` methods, list slicing, and set operations, avoiding complex SQL queries.
 
 * **Advanced Serialization & Compression**: Combine formats (JSON, MsgPack, Pickle, YAML) with algorithms like LZ4, Zstandard, or Brotli to optimize your I/O and disk usage.
+
+* **Pluggable Codec & Encryption**: Bring your own serialization or encryption logic via a simple ``dumps``/``loads`` interface — no forking required. Supports both a process-wide default and per-instance codecs (e.g. per-tenant encryption keys).
 
 * **Powerful Query Engine**: Execute searches via Regex, Lambda filters, and rich operators (``EQ``, ``GT``, ``LT``, ``IN``, ``HAS``, ``RE``, ...).
 

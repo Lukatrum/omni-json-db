@@ -303,9 +303,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         return True
 
     def readline(self, size:Optional[int]=-1) -> bytes:
@@ -322,9 +319,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         idx = self.idx
         buf = self.buf
         max_size = len(buf)
@@ -355,9 +349,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         idx = self.idx
         buf = self.buf
         max_size = len(buf)
@@ -385,9 +376,6 @@ class JBytesIO(RawIOBase):
             ValueError: If the stream is closed, ``whence`` is invalid, or the
                 resulting position is negative.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         if whence == SEEK_SET:
             next_idx = int(offset)
         elif whence == SEEK_END:
@@ -412,9 +400,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         return True
 
     def tell(self) -> int:
@@ -426,9 +411,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         return self.idx
 
     def truncate(self, size:Optional[int]=None) -> int:
@@ -441,9 +423,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed or ``size`` is negative.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         size = self.idx if size is None else size
         if size < 0:
             raise ValueError(f"negative size value {size}")
@@ -463,9 +442,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         return True
 
     def writelines(self, lines):
@@ -477,17 +453,11 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         for line in lines:
             self.write(line)
 
     def read(self, size:Optional[int]=-1) -> bytes:
         """Read up to size bytes from the stream (single-copy)."""
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         buf = self.buf
         max_size = len(buf)
         idx = self.idx
@@ -522,9 +492,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         buf = self.buf
         idx = self.idx
         rest_size = len(buf) - idx
@@ -555,9 +522,6 @@ class JBytesIO(RawIOBase):
         Raises:
             ValueError: If the stream is closed.
         """
-        if self.closed:
-            raise ValueError('I/O operation on closed file.')
-
         n_byte = len(b)
         if n_byte <= 0:
             return 0

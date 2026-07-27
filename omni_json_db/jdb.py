@@ -258,13 +258,16 @@ class JDb(JDbReader):
                 - "J+P" | KEY=JSON    | VAL=Pickle
                 - "J+S" | KEY=JSON    | VAL=msgpack (default)
                 - "J+Y" | KEY=JSON    | VAL=YAML
+                - "J+U" | KEY=JSON    | VAL=User (val_codec)
                 - "S+J" | KEY=Msgpack | VAL=JSON
                 - "S+M" | KEY=Msgpack | VAL=Marshal
                 - "S+P" | KEY=Msgpack | VAL=Pickle
                 - "S+S" | KEY=Msgpack | VAL=msgpack
                 - "S+Y" | KEY=Msgpack | VAL=YAML
+                - "S+U" | KEY=Msgpack | VAL=User (val_codec)
                 - "L+J" | KEY=split   | VAL=Json
                 - "M+M" | KEY=Marshal | VAL=Marshal
+                - "U+U" | KEY=User    | VAL=User (key_codec + val_codec)
 
             zip_type (Union[str, int, None], optional): Compression algorithm to use.
                 

@@ -38,7 +38,16 @@ omni\_json\_db.jdb\_io
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: br_compress, json_dumps, lz4_compress, msg_dumps, msg_loads, zs1_compress, zs2_compress, zstd_compress, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, gzip_compress
+   :exclude-members: br_compress, lz4_compress, zs1_compress, zs2_compress, zstd_compress, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoKEY_U, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, JIoVAL_U, gzip_compress
+
+omni\_json\_db.jdb\_codec
+------------------------------------
+
+.. automodule:: omni_json_db.jdb_codec
+   :members:
+   :show-inheritance:
+   :undoc-members: 
+   :exclude-members: _msg_decode, _msg_encode, _json_default, msg_dumps, msg_loads, json_dumps, json_loads, frozenset_representer
 
 omni\_json\_db.jdb\_lite
 ------------------------------------

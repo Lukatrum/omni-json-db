@@ -1,4 +1,4 @@
-# pylint: disable=too-many-boolean-expressions, too-many-lines, no-name-in-module, import-error
+# pylint: disable=too-many-boolean-expressions, too-many-lines, no-name-in-module, import-error, ungrouped-imports
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, Dict
@@ -8,8 +8,6 @@ from functools import reduce, lru_cache
 from collections import defaultdict, OrderedDict
 from re import findall as re_findall
 from datetime import date as dt_date, datetime, timedelta
-from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError # nosec B403
-from marshal import loads as marshal_loads, dumps as marshal_dumps
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
 try:
@@ -22,20 +20,12 @@ except ImportError:
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from .utils import Style, JIoBase, bitarray, JValueError
-
-try:
-    import yaml
-
-    def frozenset_representer(dumper, data):
-        return dumper.represent_set(set(data))
-
-    yaml.SafeDumper.add_representer(frozenset, frozenset_representer)
-    # bytes is natively dumped as !!binary by SafeRepresenter; register the same
-    # representer for bytearray so dumps_with_zip() fully supports bytearray payloads.
-    yaml.SafeDumper.add_representer(bytearray, yaml.SafeDumper.represent_binary)
-
-except ImportError:
-    yaml = None
+from .jdb_file import JFilesBase
+from .jdb_codec import _msg_dumps, _msg_loads, _msg_encode, _msg_decode, Unpacker, \
+        _json_dumps, _json_loads, json_loads, _json_default, JSONDecodeError, \
+        pickle_dumps, pickle_loads, PicklingError, \
+        marshal_dumps, marshal_loads, \
+        yaml_dumps, yaml_loads
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -55,131 +45,6 @@ try:
     lz4_decompress = _lz4_decompress
 except ModuleNotFoundError:
     lz4_compress = lz4_decompress = None
-
-def _json_default(obj):
-    """JSON encoder fallback for types JSON cannot handle natively.
-
-    Sets become lists; bytes/bytearrays become a hex string prefixed with a
-    marker (with a checksum byte) so :meth:`JIoVAL_J.loads` can restore them.
-
-    Args:
-        obj (Any): The value that plain JSON could not serialize.
-
-    Returns:
-        Any: A JSON-serializable stand-in.
-
-    Raises:
-        TypeError: If the type is still not supported.
-    """
-    if isinstance(obj, (set, frozenset)):
-        return list(obj)
-
-    if isinstance(obj, (bytes, bytearray)):
-        chk_code = reduce(lambda x,y: (x+y) & 0xff, obj)
-        return '\0\1\0\1'+obj.hex()+bytearray([(256-chk_code) & 0xff]).hex()
-
-    raise TypeError(f"Unknown type: {type(obj)}")
-
-try:
-    from orjson import loads as _json_loads, dumps as _json_dumps, JSONDecodeError
-    # don't support bigger than 64bit integer
-    json_dumps = lambda obj : _json_dumps(obj, default=_json_default)
-    # 17.25% faster than json_loads = lambda data : _json_loads(data)
-    json_loads = _json_loads
-
-except ModuleNotFoundError:
-    from json import loads as __json_loads, dumps as __json_dumps, JSONDecodeError
-
-    def _json_loads(data:bytes) -> Any:
-        if isinstance(data, memoryview):
-            data = bytes(data)
-
-        return __json_loads(data)
-
-    def _json_dumps(obj:Any, default:Optional[Callable[[Any], bytes]]=None) -> bytes:
-        """Internal JSON string dump utility function acting as alternative to orjson.
-
-        Args:
-            obj (Any): Target object structure payload to serialize.
-            default (Optional[Callable[[Any], bytes]], optional): Fallback serialization routing encoder. Defaults to None.
-
-        Returns:
-            bytes: UTF-8 encoded byte representation of the serialized JSON payload.
-        """
-        return __json_dumps(obj, default=default, ensure_ascii=False, separators=(',',':')).encode('utf8')
-
-    def json_dumps(obj:Any) -> bytes:
-        """Standard JSON dump abstraction routing parameters through custom default fallback logic layers.
-
-        Args:
-            obj (Any): Python data structure or primitive payload to process.
-
-        Returns:
-            bytes: Compact UTF-8 raw encoded JSON byte sequence array.
-        """
-        return __json_dumps(obj, default=_json_default, ensure_ascii=False, separators=(',',':')).encode('utf8')
-
-    json_loads = _json_loads
-
-try:
-    from ormsgpack import packb as _msg_dumps, Ext
-    from msgpack import unpackb as _msg_loads, Unpacker
-
-except (ModuleNotFoundError, ImportError):
-    from msgpack import packb as _msg_dumps, unpackb as _msg_loads, Unpacker, ExtType as Ext
-
-def _msg_encode(obj) -> bytes:
-    """Pack non-primitive objects into MsgPack ExtType objects.
-
-    Args:
-        obj (Any): The non-primitive input object (e.g., a set).
-
-    Returns:
-        ExtType: A wrapped serialization object extension mapping to type ID 123.
-        
-    Raises:
-        TypeError: If the object type is not supported.
-    """
-    if isinstance(obj, set):
-        return Ext(123, _msg_dumps(list(obj)))
-
-    if isinstance(obj, frozenset):
-        return Ext(124, _msg_dumps(list(obj)))
-
-    raise TypeError
-
-def _msg_decode(code:int, data:bytes):
-    """Decode custom MsgPack extensions.
-
-    Args:
-        code (int): The extension type code. Expects type ID 123.
-        data (bytes): The raw binary payload associated with the extension.
-
-    Returns:
-        Any: The unpacked Python object (e.g., a set).
-
-    Raises:
-        TypeError: If the extension type code is unregistered.
-    """
-    if code == 123:
-        try:
-            return set(_msg_loads(data))
-
-        except ValueError: # pragma: no cover
-            # nosemgrep
-            return marshal_loads(data) # nosec B302
-
-    if code == 124:
-        try:
-            return frozenset(_msg_loads(data))
-
-        except ValueError: # pragma: no cover
-            pass
-
-    raise TypeError(f'code={code} data={data}')
-
-msg_dumps = lambda obj : _msg_dumps(obj, default=_msg_encode)
-msg_loads = lambda _bytes : _msg_loads(_bytes, ext_hook=_msg_decode, strict_map_key=False)
 
 # don't use zstd.ZstdCompressor and zstd.ZstdDecompressor due to thread issue
 try:
@@ -203,9 +68,6 @@ except ImportError:
 
 BZ_Error = OSError
 LZ_Error = RuntimeError
-
-#-----------------------------------------------------------------------------
-from .jdb_file import JFilesBase
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -792,7 +654,7 @@ class KeyTable:
             key (str): key in bytearray.
 
         Returns:
-            Tuple[int, int, int]: key's row ID, bytearray start index, bytearry end index
+            Tuple[int, int, int]: key's row ID, bytearray start index, bytearray end index
         """
         n_bytes = len(key_array)
         if n_bytes > 0:
@@ -860,7 +722,7 @@ class DictKeyTable(dict):
         return -1
 
     def get_mode(self) -> int:
-        """Return the key-table mode code (``0`` for a plain dict).
+        """Return the key-table mode code (``-1`` for a plain dict).
 
         Returns:
             int: The mode code.
@@ -1640,18 +1502,18 @@ class JIoVAL_Y(JIoVAL):
     """Value codec using YAML (human-readable; requires PyYAML)."""
     def dumps(self, data:Any) -> bytes:
         """Serialize a value as YAML."""
-        if yaml is None: # pragma: no cover
+        if yaml_dumps is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         try:
-            return yaml.safe_dump(data, allow_unicode=True).encode('utf8')
+            return yaml_dumps(data, allow_unicode=True).encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError) as e: # pragma: no cover
             raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
         """Deserialize a YAML value (retries with padding to tolerate reserved-row slack)."""
-        if yaml is None: # pragma: no cover
+        if yaml_loads is None: # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         if isinstance(data, (bytearray, memoryview)): # pragma: no cover
@@ -1661,7 +1523,7 @@ class JIoVAL_Y(JIoVAL):
 
         for _ in range(9):
             try:
-                return yaml.safe_load(data)
+                return yaml_loads(data)
 
             except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError): # pragma: no cover
                 data = data + b'\n'
@@ -2367,7 +2229,7 @@ class JIo(JIoBase):
         if not LAST_DATA_TYPE >= value >= 0:
             raise ValueError(f'invalid data type {value}')
 
-        if value in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
+        if value in {J_Y_TYPE, S_Y_TYPE} and (yaml_loads is None or yaml_dumps is None): # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         if value in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover
@@ -2506,7 +2368,7 @@ class JIo(JIoBase):
         if not isinstance(version, int):
             raise TypeError
 
-        if data_type in {J_Y_TYPE, S_Y_TYPE} and yaml is None: # pragma: no cover
+        if data_type in {J_Y_TYPE, S_Y_TYPE} and (yaml_loads is None or yaml_dumps is None): # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
         if data_type in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover

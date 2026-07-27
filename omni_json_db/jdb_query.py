@@ -7,7 +7,7 @@ from datetime import date as dt_date, datetime, timedelta
 from typing import Any, List, Generator, Union, Callable, Tuple, Optional
 from re import compile as re_compile, Pattern, S as re_S
 #-----------------------------------------------------------------------------
-from .jdb_io import json_dumps
+from .jdb_codec import json_dumps
 #-----------------------------------------------------------------------------
 
 JSON_RE_sub = re_compile(r'[",{}\[\]]', flags=re_S).sub

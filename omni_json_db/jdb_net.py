@@ -9,9 +9,8 @@ from re import match as re_match
 from sys import is_finalizing as sys_is_finalizing
 from typing import Optional, Union, Tuple, IO
 #-----------------------------------------------------------------------------
-from msgpack import packb as msg_dumps, unpackb as msg_loads
-#-----------------------------------------------------------------------------
 from .jdb_file import JFilesBase
+from .jdb_codec import _msg_dumps as msg_dumps, _msg_loads as msg_loads
 #-----------------------------------------------------------------------------
 
 class JErrCode(IntFlag):
