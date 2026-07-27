@@ -25,7 +25,7 @@ from .jdb_codec import _msg_dumps, _msg_loads, _msg_encode, _msg_decode, Unpacke
         _json_dumps, _json_loads, json_loads, _json_default, JSONDecodeError, \
         pickle_dumps, pickle_loads, PicklingError, \
         marshal_dumps, marshal_loads, \
-        yaml_dumps, yaml_loads
+        yaml_dumps, yaml_loads, YAMLError
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -1508,7 +1508,7 @@ class JIoVAL_Y(JIoVAL):
         try:
             return yaml_dumps(data, allow_unicode=True).encode('utf8')
 
-        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError) as e: # pragma: no cover
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, YAMLError) as e: # pragma: no cover
             raise JValueError from e
 
     def loads(self, data:bytes) -> Any:
@@ -1525,7 +1525,7 @@ class JIoVAL_Y(JIoVAL):
             try:
                 return yaml_loads(data)
 
-            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, yaml.YAMLError): # pragma: no cover
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, YAMLError): # pragma: no cover
                 data = data + b'\n'
 
         raise JValueError

@@ -18,9 +18,11 @@ try:
 
     yaml_dumps = yaml.safe_dump
     yaml_loads = yaml.safe_load
+    YAMLError = yaml.YAMLError
 
 except ImportError:
     yaml_dumps = yaml_loads = None
+    YAMLError = ValueError
 
 def _json_default(obj:Any):
     """JSON encoder fallback for types JSON cannot handle natively.
