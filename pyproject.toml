@@ -7,7 +7,7 @@ exclude = ["artwork", "tests", "benchmark", "db", "docs"]
 
 [project]
 name = "omni_json_db"
-version = "2.14.38"
+version = "2.14.39"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -104,10 +104,9 @@ license-files = ["LICEN[CS]E*"]
 [project.optional-dependencies]
 # --- Faster drop-in accelerators (pure-Python fallbacks are built in) --------
 # No new features; these just speed up the default code paths. On PyPy the
-# pure-Python paths are already fast, so orjson/ormsgpack are skipped there.
+# pure-Python paths are already fast, so orjson/msgpack are skipped there.
 speed = [
 	"orjson>=3.9.7;    platform_python_implementation != 'PyPy'",
-	"ormsgpack>=1.2.6; platform_python_implementation != 'PyPy'",
 	"msgpack>=1.0.5",
 	"bitarray>=3.8.0",
 ]

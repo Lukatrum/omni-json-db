@@ -2142,7 +2142,7 @@ class JIo(JIoBase):
         if not LAST_ZIP_TYPE >= value >= 0:
             raise ValueError(f'invalid data type {value}')
 
-        if value in {ZS_ZIP, Z1_ZIP, Z2_ZIP} and zstd_decompress is None: # pragma: no cover
+        if value in (ZS_ZIP, Z1_ZIP, Z2_ZIP) and zstd_decompress is None: # pragma: no cover
             raise ModuleNotFoundError("zstandard is not installed. Please pip install zstandard.")
 
         if value == LZ_ZIP and lz4_decompress is None: # pragma: no cover
@@ -2368,10 +2368,10 @@ class JIo(JIoBase):
         if not isinstance(version, int):
             raise TypeError
 
-        if data_type in {J_Y_TYPE, S_Y_TYPE} and (yaml_loads is None or yaml_dumps is None): # pragma: no cover
+        if data_type in (J_Y_TYPE, S_Y_TYPE) and (yaml_loads is None or yaml_dumps is None): # pragma: no cover
             raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
 
-        if data_type in {J_U_TYPE, S_U_TYPE, U_U_TYPE} and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover
+        if data_type in (J_U_TYPE, S_U_TYPE, U_U_TYPE) and self._val_codec is None and not g_VAL_U.is_registered: # pragma: no cover
             raise UserCodecNotRegisteredError(
                 "data_type requires a VAL codec. Pass val_codec=... to JDb()/JIo(), "
                 "or call register_user_val_codec(dumps, loads) to set a process-wide default.")
@@ -2381,7 +2381,7 @@ class JIo(JIoBase):
                 "data_type 'U+U' requires a KEY codec too. Pass key_codec=... to JDb()/JIo(), "
                 "or call register_user_key_codec(dumps, loads) to set a process-wide default.")
 
-        if zip_type in {ZS_ZIP, Z1_ZIP, Z2_ZIP} and zstd_decompress is None: # pragma: no cover
+        if zip_type in (ZS_ZIP, Z1_ZIP, Z2_ZIP) and zstd_decompress is None: # pragma: no cover
             raise ModuleNotFoundError("zstandard is not installed. Please pip install zstandard.")
 
         if zip_type == LZ_ZIP and lz4_decompress is None: # pragma: no cover

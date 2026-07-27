@@ -11,7 +11,7 @@ Installating **omni-json-db**
 
    pip install omni-json-db
 
-For the fastest, full-featured build — C-accelerated serializers(``orjson`` / ``ormsgpack`` / ``msgpack``), extra compression codecs(``zstandard`` / ``lz4`` / ``brotli``), ``YAML`` value formats, and the ``BTrees`` key-index backend — install the ``full`` extra:
+For the fastest, full-featured build — C-accelerated serializers(``orjson`` / ``msgpack``), extra compression codecs(``zstandard`` / ``lz4`` / ``brotli``), ``YAML`` value formats, and the ``BTrees`` key-index backend — install the ``full`` extra:
 
 .. code-block:: bash
 

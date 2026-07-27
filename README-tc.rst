@@ -51,7 +51,7 @@
 
 * **深度 Python 化**：告別 SQL！ 使用標準 Python ``dict`` 方法、切片甚至是 ``set`` 運算與資料庫互動。 [參考 `基本用法`_ + `運算子`_]
 
-* **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*ormsgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
+* **動態序列化與進階壓縮**：混合搭配 JSON (*orjson*)、MsgPack (*msgpack*)、Marshal、Pickle 和 YAML，並結合 LZ4、Zstandard (z1/z2/zs)、Brotli 及 Bzip2 等壓縮算法，完美平衡 I/O 速度與磁碟佔用空間。[參考 `轉換格式`_ + `資料種類`_ + `壓縮種類`_]
 
 * **可插拔編碼與加密**：透過簡單的 ``dumps``/``loads`` 介面，帶入您自己的序列化或加密邏輯——無需修改函式庫原始碼。同時支援全域預設編碼與個別實例編碼（例如每個租戶各自使用不同的加密金鑰）。[參考 `使用者自訂編碼（U）`_]
 
