@@ -1,8 +1,9 @@
 # pylint: disable=ungrouped-imports,too-many-lines,chained-comparison,too-few-public-methods, unused-import
 from __future__ import annotations
-from typing import Optional, Any, Dict, Set, List, Tuple, Callable
+from abc import ABCMeta, abstractmethod
 from functools import reduce
-from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError # nosec B403
+from typing import Optional, Any, Dict, Set, List, Tuple, Callable, Union
+from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError, UnpicklingError # nosec B403
 from marshal import loads as marshal_loads, dumps as marshal_dumps # nosec B403
 
 try:
@@ -609,5 +610,974 @@ def _msg_decode(code:int, data:bytes):
             pass
 
     raise TypeError(f'code={code} data={data}')
+
+from .utils import JValueError
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+class JIoHEAD:
+    """Codec module for packing and unpacking the database layout header."""
+    def dumps_v0(self, sync_id:int, n_records:int, n_lines:int, index_size:int, zip_type:int, data_type:int, swap_id:int, remv_id:int, api_ver:int, max_vfiles:int=-1) -> bytes:
+        """Serialize the database header (V0 layout) as a fixed-size JSON line.
+
+        Args:
+            sync_id (int): Write-session counter.
+            n_records (int): Number of active records.
+            n_lines (int): Total rows including dead/history rows.
+            index_size (int): Byte size of one KEY index row.
+            zip_type (int): Compression code:
+
+                - 0 = no compression for VAL
+                - 1 = gzip compression(9) for VAL
+                - 2 = bz2 compression(9) for VAL
+                - 3 = lzma compression for VAL
+                - 4 = zstandard compression(22) for VAL
+                - 5 = brotli compression(6) for VAL
+                - 6 = zstandard compression(6) for VAL
+                - 7 = zstandard compression(11) for VAL
+                - 8 = lz4 compression(0) for VAL
+
+            data_type (int): Serialization format code:
+
+                - 1  = KEY=split    | VAL=Json
+                - 2  = KEY=Marshal  | VAL=Marshal
+                - 3  = KEY=Json     | VAL=Json
+                - 4  = KEY=Json     | VAL=Marshal
+                - 5  = KEY=Json     | VAL=Pickle
+                - 6  = KEY=msgpack  | VAL=msgpack
+                - 7  = KEY=Json     | VAL=msgpack
+                - 8  = KEY=msgpack  | VAL=Marshal
+                - 9  = KEY=msgpack  | VAL=Json
+                - 10 = KEY=msgpack  | VAL=Pickle
+                - 11 = KEY=Json     | VAL=YAML
+                - 12 = KEY=msgpack  | VAL=YAML
+
+            swap_id (int): Compaction counter.
+            remv_id (int): Deletion counter.
+            api_ver (int): On-disk format version.
+            max_vfiles (int, optional): Stored as the 10th field. Older releases
+                stop reading at ``api_ver``, so writing it stays backward compatible
+                for anything that decodes the header as a variable-length int list.
+
+        Returns:
+            bytes: The header line bytes.
+        """
+        return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver, max_vfiles))
+
+    def loads_v0(self, header:bytes) -> List[int]:
+        """Parse a V0 header line back into its fields.
+
+        Args:
+            header (bytes): The raw header bytes.
+
+        Returns:
+            List[int]: ``[sync_id, n_records, n_lines, index_size, zip_type,
+            data_type, swap_id, remv_id, api_ver, max_vfiles]`` -- always exactly 10
+            entries. Headers shorter than that are widened with the historical
+            defaults (``api_ver`` becomes ``API_V0``, ``max_vfiles`` becomes ``-1``);
+            longer ones are truncated, so a future 11-field header still decodes here.
+        """
+        try:
+            if header[0] == 91: # '['
+                info = _json_loads(header)
+            else: # pragma: no cover
+                # deprecated
+                info = [int(v) for v in header.decode('utf8').split(',')]
+
+            nn = len(info)
+            if nn >= 10:
+                return info[:10]
+
+            if nn >= 9:
+                return info + [-1]
+
+            if nn >= 8:
+                return info + [0, -1]
+
+            if nn >= 4: # pragma: no cover
+                if nn == 7:
+                    return info + [info[0] % 10, 0, -1]
+                elif nn == 6:
+                    return info + [info[0] % 10, info[0] % 10, 0, -1]
+                elif nn == 5:
+                    return info + [1, info[0] % 10, info[0] % 10, 0, -1]
+                else:
+                    return info + [0, 1, info[0] % 10, info[0] % 10, 0, -1]
+
+            raise ValueError(f'cannot decode header (n={nn})')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise ValueError from e
+
+    def dumps_v1(self, sync_id:int, n_records:int, n_lines:int, index_size:int, zip_type:int, data_type:int, swap_id:int, remv_id:int, api_ver:int, max_vfiles:int=-1) -> bytes:
+        """Serialize the database header (V1 layout) as a fixed-size JSON line.
+
+        Args:
+            sync_id (int): Write-session counter.
+            n_records (int): Number of active records.
+            n_lines (int): Total rows including dead/history rows.
+            index_size (int): Byte size of one KEY index row.
+            zip_type (int): Compression code:
+
+                - 0 = no compression for VAL
+                - 1 = gzip compression(9) for VAL
+                - 2 = bz2 compression(9) for VAL
+                - 3 = lzma compression for VAL
+                - 4 = zstandard compression(22) for VAL
+                - 5 = brotli compression(6) for VAL
+                - 6 = zstandard compression(6) for VAL
+                - 7 = zstandard compression(11) for VAL
+                - 8 = lz4 compression(0) for VAL
+
+            data_type (int): Serialization format code:
+
+                - 1  = KEY=split    | VAL=Json
+                - 2  = KEY=Marshal  | VAL=Marshal
+                - 3  = KEY=Json     | VAL=Json
+                - 4  = KEY=Json     | VAL=Marshal
+                - 5  = KEY=Json     | VAL=Pickle
+                - 6  = KEY=msgpack  | VAL=msgpack
+                - 7  = KEY=Json     | VAL=msgpack
+                - 8  = KEY=msgpack  | VAL=Marshal
+                - 9  = KEY=msgpack  | VAL=Json
+                - 10 = KEY=msgpack  | VAL=Pickle
+                - 11 = KEY=Json     | VAL=YAML
+                - 12 = KEY=msgpack  | VAL=YAML
+            
+            swap_id (int): Compaction counter.
+            remv_id (int): Deletion counter.
+            api_ver (int): On-disk format version.
+            max_vfiles (int, optional): Stored as the 10th field. See the note in :meth:`dumps_v0`.
+
+        Returns:
+            bytes: The header line bytes.
+        """
+        try:
+            return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver, max_vfiles))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
+
+    def loads_v1(self, header:bytes) -> List[int]:
+        """Parse a V1 header line back into its fields.
+
+        Args:
+            header (bytes): The raw header bytes.
+
+        Returns:
+            List[int]: ``[sync_id, n_records, n_lines, index_size, zip_type,
+            data_type, swap_id, remv_id, api_ver, max_vfiles]`` -- always exactly 10
+            entries. A 9-field header yields ``max_vfiles = -1``; anything else is
+            delegated to :meth:`loads_v0`.
+        """
+        try:
+            info = _json_loads(header)
+            nn = len(info)
+            if nn >= 10: # a V2 header opened by a V1-configured engine
+                return info[:10]
+
+            if nn >= 9:
+                return info + [-1]
+
+            raise ValueError(f'cannot decode header (n={nn})')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError): # pragma: no cover
+            return self.loads_v0(header)
+
+    def dumps_v2(self, sync_id:int, n_records:int, n_lines:int, index_size:int, zip_type:int, data_type:int, swap_id:int, remv_id:int, api_ver:int, max_vfiles:int=-1) -> bytes:
+        """Serialize the database header (V2 layout) as a fixed-size JSON line.
+
+        V2 is V1 plus a trailing ``max_vfiles`` field, so the header holds ten
+        integers instead of nine.
+
+        Args:
+            sync_id (int): Write-session counter.
+            n_records (int): Number of active records.
+            n_lines (int): Total rows including dead/history rows.
+            index_size (int): Byte size of one KEY index row.
+            zip_type (int): Compression code (see :meth:`dumps_v1`).
+            data_type (int): Serialization format code (see :meth:`dumps_v1`).
+            swap_id (int): Compaction counter.
+            remv_id (int): Deletion counter.
+            api_ver (int): On-disk format version.
+            max_vfiles (int, optional): One past the highest VAL file id in use
+                (``max(file_id) + 1``). This is an upper bound on the id range, not
+                a count: with sparse ids the two differ. ``-1`` means "unknown,
+                probe the filesystem".
+
+        Returns:
+            bytes: The header line bytes.
+        """
+        try:
+            return _json_dumps((sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver, max_vfiles))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise ValueError from e
+
+    def loads_v2(self, header:bytes) -> List[int]:
+        """Parse a V2 header line back into its fields.
+
+        Falls back to :meth:`loads_v0`, which decodes every historical header
+        width, when the header on disk was written by an older release. That lets
+        a V2-configured engine open a legacy KEY file.
+
+        Args:
+            header (bytes): The raw header bytes.
+
+        Returns:
+            List[int]: ``[sync_id, n_records, n_lines, index_size, zip_type,
+            data_type, swap_id, remv_id, api_ver, max_vfiles]`` -- always exactly 10
+            entries.
+        """
+        try:
+            info = _json_loads(header)
+            nn = len(info)
+            if nn >= 10:
+                return info[:10]
+
+            raise ValueError(f'cannot decode header (n={nn})')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError):
+            return self.loads_v0(header)
+
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+class UserCodecNotRegisteredError(RuntimeError):
+    """Raised when a 'U' (developer-defined) data_type is used before its codec was registered."""
+
+class JIoKEY(metaclass=ABCMeta): # pragma: no cover
+    """Abstract codec for one KEY index row.
+
+    A KEY row holds the fixed-width metadata for one record:
+        ``(key, file_id, offset, row_size, val_size, ver, days, flags)``.
+
+    All ``loads_*`` methods return the same 8-field tuple regardless of the
+    on-disk layout, and all ``dumps_*`` methods accept the same 8 arguments, so
+    callers never have to branch on ``api_ver``:
+
+    * ``_v0`` -- 6 stored fields; ``val_size`` is packed into the high 32 bits of
+      ``row_size`` and ``flags`` is dropped on write / returned as
+      ``0`` on read.
+    * ``_v1`` -- 7 stored fields; ``flags`` is dropped on write / returned as
+      ``0`` on read.
+    * ``_v2`` -- 8 stored fields; ``flags`` round-trips (see :class:`JKeyFlag`).
+    """
+    @abstractmethod
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v0 layout (``val_size`` packed into ``row_size``, ``flags`` dropped)."""
+    @abstractmethod
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v0 KEY row; ``flags`` is always ``0``."""
+    @abstractmethod
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v1 layout (all fields separate, ``flags`` dropped)."""
+    @abstractmethod
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v1 KEY row; ``flags`` is always ``0``."""
+    @abstractmethod
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v2 layout (all 8 fields stored separately)."""
+    @abstractmethod
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v2 KEY row into ``(key, file_id, offset, row_size, val_size, ver, days, flags)``."""
+
+class JIoKEY_J(JIoKEY):
+    """KEY row codec using JSON (one JSON array per row)."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v0 layout); ``flags`` is dropped."""
+        try:
+            return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v0 JSON KEY row, unpacking val_size from the high bits of row_size."""
+        try:
+            args = _json_loads(data)
+            key, file_id, offset, row_size, ver, days = args[:6]
+            val_size = row_size >> 32
+            row_size &= 0X_FFFF_FFFF
+            return key, file_id, offset, row_size, val_size, ver, days, 0
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v1 layout); ``flags`` is dropped."""
+        try:
+            return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v1 JSON KEY row."""
+        try:
+            args = _json_loads(data)
+            args.append(0)
+            return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v2 layout, 8 fields)."""
+        try:
+            return _json_dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v2 JSON KEY row (8 fields; a v1 row is rejected, not widened)."""
+        try:
+            args = _json_loads(data)
+            return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise JValueError from e
+
+class JIoKEY_S(JIoKEY):
+    """KEY row codec using msgpack, prefixed with a 3-byte length header."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v0 layout); ``flags`` is dropped."""
+        try:
+            info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) or b''
+            info_len = len(info_b)
+            return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v0 msgpack KEY row, unpacking val_size from the high bits of row_size."""
+        try:
+            prefix0, prefix1, prefix2, info0 = data[:4]
+            if prefix0 == 0xcd and info0 == 0x96:
+                info_len = (prefix1 << 8)| prefix2
+                end_idx = info_len + 3
+                key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
+                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, 0
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v1 layout); ``flags`` is dropped."""
+        try:
+            info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days)) or b''
+            info_len = len(info_b)
+            return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int, int]:
+        """Parse a v1 msgpack KEY row."""
+        try:
+            prefix0, prefix1, prefix2, info0 = data[:4]
+            if prefix0 == 0xcd and info0 == 0x97:
+                info_len = (prefix1 << 8)| prefix2
+                end_idx = info_len + 3
+                args = _msg_loads(data[3:end_idx])
+                args.append(0)
+                return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v2 layout, 8 fields)."""
+        try:
+            info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) or b''
+            info_len = len(info_b)
+            return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v2 msgpack KEY row (fixarray(8); a v1 fixarray(7) row is rejected)."""
+        try:
+            prefix0, prefix1, prefix2, info0 = data[:4]
+            if prefix0 == 0xcd and info0 == 0x98: # 0x98 = msgpack fixarray(8)
+                info_len = (prefix1 << 8)| prefix2
+                end_idx = info_len + 3
+                return _msg_loads(data[3:end_idx])[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+class JIoKEY_M(JIoKEY):
+    """KEY row codec using Python ``marshal`` (fast, CPython-specific)."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v0 layout); ``flags`` is dropped."""
+        try:
+            # nosemgrep
+            return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v0 marshal KEY row, unpacking val_size from the high bits of row_size."""
+        try:
+            # nosemgrep
+            args = marshal_loads(data) # nosec B302
+            key, file_id, offset, row_size, ver, days = args[:6]
+            val_size = row_size >> 32
+            row_size &= 0X_FFFF_FFFF
+            return key, file_id, offset, row_size, val_size, ver, days, 0
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v1 layout); ``flags`` is dropped."""
+        try:
+            # nosemgrep
+            return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v1 marshal KEY row."""
+        try:
+            # nosemgrep
+            args = list(marshal_loads(data)) # nosec B302
+            args.append(0)
+            return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v2 layout, 8 fields)."""
+        try:
+            # nosemgrep
+            return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) # tuple smaller than list
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v2 marshal KEY row (8 fields; a v1 row is rejected, not widened)."""
+        try:
+            # nosemgrep
+            args = list(marshal_loads(data)) # nosec B302
+            return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+class JIoKEY_L(JIoKEY):
+    """KEY row codec using a plain comma-separated text line."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v0 layout); ``flags`` is dropped."""
+        try:
+            data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days}'
+            return data.encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v0 comma-separated KEY row (keys may contain commas)."""
+        try:
+            if isinstance(data, memoryview):
+                data = bytes(data)
+
+            data_s = data.decode('utf8').rstrip()
+            fields = data_s.split(',')
+            file_id = int(fields[-3])
+            offset = int(fields[-2])
+            n_fields = len(fields)
+            key = ','.join(fields[:-3]) if n_fields > 4 else fields[0]
+            extra = fields[-1].split('|')
+            n_extra = len(extra)
+            if n_extra > 2:
+                row_size = int(extra[0])
+                ver = int(extra[1])
+                days = int(extra[2])
+            else: # pragma: no cover
+                if n_extra > 1:
+                    row_size = int(extra[0])
+                    ver = int(extra[1])
+                    days = 0
+                else:
+                    row_size = int(extra[0])
+                    ver = 0
+                    days = 0
+
+            return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, 0
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v1 layout); ``flags`` is dropped."""
+        try:
+            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days}'
+            return data.encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v1 comma-separated KEY row (keys may contain commas)."""
+        try:
+            if isinstance(data, memoryview):
+                data = bytes(data)
+
+            data_s = data.decode('utf8').rstrip()
+            fields = data_s.split(',')
+            n_fields = len(fields)
+            key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
+            file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
+            return key, file_id, offset, row_size, val_size, ver, days, 0
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v2 layout, 8 fields)."""
+        try:
+            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days},{int(flags)}'
+            return data.encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a v2 comma-separated KEY row (keys may contain commas)."""
+        try:
+            if isinstance(data, memoryview):
+                data = bytes(data)
+
+            data_s = data.decode('utf8').rstrip()
+            fields = data_s.split(',')
+            n_fields = len(fields)
+            key = ','.join(fields[:-7]) if n_fields > 8 else fields[0]
+            file_id, offset, row_size, val_size, ver, days, flags = (int(field) for field in fields[-7:])
+            return key, file_id, offset, row_size, val_size, ver, days, flags
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
+            raise JValueError from e
+
+class JIoKEY_U(JIoKEY):
+    """Pluggable KEY (row index) codec ("U+U" data_type).
+
+    Like :class:`JIoVAL_U`, but for the KEY row metadata
+    ``(key, file_id, offset, row_size, val_size, ver, days, flags)``. Most
+    developers only need to customize the VAL codec (``J+U`` / ``S+U``); this
+    exists for the rarer case where the KEY row itself must be transformed too
+    (e.g. to obfuscate record keys on disk).
+
+    ``dumps``/``loads`` describe the *current* (API v2, 8-field) layout. When no
+    version-specific callables are supplied they are reused for the v0/v1
+    layouts as well, which is correct for length-agnostic encoders such as
+    msgpack or JSON. Supply ``dumps_v1``/``loads_v1`` (7 fields) or
+    ``dumps_v0``/``loads_v0`` (6 fields) only when byte-exact compatibility with
+    an older on-disk layout is required.
+    """
+    __slots__ = ('_dumps', '_loads', '_dumps_v1', '_loads_v1', '_dumps_v0', '_loads_v0')
+
+    def __init__(self):
+        self._dumps: Optional[Callable[..., bytes]] = None
+        self._loads: Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]]] = None
+        self._dumps_v0: Optional[Callable[..., bytes]] = None
+        self._loads_v0: Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]]] = None
+        self._dumps_v1: Optional[Callable[..., bytes]] = None
+        self._loads_v1: Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]]] = None
+
+    def register(self, \
+            dumps:Callable[..., bytes], \
+            loads:Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]], \
+            dumps_v0:Optional[Callable[..., bytes]]=None, \
+            loads_v0:Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]]]=None, \
+            dumps_v1:Optional[Callable[..., bytes]]=None, \
+            loads_v1:Optional[Callable[[bytes], Tuple[str,int,int,int,int,int,int,int]]]=None) -> None:
+
+        """Register the developer-defined KEY codec.
+
+        Args:
+            dumps (Callable): Receives a single packed row tuple
+                ``(key, file_id, offset, row_size, val_size, ver, days, flags)``
+                (API v2 layout) and returns ``bytes``. Called with *one* tuple
+                argument, not 8 separate positional arguments.
+            loads (Callable[[bytes], Tuple]): ``bytes -> (key, file_id, offset,
+                row_size, val_size, ver, days, flags)``.
+            dumps_v0 (Callable, optional): Same as ``dumps`` but for the legacy v0
+                layout. Defaults to reusing ``dumps``.
+            loads_v0 (Callable, optional): Same as ``loads`` but for the legacy v0
+                layout. Defaults to reusing ``loads``.
+            dumps_v1 (Callable, optional): Same as ``dumps`` but for the v1 layout
+                (7 fields, no ``flags``). Defaults to reusing ``dumps``.
+            loads_v1 (Callable, optional): Same as ``loads`` but for the v1 layout.
+                Defaults to reusing ``loads``.
+
+        Raises:
+            TypeError: If any provided argument is not callable, or if the
+                dumps/loads round-trip self-test fails. A codec that only handles
+                the old 7-field layout is rejected with an explicit upgrade hint.
+        """
+        for fn in (dumps, loads) + tuple(f for f in (dumps_v0, loads_v0, dumps_v1, loads_v1) if f is not None):
+            if not callable(fn):
+                raise TypeError('dumps/loads must be callable')
+
+        # test_val mirrors the real call convention: dumps() always receives ONE
+        # packed 8-tuple (key, file_id, offset, row_size, val_size, ver, days, flags).
+        test_val = ('1', 2, 3, 4, 5, 6, 7, 8)
+        try:
+            if tuple(loads(dumps(test_val))) != test_val:
+                raise TypeError
+        except Exception as e:
+            try:
+                legacy = ('1', 2, 3, 4, 5, 6, 7)
+                is_v1_only = tuple(loads(dumps(legacy))) == legacy
+            except Exception: # pylint: disable=broad-except
+                is_v1_only = False
+
+            if is_v1_only:
+                raise TypeError(
+                    'dumps/loads only handle the API v1 KEY layout (7 fields). '
+                    'API v2 rows carry a trailing flags field: update the codec to '
+                    '(key, file_id, offset, row_size, val_size, ver, days, flags), '
+                    'or pass it as dumps_v1=/loads_v1= and supply a v2 codec.') from e
+
+            raise TypeError('dumps/loads cannot work correctly') from e
+
+        self._dumps = dumps
+        self._loads = loads
+        self._dumps_v1 = dumps_v1 or dumps
+        self._loads_v1 = loads_v1 or loads
+        self._dumps_v0 = dumps_v0 or dumps
+        self._loads_v0 = loads_v0 or loads
+
+    def unregister(self) -> None:
+        """Clear a previously registered codec, e.g. between tests."""
+        self._dumps = self._loads = self._dumps_v1 = self._loads_v1 = self._dumps_v0 = self._loads_v0 = None
+
+    @property
+    def is_registered(self) -> bool:
+        """bool: Whether a developer codec has been registered yet."""
+        return self._dumps is not None and self._loads is not None
+
+    def _missing(self): # pragma: no cover
+        raise UserCodecNotRegisteredError(
+            "data_type 'U+U' (KEY) is selected but no codec is registered. "
+            "Call register_user_key_codec(dumps, loads) before opening the JDb.")
+
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row (v2 layout) using the registered developer codec."""
+        if self._dumps is None: # pragma: no cover
+            self._missing()
+
+        try:
+            return self._dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a KEY row (v2 layout) using the registered developer codec."""
+        if self._loads is None: # pragma: no cover
+            self._missing()
+
+        try:
+            args = self._loads(data)
+            return args[:8]
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row (v1 layout) using the registered developer codec; ``flags`` is dropped."""
+        if self._dumps is None: # pragma: no cover
+            self._missing()
+        try:
+            return self._dumps((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a KEY row (v1 layout) using the registered developer codec."""
+        if self._loads is None: # pragma: no cover
+            self._missing()
+
+        try:
+            args = list(self._loads(data))
+            return (*args[:7], 0)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+        """Serialize a KEY row (v0 layout) using the registered developer codec; ``flags`` is dropped."""
+        if self._dumps_v0 is None: # pragma: no cover
+            self._missing()
+        try:
+            return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days))
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+        """Parse a KEY row (v0 layout) using the registered developer codec."""
+        if self._loads_v0 is None: # pragma: no cover
+            self._missing()
+        try:
+            args = self._loads_v0(data)
+            return (*args[:7], 0)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+        raise JValueError
+
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
+class JIoVAL(metaclass=ABCMeta): # pragma: no cover
+    """Abstract codec for a stored record value."""
+    @abstractmethod
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a Python value to bytes."""
+    @abstractmethod
+    def loads(self, data:bytes) -> Any:
+        """Deserialize bytes back into a Python value."""
+
+class JIoVAL_J(JIoVAL):
+    """Value codec using JSON (human-readable; bytes are hex-encoded)."""
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value as JSON (bytes are hex-encoded with a marker prefix)."""
+        try:
+            return _json_dumps(data, default=_json_default)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a JSON value, decoding the hex-encoded bytes marker back to bytes."""
+        try:
+            val = json_loads(data)
+            if isinstance(val, str) and val[:4] == '\0\1\0\1':
+                try:
+                    _bytes = bytes.fromhex(val[4:])
+                    if reduce(lambda x,y: (x+y) & 0xff, _bytes) == 0:
+                        return _bytes[:-1]
+
+                except ValueError: # pragma: no cover
+                    return val
+
+            return val
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
+            raise JValueError from e
+
+class JIoVAL_S(JIoVAL):
+    """Value codec using msgpack (compact binary)."""
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value with msgpack."""
+        try:
+            return _msg_dumps(data, default=_msg_encode) or b''
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a msgpack value (retries with padding to tolerate reserved-row slack)."""
+        for _ in range(9):
+            try:
+                return _msg_loads(data, ext_hook=_msg_decode, strict_map_key=False)
+
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
+                data = data + b'\xc1'
+
+        raise JValueError
+
+class JIoVAL_M(JIoVAL):
+    """Value codec using Python ``marshal`` (fast, CPython-specific)."""
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value with marshal."""
+        try:
+            # nosemgrep
+            return marshal_dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a marshal value (retries with padding to tolerate reserved-row slack)."""
+        for _ in range(9):
+            try:
+                # nosemgrep
+                return marshal_loads(data) # nosec B302
+
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError): # pragma: no cover
+                data = data + b'\n'
+
+        raise JValueError
+
+class JIoVAL_P(JIoVAL):
+    """Value codec using pickle (supports arbitrary Python objects)."""
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value with pickle."""
+        try:
+            # nosemgrep
+            return pickle_dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, PicklingError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a pickle value (retries with padding to tolerate reserved-row slack)."""
+        for _ in range(9):
+            try:
+                # nosemgrep
+                return pickle_loads(data) # nosec B301
+
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, UnpicklingError): # pragma: no cover
+                data = data + b'\n'
+
+        raise JValueError
+
+class JIoVAL_Y(JIoVAL):
+    """Value codec using YAML (human-readable; requires PyYAML)."""
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value as YAML."""
+        if yaml_dumps is None: # pragma: no cover
+            raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
+
+        try:
+            return yaml_dumps(data, allow_unicode=True).encode('utf8')
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, YAMLError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a YAML value (retries with padding to tolerate reserved-row slack)."""
+        if yaml_loads is None: # pragma: no cover
+            raise ModuleNotFoundError("PyYAML is not installed. Please pip install pyyaml.")
+
+        if isinstance(data, (bytearray, memoryview)): # pragma: no cover
+            # PyYAML only accepts str/bytes; any other object is treated as a
+            # file-like stream (and fails with AttributeError: no 'read').
+            data = bytes(data)
+
+        for _ in range(9):
+            try:
+                return yaml_loads(data)
+
+            except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, YAMLError): # pragma: no cover
+                data = data + b'\n'
+
+        raise JValueError
+
+class JIoVAL_U(JIoVAL):
+    """Pluggable VAL codec ("U+..." / "...+U" data types).
+
+    Ships with no encoding logic of its own. A developer registers a
+    ``dumps``/``loads`` pair once (typically at application start-up) via
+    :meth:`register` or the module-level :func:`register_user_val_codec`
+    helper, and every ``JDb`` opened with a 'U' VAL data_type (``J+U``,
+    ``S+U``, ``U+U``) routes every value through that pair. This is the
+    extension point for encryption, custom compression, protobuf, etc.,
+    without needing to fork the library.
+    """
+    __slots__ = ('_dumps', '_loads', 'pad_byte')
+
+    def __init__(self):
+        self._dumps: Optional[Callable[[Any], bytes]] = None
+        self._loads: Optional[Callable[[bytes], Any]] = None
+        self.pad_byte: bytes = b'\n'
+
+    def register(self, dumps:Callable[[Any], bytes], loads:Callable[[bytes], Any], pad_byte:bytes=b'\n') -> None:
+        """Register the developer-defined VAL codec.
+
+        Args:
+            dumps (Callable[[Any], bytes]): Encode a Python value into bytes.
+            loads (Callable[[bytes], Any]): Decode bytes back into the Python value.
+            pad_byte (bytes, optional): Single byte guaranteed to never occur as the
+                first/last byte of ``dumps()`` output; used only when zip_type=NO_ZIP
+                to pad small values inline in the KEY row. Defaults to ``b'\\n'``.
+
+        Raises:
+            TypeError: If dumps/loads are not callable, pad_byte is not a single byte,
+                or the dumps/loads round-trip self-test fails.
+        """
+        if not callable(dumps) or not callable(loads):
+            raise TypeError('dumps and loads must be callable')
+        if not (isinstance(pad_byte, bytes) and len(pad_byte) == 1):
+            raise TypeError('pad_byte must be a single byte, e.g. b"\\n"')
+
+        test_val = {'key1':0, 'key2':[True,2.,'3']}
+        try:
+            if loads(dumps(test_val)) != test_val:
+                raise TypeError
+
+        except Exception as e:
+            raise TypeError('dumps/loads cannot work correctly') from e
+
+        self._dumps = dumps
+        self._loads = loads
+        self.pad_byte = pad_byte
+
+    def unregister(self) -> None:
+        """Clear a previously registered codec, e.g. between tests."""
+        self._dumps = self._loads = None
+        self.pad_byte = b'\n'
+
+    @property
+    def is_registered(self) -> bool:
+        """bool: Whether a developer codec has been registered yet."""
+        return self._dumps is not None and self._loads is not None
+
+    def dumps(self, data:Any) -> bytes:
+        """Serialize a value using the registered developer codec."""
+        if self._dumps is None: # pragma: no cover
+            raise UserCodecNotRegisteredError(
+                "data_type 'U' (VAL) is selected but no codec is registered. "
+                "Call register_user_val_codec(dumps, loads) before opening the JDb.")
+        try:
+            return self._dumps(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
+
+    def loads(self, data:bytes) -> Any:
+        """Deserialize a value using the registered developer codec."""
+        if self._loads is None: # pragma: no cover
+            raise UserCodecNotRegisteredError(
+                "data_type 'U' (VAL) is selected but no codec is registered. "
+                "Call register_user_val_codec(dumps, loads) before opening the JDb.")
+        try:
+            return self._loads(data)
+
+        except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
+            raise JValueError from e
 
 #

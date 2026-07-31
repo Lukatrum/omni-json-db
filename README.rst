@@ -1680,10 +1680,10 @@ Configure ``zip_type`` during initialization:
 * ``gz``: Gzip (mode=1) compression for Value
 * ``bz``: Bzip2 (mode=9) compression for Value
 * ``xz``: LZMA compression for Value
-* ``zs``: Zstandard (mode=22) compression for Value
+* ``zs``: Zstandard (mode=22) compression for Value (better than ``xz``)
 * ``br``: Brotli (mode=6) compression for Value (better than ``gz``)
 * ``z1``: Zstandard (mode=6) compression for Value (better than ``gz``)
-* ``z2``: Zstandard (mode=11) compression for Value
+* ``z2``: Zstandard (mode=11) compression for Value (better than ``gz``)
 * ``lz``: LZ4 (mode=0) compression for Value
 
 **Data size = 70,840,580 (MB = 1,000,000B)**
@@ -1703,13 +1703,14 @@ Configure ``zip_type`` during initialization:
 +------------+------------+-------+----------+-----------+---------------+---------------+
 | ``zs``     | 11,119,665 | 6.37  | 73.0MB/s | 1.7MB/s   |* best ratio   |* slowest zip  |
 |            |            |       |          |           |* faster unzip |               |
-+------------+------------+-------+----------+-----------+---------------+---------------+
+|            |            |       |          |           |* better ``xz``|               |+------------+------------+-------+----------+-----------+---------------+---------------+
 | ``br``     | 13,700,696 | 5.17  | 65.8MB/s | 25.3MB/s  |* better ``gz``|               |
 +------------+------------+-------+----------+-----------+---------------+---------------+
 | ``z1``     | 14,738,859 | 4.80  | 73.6MB/s | 70.8MB/s  |* faster zip   |               |
 |            |            |       |          |           |* faster unzip |               |
-+------------+------------+-------+----------+-----------+---------------+---------------+
+|            |            |       |          |           |* better ``gz``|               |+------------+------------+-------+----------+-----------+---------------+---------------+
 | ``z2``     | 13,799,407 | 5.13  | 72.7MB/s | 23.6MB/s  |* faster unzip |               |
+|            |            |       |          |           |* better ``gz``|               |
 +------------+------------+-------+----------+-----------+---------------+---------------+
 | ``lz``     | 26,226,039 | 2.70  | 75.6MB/s | 202.4MB/s |* fastest zip  |* worst ratio  |
 |            |            |       |          |           |* fastest unzip|               |

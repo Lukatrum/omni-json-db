@@ -351,6 +351,42 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'create_group': # pragma: no cover
                         resp['ret'] = grp_files_obj.create_group(*_args, **_kwargs).get_KEY()
 
+                    elif cmd == 'link_group':
+                        # link a foreign backend as one of this database's groups:
+                        # either another server's group (chained JNetFiles proxy)
+                        # or a KEY path reachable from this host
+                        _name = _kwargs['name']
+                        _addr = _kwargs.get('addr', None)
+                        if _addr is not None:
+                            _target = JNetFiles((str(_addr[0]), int(_addr[1])), group_path=tuple(_kwargs.get('group_path', ())))
+                        else:
+                            _target = JDiskFiles(_kwargs['KEY'])
+
+                        _target = grp_files_obj.link_group(_name, _target)
+                        # refresh the server-wide registry so other connections
+                        # (and their cached resolutions) pick up the new link
+                        _full_path = f'{group_path}/{_name}' if group_path else _name
+                        with server.group_lock:
+                            server.group_files[_full_path] = _target
+
+                        resp['ret'] = _target.get_KEY()
+
+                    elif cmd == 'unlink_group':
+                        _name = _kwargs.get('name', None)
+                        _removed = grp_files_obj.unlink_group(_name)
+                        with server.group_lock:
+                            if _name is None:
+                                _prefix = f'{group_path}/' if group_path else ''
+                                for _p in [p for p in server.group_files if p.startswith(_prefix)]:
+                                    _removed = True
+                                    server.group_files.pop(_p, None)
+                            else:
+                                _full_path = f'{group_path}/{_name}' if group_path else _name
+                                if server.group_files.pop(_full_path, None) is not None:
+                                    _removed = True
+
+                        resp['ret'] = _removed
+
                     elif cmd == 'size':
                         resp['ret'] = grp_files_obj.KEY_size()
 

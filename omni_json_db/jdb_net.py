@@ -730,6 +730,82 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
+    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
+        """Ask the remote server to link an existing backend as group ``name``.
+
+        This is the network counterpart of :meth:`JFilesBase.link_group` and is
+        the mechanism behind assigning an *already remote* child database to a
+        (possibly different) server: instead of copying the child's data, the
+        server is told where the child's storage lives, and serves group
+        ``name`` by proxying to it. Supported targets:
+
+        - :class:`JNetFiles`: the server connects to ``files_obj``'s server
+          address / group path (chained proxy). Works across servers.
+        - any other :class:`JFilesBase`: the server links ``files_obj``'s KEY
+          path, which therefore must be reachable from the server host.
+
+        Args:
+            name (str): The group name. Must be alphanumeric/underscore only.
+            files_obj (JFilesBase): The backend that should serve group ``name``.
+
+        Returns:
+            JFilesBase: A new :class:`JNetFiles` client targeting group ``name``.
+
+        Raises:
+            KeyError: If ``name`` violates the group naming constraint.
+            TypeError: If ``files_obj`` is not a :class:`JFilesBase`.
+            IOError: If the network socket is disconnected.
+            ValueError: If the remote link command fails.
+        """
+        if not re_match(r'^\w+$', name):
+            raise KeyError(name)
+
+        if not isinstance(files_obj, JFilesBase):
+            raise TypeError('files_obj must be a JFilesBase')
+
+        if isinstance(files_obj, JNetFiles):
+            _kwargs = {'name':name, 'addr':list(files_obj.server_addr), 'group_path':list(files_obj.group_path)}
+        else:
+            _kwargs = {'name':name, 'KEY':files_obj.get_KEY()}
+
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'link_group', (), _kwargs))
+                resp = recv_and_load(self.sock)
+
+                if resp.get('ok'):
+                    return JNetFiles(self.server_addr, group_path=self.group_path + (name,))
+
+                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
+
+            raise IOError
+
+    def unlink_group(self, name:Optional[str]=None) -> bool:
+        """Ask the remote server to remove a group link (see :meth:`JFilesBase.unlink_group`).
+
+        Args:
+            name (Optional[str]): The group name to unlink, or ``None`` to
+                clear this namespace's whole link registry.
+
+        Returns:
+            bool: ``True`` if the server removed something.
+
+        Raises:
+            IOError: If the network socket is disconnected.
+            ValueError: If the remote command fails.
+        """
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'unlink_group', (), {'name':name}))
+                resp = recv_and_load(self.sock)
+
+                if resp.get('ok'):
+                    return bool(resp.get('ret', False))
+
+                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
+
+            raise IOError
+
     def KEY_open(self, mode:str='rb', buffering:int=-1, **kwargs) -> IO:
         """Open a network stream to read or write the remote main index (KEY) file.
 

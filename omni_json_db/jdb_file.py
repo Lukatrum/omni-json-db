@@ -9,6 +9,7 @@ from os.path import basename, dirname, join as path_join, exists as path_exists
 from os import open as os_open, close as os_close, O_APPEND, O_CREAT
 from datetime import datetime
 from threading import Lock, Condition
+from re import match as re_match
 #-----------------------------------------------------------------------------
 OPEN_FLAGS = O_APPEND | O_CREAT
 try:
@@ -576,6 +577,49 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool: ...
     @abstractmethod
     def create_group(self, name:str) -> JFilesBase: ...
+
+    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
+        """Link an existing storage backend as the group ``name`` of this database.
+
+        After linking, every :meth:`create_group` call with the same ``name``
+        (from this instance or any of its :meth:`copy` chain) resolves to
+        ``files_obj`` instead of creating fresh group storage. This is how a
+        foreign child database (one whose storage is *not* this database's
+        group namespace) is made visible to all handles and connections
+        without copying its data.
+
+        The link lives in an in-process registry — it is not persisted to
+        storage, so a handle opened in another process will not see it.
+
+        Args:
+            name (str): The group name. Must be alphanumeric/underscore only.
+            files_obj (JFilesBase): The backend to serve as group ``name``.
+
+        Returns:
+            JFilesBase: The linked backend.
+
+        Raises:
+            KeyError: If ``name`` violates the group naming constraint.
+            NotImplementedError: If this driver does not support linking.
+        """
+        raise NotImplementedError(f'{type(self).__name__} does not support link_group')
+
+    def unlink_group(self, name:Optional[str]=None) -> bool:
+        """Remove a group link (or all of them) from the in-process registry.
+
+        Called when a child/group key is deleted so that a later
+        :meth:`create_group` with the same name resolves to fresh group
+        storage instead of the stale linked backend.
+
+        Args:
+            name (Optional[str]): The group name to unlink, or ``None`` to
+                clear the whole registry (used by ``clear()``).
+
+        Returns:
+            bool: ``True`` if something was removed.
+        """
+        return False
+
     @abstractmethod
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO: ...
     @abstractmethod
@@ -784,6 +828,51 @@ class JMemFiles(JFilesBase):
 
         return files_obj
 
+    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
+        """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
+
+        The link is stored in the shared ``group_table``, so every copy of
+        this instance (other :class:`JDb` wrappers, server connections)
+        resolves ``create_group(name)`` to the same linked backend.
+
+        Args:
+            name (str): The group name. Must be alphanumeric/underscore only.
+            files_obj (JFilesBase): The backend to serve as group ``name``.
+
+        Returns:
+            JFilesBase: The linked backend (a private :meth:`copy`).
+
+        Raises:
+            KeyError: If ``name`` violates the group naming constraint.
+            TypeError: If ``files_obj`` is not a :class:`JFilesBase`.
+        """
+        if not re_match(r'^\w+$', name):
+            raise KeyError(name)
+
+        if not isinstance(files_obj, JFilesBase):
+            raise TypeError('files_obj must be a JFilesBase')
+
+        files_obj = files_obj.copy()
+        self.group_table[name] = files_obj
+        return files_obj
+
+    def unlink_group(self, name:Optional[str]=None) -> bool:
+        """Remove a group link (or all) from the shared registry (see :meth:`JFilesBase.unlink_group`).
+
+        Args:
+            name (Optional[str]): The group name to unlink, or ``None`` to
+                clear the whole registry.
+
+        Returns:
+            bool: ``True`` if something was removed.
+        """
+        if name is None:
+            removed = len(self.group_table) > 0
+            self.group_table.clear()
+            return removed
+
+        return self.group_table.pop(name, None) is not None
+
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, **kwargs) -> IO:
         """Initialize an in-memory file stream for a specific value block.
 
@@ -988,13 +1077,18 @@ class JDiskFiles(JFilesBase):
     Maps database operations and logical indexing directly to file nodes and 
     segments on the local storage media.
     """
-    __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file')
+    __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file', 'group_table')
 
-    def __init__(self, KEY_file:str):
+    def __init__(self, KEY_file:str, group_table:Optional[dict]=None):
         """Initialize a database management context pointing to real disk storage.
 
         Args:
             KEY_file (str): The absolute or relative file path locating the primary database index.
+            group_table (dict, optional): Shared in-process registry of linked
+                group backends (see :meth:`link_group`). Groups not present in
+                the registry resolve to their deterministic on-disk path as
+                usual. Shared between all :meth:`copy` instances. Defaults to
+                a new dict.
 
         Raises:
             TypeError: If ``KEY_file`` is not a string.
@@ -1005,6 +1099,14 @@ class JDiskFiles(JFilesBase):
 
         if not KEY_file.strip():
             raise ValueError
+
+        if group_table is None:
+            group_table = {}
+
+        if not isinstance(group_table, dict):
+            raise TypeError
+
+        self.group_table = group_table
 
         file_name = basename(KEY_file)
         dir_name = dirname(KEY_file)
@@ -1086,7 +1188,7 @@ class JDiskFiles(JFilesBase):
         Returns:
             JDiskFiles: Duplicate disk space storage driver context.
         """
-        return JDiskFiles(self.KEY_file)
+        return JDiskFiles(self.KEY_file, group_table=self.group_table)
 
     def fsync(self, fd:int) -> None:
         """Force the operating system to flush internal buffers to the physical disk.
@@ -1113,16 +1215,70 @@ class JDiskFiles(JFilesBase):
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file.startswith('<MEM.') or KEY_file == self.group_KEY_file.format(group_key=name)
 
-    def create_group(self, name:str) -> JDiskFiles:
+    def create_group(self, name:str) -> JFilesBase:
         """Assemble an isolated disk subdirectory tree configured for a partition group.
+
+        If ``name`` was previously linked via :meth:`link_group`, the linked
+        backend is returned instead of the deterministic on-disk group path.
 
         Args:
             name (str): Cluster classification identity label.
 
         Returns:
-            JDiskFiles: Dedicated subfolder disk management framework instance.
+            JFilesBase: The linked backend for ``name`` if one exists,
+            otherwise a dedicated subfolder disk management framework instance.
         """
+        files_obj = self.group_table.get(name, None)
+        if files_obj is not None:
+            return files_obj
+
         return JDiskFiles(self.group_KEY_file.format(group_key=name))
+
+    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
+        """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
+
+        The link is stored in the shared in-process ``group_table``, so every
+        copy of this instance resolves ``create_group(name)`` to the linked
+        backend. The link is *not* persisted to disk: a handle opened in
+        another process resolves ``name`` to the deterministic group path.
+
+        Args:
+            name (str): The group name. Must be alphanumeric/underscore only.
+            files_obj (JFilesBase): The backend to serve as group ``name``.
+
+        Returns:
+            JFilesBase: The linked backend (a private :meth:`copy`).
+
+        Raises:
+            KeyError: If ``name`` violates the group naming constraint.
+            TypeError: If ``files_obj`` is not a :class:`JFilesBase`.
+        """
+        if not re_match(r'^\w+$', name):
+            raise KeyError(name)
+
+        if not isinstance(files_obj, JFilesBase):
+            raise TypeError('files_obj must be a JFilesBase')
+
+        files_obj = files_obj.copy()
+        self.group_table[name] = files_obj
+        return files_obj
+
+    def unlink_group(self, name:Optional[str]=None) -> bool:
+        """Remove a group link (or all) from the shared registry (see :meth:`JFilesBase.unlink_group`).
+
+        Args:
+            name (Optional[str]): The group name to unlink, or ``None`` to
+                clear the whole registry.
+
+        Returns:
+            bool: ``True`` if something was removed.
+        """
+        if name is None:
+            removed = len(self.group_table) > 0
+            self.group_table.clear()
+            return removed
+
+        return self.group_table.pop(name, None) is not None
 
     def VAL_open(self, file_id:int=0, mode:str='rb', buffering:int=0, encoding:Optional[str]=None, **kwargs) -> IO:
         """Open a standard file stream for a specific value partition (VAL file).

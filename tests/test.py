@@ -127,22 +127,23 @@ class TestJDb(unittest.TestCase):
         self.server2 = run_files_server('127.0.0.1', 59899, files=None, verbose=0)
 
         self.jdb_configs = [
-            {'KEY_file':'net_59898_3',      'api_ver':1, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
-            {'KEY_file':'net_59899_6',      'api_ver':1, 'data_type':'S+S', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
+            {'KEY_file':'net_59898_3',      'api_ver':2, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'net_59899_6',      'api_ver':2, 'data_type':'S+S', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'<64'},
 
-            {'KEY_file':'mem_3lz',          'api_ver':1, 'data_type':'J+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'mem_6z1',          'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+            {'KEY_file':'mem_3gz',          'api_ver':2, 'data_type':'J+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
+            {'KEY_file':'mem_6bz',          'api_ver':2, 'data_type':'S+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
                 # {'KEY_file':'mem_7lz',          'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
 
             {'KEY_file':'mem_3br_v0',       'api_ver':0, 'data_type':'J+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
+            {'KEY_file':'mem_6z1_v1',       'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
 
             {'KEY_file':'db/test_1lz_v0.jdb', 'api_ver':0, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'no'},
-            {'KEY_file':'db/test_2br_v0.jdb', 'api_ver':0, 'data_type':'M+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
+            {'KEY_file':'db/test_2br_v1.jdb', 'api_ver':1, 'data_type':'M+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
             {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'<16'},
-            {'KEY_file':'db/test_6lz_v0.jdb', 'api_ver':0, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l5'},
+            {'KEY_file':'db/test_6lz_v1.jdb', 'api_ver':1, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l5'},
                 # {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
 
-            {'KEY_file':'db/test_1.jdb',    'api_ver':1, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+            {'KEY_file':'db/test_1.jdb',    'api_ver':2, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1gz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1bz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1xz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
@@ -151,10 +152,10 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_1z1.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1z2.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1lz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x1.jdb',   'api_ver':1, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l0'},
-            {'KEY_file':'db/test_x1gz.jdb', 'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':0},
+            {'KEY_file':'db/test_x1.jdb',   'api_ver':2, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l0'},
+            {'KEY_file':'db/test_x1gz.jdb', 'api_ver':2, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':0},
 
-            {'KEY_file':'db/test_2.jdb',    'api_ver':1, 'data_type':'M+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+            {'KEY_file':'db/test_2.jdb',    'api_ver':2, 'data_type':'M+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2gz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2bz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2xz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
@@ -163,10 +164,10 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_2z1.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2z2.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_2lz.jdb',  'api_ver':1, 'data_type':'M+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x2.jdb',   'api_ver':1, 'data_type':'M+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l1'},
-            {'KEY_file':'db/test_x2bz.jdb', 'api_ver':1, 'data_type':'M+M', 'zip_type':'bz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':0},
+            {'KEY_file':'db/test_x2.jdb',   'api_ver':2, 'data_type':'M+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l1'},
+            {'KEY_file':'db/test_x2bz.jdb', 'api_ver':2, 'data_type':'M+M', 'zip_type':'bz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':0},
 
-            {'KEY_file':'db/test_3.jdb',    'api_ver':1, 'data_type':'J+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+            {'KEY_file':'db/test_3.jdb',    'api_ver':2, 'data_type':'J+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_3gz.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_3bz.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_3xz.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
@@ -175,8 +176,8 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_3z1.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_3z2.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_3lz.jdb',  'api_ver':1, 'data_type':'J+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x3.jdb',   'api_ver':1, 'data_type':'J+J', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l2'},
-            {'KEY_file':'db/test_x3xz.jdb', 'api_ver':1, 'data_type':'J+J', 'zip_type':'xz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
+            {'KEY_file':'db/test_x3.jdb',   'api_ver':2, 'data_type':'J+J', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l2'},
+            {'KEY_file':'db/test_x3xz.jdb', 'api_ver':2, 'data_type':'J+J', 'zip_type':'xz', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
                 # {'KEY_file':'db/test_4.jdb',    'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4gz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
@@ -187,8 +188,8 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_4z1.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4z2.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_4lz.jdb',  'api_ver':1, 'data_type':'J+M', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x4.jdb',   'api_ver':1, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l3'},
-            {'KEY_file':'db/test_x4zs.jdb', 'api_ver':1, 'data_type':'J+M', 'zip_type':'zs', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
+            {'KEY_file':'db/test_x4.jdb',   'api_ver':2, 'data_type':'J+M', 'zip_type':'no', 'max_file_size' : 32 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l3'},
+            {'KEY_file':'db/test_x4zs.jdb', 'api_ver':2, 'data_type':'J+M', 'zip_type':'zs', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
                 # {'KEY_file':'db/test_5.jdb',    'api_ver':1, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5gz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
@@ -199,10 +200,10 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_5z1.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5z2.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_5lz.jdb',  'api_ver':1, 'data_type':'J+P', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x5.jdb',   'api_ver':1, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l4'},
-            {'KEY_file':'db/test_x5br.jdb', 'api_ver':1, 'data_type':'J+P', 'zip_type':'br', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
+            {'KEY_file':'db/test_x5.jdb',   'api_ver':2, 'data_type':'J+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l4'},
+            {'KEY_file':'db/test_x5br.jdb', 'api_ver':2, 'data_type':'J+P', 'zip_type':'br', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
-            {'KEY_file':'db/test_6.jdb',    'api_ver':1, 'data_type':'S+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
+            {'KEY_file':'db/test_6.jdb',    'api_ver':2, 'data_type':'S+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_6gz.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_6bz.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_6xz.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
@@ -211,8 +212,8 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_6z1.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_6z2.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
                 # {'KEY_file':'db/test_6lz.jdb',  'api_ver':1, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x6.jdb',   'api_ver':1, 'data_type':'S+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l5'},
-            {'KEY_file':'db/test_x6z1.jdb', 'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
+            {'KEY_file':'db/test_x6.jdb',   'api_ver':2, 'data_type':'S+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'l5'},
+            {'KEY_file':'db/test_x6z1.jdb', 'api_ver':2, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'-'},
 
                 # {'KEY_file':'db/test_7.jdb',    'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_7gz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
@@ -223,32 +224,32 @@ class TestJDb(unittest.TestCase):
                 # {'KEY_file':'db/test_7z1.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
                 # {'KEY_file':'db/test_7z2.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
                 # {'KEY_file':'db/test_7lz.jdb',  'api_ver':1, 'data_type':'J+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x7.jdb',   'api_ver':1, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'<16'},
-            {'KEY_file':'db/test_x7z2.jdb', 'api_ver':1, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
+            {'KEY_file':'db/test_x7.jdb',   'api_ver':2, 'data_type':'J+S', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate': 0.1, 'cache_limit': 2, 'min_value_size':  2, 'index_size': 64, 'key_limit':'<16'},
+            {'KEY_file':'db/test_x7z2.jdb', 'api_ver':2, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' :     None, 'reserved_rate': 0.0, 'cache_limit':-1, 'min_value_size':128, 'index_size':128, 'key_limit':'--'},
 
                 # {'KEY_file':'db/test_8.jdb',    'api_ver':1, 'data_type':'S+M', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x8gz.jdb', 'api_ver':1, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l5'},
+            {'KEY_file':'db/test_x8gz.jdb', 'api_ver':2, 'data_type':'S+M', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l5'},
 
                 # {'KEY_file':'db/test_9.jdb',    'api_ver':1, 'data_type':'S+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'-'},
-            {'KEY_file':'db/test_x9z1.jdb', 'api_ver':1, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<8'},
+            {'KEY_file':'db/test_x9z1.jdb', 'api_ver':2, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<8'},
 
                 # {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x10br.jdb', 'api_ver':1, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<4'},
+            {'KEY_file':'db/test_x10br.jdb', 'api_ver':2, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<4'},
 
                 # {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x11.jdb',  'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' :  64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'bt'},
+            {'KEY_file':'db/test_x11.jdb',  'api_ver':2, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' :  64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'bt'},
 
                 # {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x12lz.jdb',  'api_ver':1, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'db/test_x12lz.jdb',  'api_ver':2, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l4'},
 
                 # {'KEY_file':'db/test_13.jdb',    'api_ver':1, 'data_type':'J+U', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x13gz.jdb',  'api_ver':1, 'data_type':'J+U', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l3'},
+            {'KEY_file':'db/test_x13gz.jdb',  'api_ver':2, 'data_type':'J+U', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l3'},
 
                 # {'KEY_file':'db/test_14.jdb',    'api_ver':1, 'data_type':'S+U', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x14z1.jdb',  'api_ver':1, 'data_type':'S+U', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l2'},
+            {'KEY_file':'db/test_x14z1.jdb',  'api_ver':2, 'data_type':'S+U', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l2'},
 
                 # {'KEY_file':'db/test_15.jdb',    'api_ver':1, 'data_type':'U+U', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x15lz.jdb',  'api_ver':1, 'data_type':'U+U', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<32'},
+            {'KEY_file':'db/test_x15lz.jdb',  'api_ver':2, 'data_type':'U+U', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<32'},
         ]
 
         self.jdbs = {}
@@ -3669,13 +3670,204 @@ class TestJDb(unittest.TestCase):
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_group_key(self):
+        remote_jdb_disk = self.server1.jdb
+        remote_jdb_mem = self.server2.jdb
+        local_jdb_disk = JDb(JNetFiles(self.server1.server_address))
+        local_jdb_mem = JDb(JNetFiles(self.server2.server_address))
+
+        remote_jdb_disk.clear(agree='yes', wait_sec=0)
+        remote_jdb_mem.clear(agree='yes', wait_sec=0)
+
+        self.assertEqual(len(local_jdb_disk), 0)
+        self.assertEqual(len(local_jdb_mem), 0)
+
         tmp_data = {f'key{v}':list(range(v+1)) for v in range(32)}
-        tmp_jdb = JDb('db/tmp.jdb')
+        tmp_jdb = remote_tmp_disk = JDb('db/remote.jdb') # disk
         tmp_jdb -= tmp_jdb
-        tmp_jdb += tmp_data
-        self.server2.jdb['tmp'] = tmp_jdb
-        jdb = JDb(JNetFiles(self.server2.server_address))
-        self.assertEqual(jdb['tmp'], tmp_data)
+        remote_tmp_disk += tmp_data
+
+        remote_jdb_disk['key'] = 1000
+        remote_jdb_mem['key'] = 2000
+
+        remote_jdb_disk['disk'] = remote_tmp_disk
+        remote_jdb_mem['disk'] = remote_tmp_disk
+        self.assertEqual(remote_tmp_disk, tmp_data)
+
+        remote_tmp_mem = JDb()          # mem
+        remote_tmp_mem[tmp_data] = 1
+
+        remote_jdb_disk['mem'] = remote_tmp_mem
+        remote_jdb_mem['mem'] = remote_tmp_mem
+        self.assertEqual(len(remote_tmp_mem), len(tmp_data))
+
+        remote_group_disk = remote_jdb_disk.add_group('group') # group
+        remote_group_disk[tmp_data] = 2
+        self.assertEqual(len(remote_group_disk), len(tmp_data))
+
+        remote_group_mem = remote_jdb_mem.add_group('group') # group
+        remote_group_mem[tmp_data] = 3
+        self.assertEqual(len(remote_group_mem), len(tmp_data))
+
+        self.assertEqual(remote_jdb_disk['disk'][:], tmp_data)
+        self.assertEqual(remote_jdb_disk['mem'[:]], remote_tmp_mem)
+        self.assertEqual(remote_jdb_disk['group'][:], remote_group_disk)
+
+        self.assertEqual(remote_jdb_mem['disk'][:], tmp_data)
+        self.assertEqual(remote_jdb_mem['mem'][:], remote_tmp_mem)
+        self.assertEqual(remote_jdb_mem['group'][:], remote_group_mem)
+
+        remote_jdb_disk2 = JDb(remote_jdb_disk)
+        self.assertEqual(remote_jdb_disk2, remote_jdb_disk)
+
+        remote_jdb_mem2 = JDb(remote_jdb_mem)
+        self.assertEqual(remote_jdb_mem2, remote_jdb_mem)
+
+        self.assertEqual(local_jdb_disk['key'], 1000)
+        self.assertEqual(local_jdb_disk['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_disk['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_disk['group'][:], remote_group_disk[:])
+
+        self.assertEqual(local_jdb_mem['key'], 2000)
+        self.assertEqual(local_jdb_mem['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_mem['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_mem['group'][:], remote_group_mem[:])
+
+        local_jdb_disk2 = JDb(local_jdb_disk)
+        self.assertEqual(local_jdb_disk2, local_jdb_disk)
+        self.assertEqual(local_jdb_disk2['disk'][:], local_jdb_disk['disk'][:])
+        self.assertEqual(local_jdb_disk2['mem'][:], local_jdb_disk['mem'][:])
+        self.assertEqual(local_jdb_disk2['group'][:], local_jdb_disk['group'][:])
+        self.assertEqual(local_jdb_disk2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_disk2['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_disk2['group'][:], remote_group_disk[:])
+
+        local_jdb_mem2 = JDb(local_jdb_mem)
+        self.assertEqual(local_jdb_mem2, local_jdb_mem)
+        self.assertEqual(local_jdb_mem2['disk'][:], local_jdb_mem['disk'][:])
+        self.assertEqual(local_jdb_mem2['mem'][:], local_jdb_mem['mem'][:])
+        self.assertEqual(local_jdb_mem2['group'][:], local_jdb_mem['group'][:])
+        self.assertEqual(local_jdb_mem2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_mem2['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_mem2['group'][:], remote_group_mem[:])
+
+        local_tmp_disk = JDb('db/local.jdb') # disk2
+        local_tmp_disk[tmp_data] = 4
+
+        local_tmp_mem = JDb()                # mem2
+        local_tmp_mem[tmp_data] = 5
+
+        local_jdb_disk['disk2'] = local_tmp_disk
+        local_jdb_disk['mem2'] = local_tmp_mem
+        local_group_disk = local_jdb_disk.add_group('group2') # group2
+        local_group_disk[tmp_data] = 6
+        self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_disk['mem2'][:], local_tmp_mem[:])
+        self.assertEqual(local_jdb_disk['group2'][:], local_group_disk[:])
+        self.assertEqual(remote_jdb_disk['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_disk['mem2'][:], local_tmp_mem[:])
+        self.assertEqual(remote_jdb_disk['group2'][:], local_group_disk[:])
+
+        local_jdb_mem['disk2'] = local_tmp_disk
+        local_jdb_mem['mem2'] = local_tmp_mem
+        local_group_mem = local_jdb_mem.add_group('group2') # group2
+        local_group_mem[tmp_data] = 7
+
+        local_jdb_disk['key2'] = 3000
+        local_jdb_mem['key2'] = 4000
+
+        self.assertEqual(local_jdb_disk['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_disk['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_disk['group'][:], remote_group_disk[:])
+        self.assertEqual(remote_jdb_disk['key2'], 3000)
+        self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])   # XX
+        self.assertEqual(local_jdb_disk['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(local_jdb_disk['group2'][:], local_group_disk[:])
+
+        self.assertEqual(local_jdb_mem['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_mem['mem2'][:], local_tmp_mem[:])
+        self.assertEqual(local_jdb_mem['group2'][:], local_group_mem[:])
+        self.assertEqual(remote_jdb_mem['key2'], 4000)
+        self.assertEqual(remote_jdb_mem['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_mem['mem2'][:], local_tmp_mem[:])
+        self.assertEqual(remote_jdb_mem['group2'][:], local_group_mem[:])
+
+        local_jdb_disk['key'] = -1000
+        local_jdb_mem['key'] = -2000
+        local_group_mem[:] = -7     # group2
+        local_group_disk[:] = -6    # group2
+        local_tmp_mem[:] = -5       # mem2
+        local_tmp_disk[:] = -4      # disk2
+
+        remote_jdb_disk['key2'] = -3000
+        remote_jdb_mem['key2'] = -4000
+        remote_group_mem[:] = -3    # group
+        remote_group_disk[:] = -2   # group
+        remote_tmp_mem[:] = -1      # mem
+        remote_tmp_disk[:] = 0      # disk
+
+        self.assertEqual(local_jdb_disk['key2'], -3000)
+        self.assertEqual(local_jdb_disk['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_disk['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_disk['group'][:], remote_group_disk[:])
+        self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])  # XX
+        self.assertEqual(local_jdb_disk['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(local_jdb_disk['group2'][:], local_group_disk[:])
+
+        self.assertEqual(local_jdb_mem['key2'], -4000)
+        self.assertEqual(local_jdb_mem['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_mem['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_mem['group'][:], remote_group_mem[:])
+        self.assertEqual(local_jdb_mem['disk2'][:], local_tmp_disk[:])   # XX
+        self.assertEqual(local_jdb_mem['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(local_jdb_mem['group2'][:], local_group_mem[:])
+
+        self.assertEqual(remote_jdb_disk['key'], -1000)
+        self.assertEqual(remote_jdb_disk['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(remote_jdb_disk['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(remote_jdb_disk['group'][:], remote_group_disk[:])
+        self.assertEqual(remote_jdb_disk['disk2'][:], local_tmp_disk[:])  # XX
+        self.assertEqual(remote_jdb_disk['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_disk['group2'][:], local_group_disk[:])
+
+        self.assertEqual(remote_jdb_mem['key'], -2000)
+        self.assertEqual(remote_jdb_mem['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(remote_jdb_mem['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(remote_jdb_mem['group'][:], remote_group_mem[:])
+        self.assertEqual(remote_jdb_mem['disk2'][:], local_tmp_disk[:])   # XX
+        self.assertEqual(remote_jdb_mem['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(remote_jdb_mem['group2'][:], local_group_mem[:])
+
+        self.assertEqual(local_jdb_disk2, local_jdb_disk)
+        self.assertEqual(local_jdb_disk2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_disk2['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_disk2['group'][:], remote_group_disk[:])
+        self.assertEqual(local_jdb_disk2['disk2'][:], local_tmp_disk[:])  # XX
+        self.assertEqual(local_jdb_disk2['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(local_jdb_disk2['group2'][:], local_group_disk[:])
+
+        self.assertEqual(local_jdb_mem2, local_jdb_mem)
+        self.assertEqual(local_jdb_mem2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(local_jdb_mem2['mem'][:], remote_tmp_mem[:])
+        self.assertEqual(local_jdb_mem2['group'][:], remote_group_mem[:])
+        self.assertEqual(local_jdb_mem2['disk2'][:], local_tmp_disk[:])   # XX
+        self.assertEqual(local_jdb_mem2['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(local_jdb_mem2['group2'][:], local_group_mem[:])
+
+        self.assertEqual(remote_jdb_disk2, remote_jdb_disk)
+        self.assertEqual(remote_jdb_disk2['disk'][:], remote_tmp_disk[:]) # XX
+        self.assertEqual(remote_jdb_disk2['mem'][:], remote_tmp_mem[:])   # XX
+        self.assertEqual(remote_jdb_disk2['group'][:], remote_group_disk[:])
+        self.assertEqual(remote_jdb_disk2['disk2'][:], local_tmp_disk[:]) # XX
+        self.assertEqual(remote_jdb_disk2['mem2'][:], local_tmp_mem[:])   # XX
+        self.assertEqual(remote_jdb_disk2['group2'][:], local_group_disk[:])
+
+        self.assertEqual(remote_jdb_mem2, remote_jdb_mem)
+        self.assertEqual(remote_jdb_mem2['disk'][:], remote_tmp_disk[:])  # XX
+        self.assertEqual(remote_jdb_mem2['mem'][:], remote_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_mem2['group'][:], remote_group_mem[:])
+        self.assertEqual(remote_jdb_mem2['disk2'][:], local_tmp_disk[:])  # XX
+        self.assertEqual(remote_jdb_mem2['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_mem2['group2'][:], local_group_mem[:])
 
         for config in self.jdb_configs:
             st_time = time.perf_counter()
@@ -5475,7 +5667,7 @@ class TestJDb(unittest.TestCase):
             chg = {}
             ret = jdb.check_version(0, with_value=True)
             for row,val in ret.items():
-                key, file_id, offset, rsize, vsize, _ver, _days, valid, val = val
+                key, file_id, offset, rsize, vsize, _ver, _days, _kflags, valid, val = val
                 self.assertLessEqual(row, jdb.n_lines)
                 if rsize > 0:
                     self.assertIn(file_id, jdb.file_table)
@@ -9825,8 +10017,7 @@ class TestJDb(unittest.TestCase):
             ret = jdb.insert(expect)
             self.assertEqual(ret, expect)
             self.assertEqual(jdb, expect)
-            ret = jdb.remove_fast(expect)
-            self.assertEqual(ret, set(expect))
+            jdb.remove_fast(expect)
             self.assertEqual(len(jdb), 0)
             ret = jdb.insert(expect)
             self.assertEqual(ret, expect)
@@ -9896,7 +10087,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jmem.keys[:], jmem1.keys[:])
                 self.assertEqual(jmem.sync_id, jmem1.sync_id)
 
-            ret = jdb.remove_fast(set(jdb))
+            jdb.remove_fast(set(jdb))
             self.assertEqual(len(jdb), 0)
 
             jdb1 = JDb(jdb)
@@ -9931,8 +10122,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(set(jdb.keys.items()), set(jdb1.keys.items()))
             self.assertEqual(set(jdb.keys.values()), set(jdb1.keys.values()))
 
-            ret = jdb.remove_fast(expect)
-            self.assertEqual(ret, set(expect))
+            jdb.remove_fast(expect)
             self.assertEqual(len(jdb), 0)
 
             self.assertEqual(jdb1, jdb)
