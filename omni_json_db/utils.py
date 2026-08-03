@@ -36,20 +36,24 @@ class JKeyFlag(IntFlag):
     ``resize_keys()`` and swap/undelete round-trips. Reading an API v0/v1 file
     always yields ``JKeyFlag(0)``.
 
-    Attributes:
-        READONLY: The record cannot be modified or deleted. Only whole-database
-            operations (``clear()`` / re-init) may remove it.
-        JDB: The record holds a group (child) database rather than an ordinary
-            value. Its value is normally the inline ``0x10`` marker, meaning the
-            group lives at ``files_obj.create_group(key)``; a legacy record may
-            instead store the child's KEY path as a string. Because the flag is
-            on the row itself, ``load_keys()`` can populate ``JIo.groups``
-            straight from the index, which is what allowed the old separate
-            ``JDb.childs`` registry to be folded into ``JIo.groups``.
+    The members are documented individually below. Do not describe them again in
+    a Google-style ``Attributes:`` section here: autodoc already emits one
+    ``py:attribute`` per enum member, and napoleon would emit a second one from
+    the section, which Sphinx reports as a duplicate object description.
     """
 
-    READONLY = 0x01  # 'r' : cannot modify/delete (except clear / reinit)
-    JDB      = 0x02  # 'j' : the record is a group JDb -> JIo.groups
+    #: ``'r'`` -- the record cannot be modified or deleted. Only whole-database
+    #: operations (``clear()`` / re-init) may remove it.
+    READONLY = 0x01
+
+    #: ``'j'`` -- the record holds a group (child) database rather than an
+    #: ordinary value. Its value is normally the inline ``0x10`` marker, meaning
+    #: the group lives at ``files_obj.create_group(key)``; a legacy record may
+    #: instead store the group's KEY path as a string. Because the flag is on the
+    #: row itself, ``load_keys()`` can populate :attr:`JIo.groups` straight from
+    #: the index, which is what allowed the old separate ``JDb.childs`` registry
+    #: to be folded into ``JIo.groups``.
+    JDB      = 0x02
 
     @classmethod
     def _missing_(cls, value):

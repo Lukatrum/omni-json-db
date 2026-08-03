@@ -38,7 +38,7 @@ omni\_json\_db.jdb\_io
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: br_compress, lz4_compress, zs1_compress, zs2_compress, zstd_compress, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoKEY_U, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, JIoVAL_U, gzip_compress
+   :exclude-members: br_compress, lz4_compress, zs1_compress, zs2_compress, zstd_compress, gzip_compress
 
 omni\_json\_db.jdb\_codec
 ------------------------------------
@@ -47,7 +47,7 @@ omni\_json\_db.jdb\_codec
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: _msg_decode, _msg_encode, _json_default, msg_dumps, msg_loads, json_dumps, json_loads, frozenset_representer
+   :exclude-members: _msg_decode, _msg_encode, _json_default, msg_dumps, msg_loads, json_dumps, json_loads, frozenset_representer, JIoHEAD, JIoKEY, JIoKEY_J, JIoKEY_L, JIoKEY_M, JIoKEY_S, JIoKEY_U, JIoVAL, JIoVAL_J, JIoVAL_M, JIoVAL_P, JIoVAL_P, JIoVAL_S, JIoVAL_Y, JIoVAL_U
 
 omni\_json\_db.jdb\_lite
 ------------------------------------

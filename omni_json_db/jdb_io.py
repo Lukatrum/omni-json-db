@@ -1882,18 +1882,6 @@ class JIo(JIoBase):
 
             raise JValueError from e
 
-    @staticmethod
-    def z_key_flags_str(flags:int) -> str:
-        """Render KEY row flags as a compact string (e.g. ``'r_'``, ``'_j'``).
-
-        Args:
-            flags (int): The raw flag bits from a KEY row.
-
-        Returns:
-            str: The readable form, one character per :class:`JKeyFlag` member.
-        """
-        return str(JKeyFlag(int(flags) & KEY_FLAG_MASK))
-
     def seek(self, fp:IO, row_id:int):
         """Reposition system storage stream pointer coordinates directly targeting selected index row boundaries blocks fields.
 
