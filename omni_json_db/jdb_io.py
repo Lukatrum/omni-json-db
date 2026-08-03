@@ -5,7 +5,6 @@ from io import DEFAULT_BUFFER_SIZE
 from time import time
 from functools import lru_cache
 from collections import defaultdict, OrderedDict
-from enum import IntFlag
 from re import findall as re_findall
 from datetime import date as dt_date, datetime, timedelta
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
@@ -19,7 +18,7 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, bitarray, JValueError
+from .utils import Style, JIoBase, bitarray, JValueError, JKeyFlag, KEY_FLAG_MASK
 from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
@@ -154,74 +153,7 @@ LAST_ZIP_TYPE = LZ_ZIP
 API_V0      = 0 # key=6 (val_size packed into row_size)
 API_V1      = 1 # key=7 (+val_size)
 API_V2      = 2 # key=8 (+flags);  header max_vfiles is only meaningful from here on
-API_DEF     = API_V1
 API_LATEST  = API_V2
-
-KEY_FLAG_MASK = 0xFFFF # on-disk width reserved for JKeyFlag
-
-class JKeyFlag(IntFlag):
-    """Per-record flags stored inside a KEY index row (API v2 and later).
-
-    The flags travel with the row itself, so they survive defragmentation,
-    ``resize_keys()`` and swap/undelete round-trips. Reading an API v0/v1 file
-    always yields ``JKeyFlag(0)``.
-
-    Attributes:
-        READONLY: The record cannot be modified or deleted. Only whole-database
-            operations (``clear()`` / re-init) may remove it.
-        JDB: The stored value is a JDb path, i.e. this record points at a child
-            database. Lets ``load_keys()`` populate ``JIo.groups`` straight from
-            the index, so ``JDb.childs`` and ``JIo.groups`` no longer have to be
-            merged by callers.
-    """
-
-    READONLY = 0x01  # 'r' : cannot modify/delete (except clear / reinit)
-    JDB      = 0x02  # 'j' : the string value is a JDb path -> JIo.groups
-
-    @classmethod
-    def _missing_(cls, value):
-        """Allow constructing flags from a letter string, mirroring ``JFlag``.
-
-        ``'r'`` = READONLY, ``'j'`` = JDB (e.g. ``JKeyFlag('rj')``). Unknown
-        letters are ignored.
-
-        Args:
-            value (Any): The letter string (case-insensitive) or an int.
-
-        Returns:
-            JKeyFlag: The combined flag instance.
-        """
-        if isinstance(value, str):
-            _value = 0
-            for ch in value.lower():
-                if ch == 'r':
-                    _value |= JKeyFlag.READONLY
-                elif ch == 'j':
-                    _value |= JKeyFlag.JDB
-
-            value = _value
-
-        return super()._missing_(value)
-
-    def __str__(self) -> str:
-        """Return a compact string showing which flags are active.
-
-        Each position holds the flag's lowercase initial when set, or ``'_'``
-        when not -- e.g. ``'rj'``, ``'r_'``, ``'__'``.
-
-        Returns:
-            str: The flag summary string.
-        """
-        return ''.join(flag.name[0].lower() if flag in self else '_' for flag in JKeyFlag)
-
-
-# Bits a caller is allowed to set. JKeyFlag.JDB is excluded because it describes
-# what the stored VALUE is, not what the caller asked for, so it is always derived.
-#
-# NOTE: use this instead of ``~JKeyFlag.JDB``. On an IntFlag ``~`` complements
-# within the *defined* flags, so ``~JKeyFlag.JDB`` is ``JKeyFlag.READONLY`` (1),
-# not 0xFFFD -- ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
-USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.JDB)
 
 ZIP_lut = (
     lambda data: data,
@@ -1345,7 +1277,7 @@ class JIo(JIoBase):
             zip_type = DEF_ZIP
 
         if api_ver is None:
-            api_ver = API_DEF
+            api_ver = API_LATEST
 
         self._KEY_rows      = OrderedDict()
         self._DEAD_rows     = {}
@@ -1459,7 +1391,7 @@ class JIo(JIoBase):
         # may throw FileNotFoundError
         except Exception: # pragma: no cover
             if api_ver is None:
-                api_ver = API_DEF
+                api_ver = API_LATEST
 
         finally:
             if fp is not None:
@@ -1741,7 +1673,7 @@ class JIo(JIoBase):
             self.update_days()
 
         if version is None: # pragma: no cover
-            version = API_DEF
+            version = API_LATEST
 
         if data_type == DEF_TYPE: # pragma: no cover
             data_type = J_S_TYPE
@@ -2476,6 +2408,7 @@ class JIo(JIoBase):
         index_size      = self.index_size
         file_table      = self.file_table
         key_table       = self.key_table
+        groups          = self.groups
         swap_id         = self.swap_id
         remv_id         = self.remv_id
         sync_id         = self.sync_id
@@ -2513,6 +2446,7 @@ class JIo(JIoBase):
                 if rec_diff == remv_diff == 0:
                     if n_records <= 0: # pragma: no cover
                         key_table.clear()
+                        groups.clear()
 
                     # swap_diff == rec_diff == remv_diff == line_diff == 0
                     if line_diff == 0:
@@ -2576,6 +2510,9 @@ class JIo(JIoBase):
                             self.groups.setdefault(key, None)
                         records += 1
 
+                if n_records == 0:
+                    groups.clear()
+
                 self.update_file_table()
                 self._sync_id   = sync_id
                 self._swap_id   = swap_id
@@ -2593,6 +2530,7 @@ class JIo(JIoBase):
                     # [B1-0] only delete records with swap
                     if n_records <= 0:
                         key_table.clear()
+                        groups.clear()
                         self._sync_id   = sync_id
                         self._swap_id   = swap_id
                         self._remv_id   = remv_id
@@ -2629,6 +2567,7 @@ class JIo(JIoBase):
                 file_table.clear()
 
         if n_lines <= 0:
+            groups.clear()
             self._sync_id   = sync_id
             self._swap_id   = swap_id
             self._remv_id   = remv_id
@@ -2637,6 +2576,9 @@ class JIo(JIoBase):
             return
 
         if fast_mode:
+            if n_records == 0:
+                groups.clear()
+
             self.update_file_table()
             self._sync_id   = sync_id
             self._swap_id   = swap_id
@@ -2646,11 +2588,21 @@ class JIo(JIoBase):
             self.file_size  = fp.seek(0, 2)
             return
 
-        for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
-            key_table[key] = records
-            if is_jdb_row(file_id, row_size, flags):
-                self.groups.setdefault(key, None)
-            records += 1
+        if n_records == 0:
+            groups.clear()
+        else:
+            new_groups = set()
+            for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
+                key_table[key] = records
+                if is_jdb_row(file_id, row_size, flags):
+                    new_groups.add(key)
+                records += 1
+
+            for grp_name in new_groups:
+                groups.setdefault(grp_name, None)
+
+            for grp_name in (set(groups) - new_groups):
+                groups.pop(grp_name, None)
 
         self.update_file_table()
         self._sync_id   = sync_id
@@ -2710,7 +2662,7 @@ class JIo(JIoBase):
             if n_lines >= sync_id:
                 return
 
-        api_ver = API_DEF if self.api_ver is None else self.api_ver
+        api_ver = API_LATEST if self.api_ver is None else self.api_ver
         dst_io = JIo(files_obj=self.files_obj.copy(), # due to JNetFiles
                     data_type=self._data_type,
                     zip_type=self._zip_type,

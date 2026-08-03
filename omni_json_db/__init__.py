@@ -4,10 +4,10 @@ omni-json-db: A Three-LESS (Schema-LESS + Server-LESS + SQL-LESS) High-Performan
 Provides rapid JSON and MsgPack serialization with robust concurrency controls
 for many-read single-write multithreading/multiprocessing environments.
 """
-from .utils import JError, JKeyError, JValueError, JTypeError
+from .utils import JError, JKeyError, JValueError, JTypeError, JKeyFlag, JFlag
 from .jdb_file import JDiskFiles, JMemFiles, JBytesIO
 from .jdb_net import JNetFiles
-from .jdb_lite import JDbReader, SEP_SYM, JFlag
+from .jdb_lite import JDbReader, SEP_SYM
 from .jdb_io import JIoVAL_U, JIoKEY_U, \
                     register_user_key_codec, unregister_user_key_codec, \
                     register_user_val_codec, unregister_user_val_codec
@@ -22,16 +22,17 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful KV JSON database with compression/Time-travel/Concurrency. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.14.41'
+__version__         = '2.14.42'
 
 __all__ = (
     'GraphDb',
     'JDb',
     'JDbReader',
-    'JError', 
-    'JKeyError', 
+    'JError',
+    'JKeyError',
     'JTypeError',
-    'JValueError', 
+    'JValueError',
+    'JKeyFlag',
     'JFlag',
     'JBytesIO',
     'JIoVAL_U',

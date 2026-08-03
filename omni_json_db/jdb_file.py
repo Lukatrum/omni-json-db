@@ -584,7 +584,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
         After linking, every :meth:`create_group` call with the same ``name``
         (from this instance or any of its :meth:`copy` chain) resolves to
         ``files_obj`` instead of creating fresh group storage. This is how a
-        foreign child database (one whose storage is *not* this database's
+        foreign group database (one whose storage is *not* this database's
         group namespace) is made visible to all handles and connections
         without copying its data.
 
@@ -607,7 +607,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     def unlink_group(self, name:Optional[str]=None) -> bool:
         """Remove a group link (or all of them) from the in-process registry.
 
-        Called when a child/group key is deleted so that a later
+        Called when a group key is deleted so that a later
         :meth:`create_group` with the same name resolves to fresh group
         storage instead of the stale linked backend.
 
@@ -618,6 +618,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
         Returns:
             bool: ``True`` if something was removed.
         """
+        _name = name
         return False
 
     @abstractmethod
@@ -807,7 +808,7 @@ class JMemFiles(JFilesBase):
         return KEY_file.startswith('<MEM.') and KEY_file[-1] == '>'
 
     def create_group(self, name:str) -> JMemFiles:
-        """Create (or resolve) a child dataset partition in memory.
+        """Create (or resolve) a group dataset partition in memory.
 
         Repeated calls with the same ``name`` — from this instance or any of
         its copies — return the same shared :class:`JMemFiles` instance,

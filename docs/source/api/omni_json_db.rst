@@ -56,7 +56,7 @@ omni\_json\_db.jdb\_lite
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members: JFlag, JDbReader
+   :exclude-members: JDbReader
 
 omni\_json\_db.jdb\_net
 ------------------------------------
@@ -91,5 +91,5 @@ omni\_json\_db.utils
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: INT_Handler, Style, JError, JKeyError, JTypeError, JValueError, JDbBase, JIoBase, SIGINT
+   :exclude-members: INT_Handler, Style, JError, JFlag, JKeyFlag, JKeyError, JTypeError, JValueError, JDbBase, JIoBase, SIGINT
 

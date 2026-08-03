@@ -1,5 +1,6 @@
 # pylint: disable=too-many-lines,unused-import,pointless-statement,too-few-public-methods,consider-using-with,unnecessary-pass
 from __future__ import annotations
+from enum import IntFlag
 from collections import defaultdict
 from contextlib import contextmanager
 from abc import ABCMeta
@@ -25,6 +26,126 @@ class JValueError(JError, ValueError):
 
 class JTypeError(JError, TypeError):
     pass
+#-----------------------------------------------------------------------------
+KEY_FLAG_MASK = 0xFFFF # on-disk width reserved for JKeyFlag
+
+class JKeyFlag(IntFlag):
+    """Per-record flags stored inside a KEY index row (API v2 and later).
+
+    The flags travel with the row itself, so they survive defragmentation,
+    ``resize_keys()`` and swap/undelete round-trips. Reading an API v0/v1 file
+    always yields ``JKeyFlag(0)``.
+
+    Attributes:
+        READONLY: The record cannot be modified or deleted. Only whole-database
+            operations (``clear()`` / re-init) may remove it.
+        JDB: The record holds a group (child) database rather than an ordinary
+            value. Its value is normally the inline ``0x10`` marker, meaning the
+            group lives at ``files_obj.create_group(key)``; a legacy record may
+            instead store the child's KEY path as a string. Because the flag is
+            on the row itself, ``load_keys()`` can populate ``JIo.groups``
+            straight from the index, which is what allowed the old separate
+            ``JDb.childs`` registry to be folded into ``JIo.groups``.
+    """
+
+    READONLY = 0x01  # 'r' : cannot modify/delete (except clear / reinit)
+    JDB      = 0x02  # 'j' : the record is a group JDb -> JIo.groups
+
+    @classmethod
+    def _missing_(cls, value):
+        """Allow constructing flags from a letter string, mirroring ``JFlag``.
+
+        ``'r'`` = READONLY, ``'j'`` = JDB (e.g. ``JKeyFlag('rj')``). Unknown
+        letters are ignored.
+
+        Args:
+            value (Any): The letter string (case-insensitive) or an int.
+
+        Returns:
+            JKeyFlag: The combined flag instance.
+        """
+        if isinstance(value, str):
+            _value = 0
+            for ch in value.lower():
+                if ch == 'r':
+                    _value |= JKeyFlag.READONLY
+                elif ch == 'j':
+                    _value |= JKeyFlag.JDB
+
+            value = _value
+
+        return super()._missing_(value)
+
+    def __str__(self) -> str:
+        """Return a compact string showing which flags are active.
+
+        Each position holds the flag's lowercase initial when set, or ``'_'``
+        when not -- e.g. ``'rj'``, ``'r_'``, ``'__'``.
+
+        Returns:
+            str: The flag summary string.
+        """
+        return ''.join(flag.name[0].lower() if flag in self else '_' for flag in JKeyFlag)
+
+
+# Bits a caller is allowed to set. JKeyFlag.JDB is excluded because it describes
+# what the stored VALUE is, not what the caller asked for, so it is always derived.
+#
+# NOTE: use this instead of ``~JKeyFlag.JDB``. On an IntFlag ``~`` complements
+# within the *defined* flags, so ``~JKeyFlag.JDB`` is ``JKeyFlag.READONLY`` (1),
+# not 0xFFFD -- ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
+USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.JDB)
+
+class JFlag(IntFlag):
+    """Enumeration flag to control write/delete behavior in database operations."""
+
+    REVERT  = 0x01  # allow to revert after write/delete operation
+    SPLIT   = 0x02  # allow to split large row into two
+    FSYNC   = 0x04  # fsync after updating
+
+    @classmethod
+    def _missing_(cls, value):
+        """Allow constructing flags from a letter string: ``'r'`` = REVERT,
+        ``'s'`` = SPLIT, ``'f'`` = FSYNC (e.g. ``JFlag('rs')``). Unknown
+        letters are ignored.
+
+        Args:
+            value (Any): The letter string (case-insensitive).
+
+        Returns:
+            JFlag: The combined flag instance.
+        """
+        if isinstance(value, str):
+            _value = 0
+            for ch in value.lower():
+                if ch == 'r':
+                    _value |= JFlag.REVERT
+                elif ch == 's':
+                    _value |= JFlag.SPLIT
+                elif ch == 'f':
+                    _value |= JFlag.FSYNC
+
+            value = _value
+
+        return super()._missing_(value)
+
+    def __str__(self):
+        """Return a compact string showing which flags are active.
+
+        Each position holds the flag's uppercase initial when set, or ``'_'``
+        when not — e.g. ``'RS_'`` for REVERT+SPLIT, ``'___'`` for no flags.
+
+        Returns:
+            str: The flag summary string.
+        """
+        ret = ''
+        for flag in JFlag:
+            if flag in self:
+                ret += flag.name[0]
+            else:
+                ret += '_'
+
+        return ret
 
 #-----------------------------------------------------------------------------
 try:

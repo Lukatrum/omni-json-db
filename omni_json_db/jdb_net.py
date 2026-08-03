@@ -689,7 +689,7 @@ class JNetFiles(JFilesBase):
             ValueError: If the remote command fails.
         """
         if isinstance(KEY_file, JNetFiles):
-            # resolve locally: a child is this database's group when it targets
+            # resolve locally: a group is this database's group when it targets
             # the same server and its group path extends ours by exactly `name`
             return KEY_file.server_addr == self.server_addr and \
                     KEY_file.group_path == self.group_path + (name,)
@@ -708,7 +708,7 @@ class JNetFiles(JFilesBase):
             raise IOError
 
     def create_group(self, name:str) -> JNetFiles:
-        """Create a network client bound to a child group on the remote server.
+        """Create a network client bound to a group on the remote server.
 
         The group's physical files are created lazily by the server (via its
         own backend's ``create_group``) the first time they are accessed.
@@ -717,7 +717,7 @@ class JNetFiles(JFilesBase):
             name (str): The group namespace; must match contraint.
 
         Returns:
-            JNetFiles: A new client whose commands target the child group.
+            JNetFiles: A new client whose commands target the group.
 
         Raises:
             KeyError: If ``name`` violates the group naming constraints.
@@ -734,9 +734,9 @@ class JNetFiles(JFilesBase):
         """Ask the remote server to link an existing backend as group ``name``.
 
         This is the network counterpart of :meth:`JFilesBase.link_group` and is
-        the mechanism behind assigning an *already remote* child database to a
-        (possibly different) server: instead of copying the child's data, the
-        server is told where the child's storage lives, and serves group
+        the mechanism behind assigning an *already remote* group database to a
+        (possibly different) server: instead of copying the group's data, the
+        server is told where the group's storage lives, and serves group
         ``name`` by proxying to it. Supported targets:
 
         - :class:`JNetFiles`: the server connects to ``files_obj``'s server
@@ -763,10 +763,8 @@ class JNetFiles(JFilesBase):
         if not isinstance(files_obj, JFilesBase):
             raise TypeError('files_obj must be a JFilesBase')
 
-        if isinstance(files_obj, JNetFiles):
-            _kwargs = {'name':name, 'addr':list(files_obj.server_addr), 'group_path':list(files_obj.group_path)}
-        else:
-            _kwargs = {'name':name, 'KEY':files_obj.get_KEY()}
+        _kwargs = {'name':name, 'addr':list(files_obj.server_addr), 'group_path':list(files_obj.group_path)} if isinstance(files_obj, JNetFiles) else \
+                    {'name':name, 'KEY':files_obj.get_KEY()}
 
         with self.lock:
             if self.sock and not self.sock._closed:

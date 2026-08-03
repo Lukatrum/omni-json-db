@@ -611,7 +611,7 @@ def _msg_decode(code:int, data:bytes):
 
     raise TypeError(f'code={code} data={data}')
 
-from .utils import JValueError
+from .utils import JValueError, JKeyFlag
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -777,7 +777,7 @@ class JIoHEAD:
             if nn >= 10: # a V2 header opened by a V1-configured engine
                 return info[:10]
 
-            if nn >= 9:
+            if nn >= 9: # pragma: no cover
                 return info + [-1]
 
             raise ValueError(f'cannot decode header (n={nn})')
@@ -901,7 +901,7 @@ class JIoKEY_J(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            return key, file_id, offset, row_size, val_size, ver, days, 0
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
@@ -917,9 +917,8 @@ class JIoKEY_J(JIoKEY):
     def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
         """Parse a v1 JSON KEY row."""
         try:
-            args = _json_loads(data)
-            args.append(0)
-            return args[:8]
+            key, file_id, offset, row_size, val_size, ver, days = _json_loads(data)[:7]
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
@@ -961,7 +960,7 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
-                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, 0
+                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -985,9 +984,8 @@ class JIoKEY_S(JIoKEY):
             if prefix0 == 0xcd and info0 == 0x97:
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
-                args = _msg_loads(data[3:end_idx])
-                args.append(0)
-                return args[:8]
+                key, file_id, offset, row_size, val_size, ver, days = _msg_loads(data[3:end_idx])[:7]
+                return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1037,7 +1035,7 @@ class JIoKEY_M(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            return key, file_id, offset, row_size, val_size, ver, days, 0
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1057,9 +1055,8 @@ class JIoKEY_M(JIoKEY):
         """Parse a v1 marshal KEY row."""
         try:
             # nosemgrep
-            args = list(marshal_loads(data)) # nosec B302
-            args.append(0)
-            return args[:8]
+            key, file_id, offset, row_size, val_size, ver, days = marshal_loads(data)[:7] # nosec B302
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1126,7 +1123,9 @@ class JIoKEY_L(JIoKEY):
                     ver = 0
                     days = 0
 
-            return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, 0
+            val_size = row_size >> 32
+            row_size &= 0X_FFFF_FFFF
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1151,7 +1150,7 @@ class JIoKEY_L(JIoKEY):
             n_fields = len(fields)
             key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
             file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
-            return key, file_id, offset, row_size, val_size, ver, days, 0
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
             raise JValueError from e
@@ -1326,8 +1325,8 @@ class JIoKEY_U(JIoKEY):
             self._missing()
 
         try:
-            args = list(self._loads(data))
-            return (*args[:7], 0)
+            key, file_id, offset, row_size, val_size, ver, days = self._loads(data)[:7]
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1349,8 +1348,8 @@ class JIoKEY_U(JIoKEY):
         if self._loads_v0 is None: # pragma: no cover
             self._missing()
         try:
-            args = self._loads_v0(data)
-            return (*args[:7], 0)
+            key, file_id, offset, row_size, val_size, ver, days = self._loads_v0(data)[:7]
+            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e

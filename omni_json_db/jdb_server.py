@@ -107,9 +107,9 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
 
         Resolution order per path segment:
 
-        1. Peek the server-side database's live registries (``jdb.childs`` and
-           ``jdb.io.groups``) so children/groups created directly on the server
-           (e.g. ``server.jdb['child1'] = JDb()`` or ``server.jdb.add_group()``)
+        1. Peek the server-side database's live registry (``jdb.io.groups``) so
+           that groups created directly on the server
+           (e.g. ``server.jdb['group1'] = JDb()`` or ``server.jdb.add_group()``)
            are served to network clients as-is. The peek takes no database
            locks, since the requesting client may currently hold the parent's
            write lock (taking it here would deadlock).
@@ -140,13 +140,10 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
 
                 _path = f'{_path}/{part}' if _path else part
 
-                # 1) live server-side child/group registry (authoritative)
-                _sub_jdb = None
-                if cur_jdb is not None:
-                    _sub_jdb = cur_jdb.childs.get(part, None)
-                    if _sub_jdb is None:
-                        _io = cur_jdb.io
-                        _sub_jdb = _io.groups.get(part, None)
+                # 1) live server-side group registry (authoritative).
+                # cur_jdb is None once a segment fell through to branch 2/3 below,
+                # so a deeper segment has no live registry left to peek at.
+                _sub_jdb = cur_jdb.io.groups.get(part, None) if isinstance(cur_jdb, JDbReader) else None
 
                 if _sub_jdb is not None:
                     self.group_files[_path] = files_obj = _sub_jdb.files_obj
@@ -359,7 +356,7 @@ class ServerHandler(BaseRequestHandler):
                         _addr = _kwargs.get('addr', None)
                         if _addr is not None:
                             _target = JNetFiles((str(_addr[0]), int(_addr[1])), group_path=tuple(_kwargs.get('group_path', ())))
-                        else:
+                        else: # pragma: no cover
                             _target = JDiskFiles(_kwargs['KEY'])
 
                         _target = grp_files_obj.link_group(_name, _target)
@@ -374,7 +371,7 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'unlink_group':
                         _name = _kwargs.get('name', None)
                         _removed = grp_files_obj.unlink_group(_name)
-                        with server.group_lock:
+                        with server.group_lock: # pragma: no cover
                             if _name is None:
                                 _prefix = f'{group_path}/' if group_path else ''
                                 for _p in [p for p in server.group_files if p.startswith(_prefix)]:

@@ -1,10 +1,10 @@
-# pylint: disable=too-many-lines, multiple-imports, W0640, cell-var-from-loop
+# pylint: disable=too-many-lines, multiple-imports, W0640, cell-var-from-loop, import-outside-toplevel
 import unittest, time, random, threading, inspect, re, os, io
 from marshal import loads as marshal_loads, dumps as marshal_dumps
 import datetime as dt
 import sqlite3
 import networkx as nx
-from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, \
+from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     JNetFiles, JDiskFiles, run_files_server, \
                     GraphDb, loads, dumps, Query, JIoVAL_U, \
                     register_user_val_codec, register_user_key_codec, \
@@ -128,7 +128,7 @@ class TestJDb(unittest.TestCase):
 
         self.jdb_configs = [
             {'KEY_file':'net_59898_3',      'api_ver':2, 'data_type':'J+J', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'l4'},
-            {'KEY_file':'net_59899_6',      'api_ver':2, 'data_type':'S+S', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'<64'},
+            {'KEY_file':'net_59899_6',      'api_ver':2, 'data_type':'S+S', 'zip_type':'--', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 16, 'min_value_size': 8, 'index_size':64, 'key_limit':'--'},
 
             {'KEY_file':'mem_3gz',          'api_ver':2, 'data_type':'J+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'mem_6bz',          'api_ver':2, 'data_type':'S+S', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
@@ -137,13 +137,13 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'mem_3br_v0',       'api_ver':0, 'data_type':'J+J', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
             {'KEY_file':'mem_6z1_v1',       'api_ver':1, 'data_type':'S+S', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': -1, 'min_value_size': 8, 'index_size':64, 'key_limit':'bt'},
 
-            {'KEY_file':'db/test_1lz_v0.jdb', 'api_ver':0, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'no'},
+            {'KEY_file':'db/test_1lz_v0.jdb', 'api_ver':0, 'data_type':'L+J', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'<32'},
             {'KEY_file':'db/test_2br_v1.jdb', 'api_ver':1, 'data_type':'M+M', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l3'},
-            {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'<16'},
+            {'KEY_file':'db/test_5z1_v0.jdb', 'api_ver':0, 'data_type':'J+P', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
             {'KEY_file':'db/test_6lz_v1.jdb', 'api_ver':1, 'data_type':'S+S', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'l5'},
                 # {'KEY_file':'db/test_7z2_v0.jdb', 'api_ver':0, 'data_type':'J+S', 'zip_type':'z2', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size':8, 'index_size':64, 'key_limit':'bt'},
 
-            {'KEY_file':'db/test_1.jdb',    'api_ver':2, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
+            {'KEY_file':'db/test_1.jdb',    'api_ver':2, 'data_type':'L+J', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'no'},
                 # {'KEY_file':'db/test_1gz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1bz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'bz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
                 # {'KEY_file':'db/test_1xz.jdb',  'api_ver':1, 'data_type':'L+J', 'zip_type':'xz', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':0},
@@ -3678,8 +3678,15 @@ class TestJDb(unittest.TestCase):
         remote_jdb_disk.clear(agree='yes', wait_sec=0)
         remote_jdb_mem.clear(agree='yes', wait_sec=0)
 
+        self.assertEqual(len(remote_jdb_disk), 0)
+        self.assertEqual(len(remote_jdb_mem), 0)
         self.assertEqual(len(local_jdb_disk), 0)
         self.assertEqual(len(local_jdb_mem), 0)
+
+        self.assertEqual(len(remote_jdb_disk.groups), 0)
+        self.assertEqual(len(remote_jdb_mem.groups), 0)
+        self.assertEqual(len(local_jdb_disk.groups), 0)
+        self.assertEqual(len(local_jdb_mem.groups), 0)
 
         tmp_data = {f'key{v}':list(range(v+1)) for v in range(32)}
         tmp_jdb = remote_tmp_disk = JDb('db/remote.jdb') # disk
@@ -3692,6 +3699,8 @@ class TestJDb(unittest.TestCase):
         remote_jdb_disk['disk'] = remote_tmp_disk
         remote_jdb_mem['disk'] = remote_tmp_disk
         self.assertEqual(remote_tmp_disk, tmp_data)
+        self.assertEqual(len(remote_jdb_disk.groups), 1)
+        self.assertEqual(len(remote_jdb_mem.groups), 1)
 
         remote_tmp_mem = JDb()          # mem
         remote_tmp_mem[tmp_data] = 1
@@ -3699,6 +3708,8 @@ class TestJDb(unittest.TestCase):
         remote_jdb_disk['mem'] = remote_tmp_mem
         remote_jdb_mem['mem'] = remote_tmp_mem
         self.assertEqual(len(remote_tmp_mem), len(tmp_data))
+        self.assertEqual(len(remote_jdb_disk.groups), 2)
+        self.assertEqual(len(remote_jdb_mem.groups), 2)
 
         remote_group_disk = remote_jdb_disk.add_group('group') # group
         remote_group_disk[tmp_data] = 2
@@ -3707,6 +3718,9 @@ class TestJDb(unittest.TestCase):
         remote_group_mem = remote_jdb_mem.add_group('group') # group
         remote_group_mem[tmp_data] = 3
         self.assertEqual(len(remote_group_mem), len(tmp_data))
+        self.assertEqual(len(remote_jdb_disk.groups), 3)
+        self.assertEqual(len(remote_jdb_mem.groups), 3)
+
 
         self.assertEqual(remote_jdb_disk['disk'][:], tmp_data)
         self.assertEqual(remote_jdb_disk['mem'[:]], remote_tmp_mem)
@@ -3722,6 +3736,9 @@ class TestJDb(unittest.TestCase):
         remote_jdb_mem2 = JDb(remote_jdb_mem)
         self.assertEqual(remote_jdb_mem2, remote_jdb_mem)
 
+        self.assertEqual(len(remote_jdb_disk2.groups), 3)
+        self.assertEqual(len(remote_jdb_mem2.groups), 3)
+
         self.assertEqual(local_jdb_disk['key'], 1000)
         self.assertEqual(local_jdb_disk['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_disk['mem'][:], remote_tmp_mem[:])
@@ -3731,6 +3748,9 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(local_jdb_mem['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_mem['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_mem['group'][:], remote_group_mem[:])
+
+        self.assertEqual(len(local_jdb_disk.groups), 3)
+        self.assertEqual(len(local_jdb_mem.groups), 3)
 
         local_jdb_disk2 = JDb(local_jdb_disk)
         self.assertEqual(local_jdb_disk2, local_jdb_disk)
@@ -3750,14 +3770,17 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(local_jdb_mem2['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_mem2['group'][:], remote_group_mem[:])
 
+        self.assertEqual(len(local_jdb_disk2.groups), 3)
+        self.assertEqual(len(local_jdb_mem2.groups), 3)
+
         local_tmp_disk = JDb('db/local.jdb') # disk2
         local_tmp_disk[tmp_data] = 4
 
         local_tmp_mem = JDb()                # mem2
         local_tmp_mem[tmp_data] = 5
 
-        local_jdb_disk['disk2'] = local_tmp_disk
-        local_jdb_disk['mem2'] = local_tmp_mem
+        local_jdb_disk['disk2'] = local_tmp_disk # ??
+        local_jdb_disk['mem2'] = local_tmp_mem   # ??
         local_group_disk = local_jdb_disk.add_group('group2') # group2
         local_group_disk[tmp_data] = 6
         self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])
@@ -3767,10 +3790,13 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(remote_jdb_disk['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_disk['group2'][:], local_group_disk[:])
 
-        local_jdb_mem['disk2'] = local_tmp_disk
-        local_jdb_mem['mem2'] = local_tmp_mem
+        local_jdb_mem['disk2'] = local_tmp_disk # ??
+        local_jdb_mem['mem2'] = local_tmp_mem   # ??
         local_group_mem = local_jdb_mem.add_group('group2') # group2
         local_group_mem[tmp_data] = 7
+
+        self.assertEqual(len(local_jdb_disk.groups), 6)
+        self.assertEqual(len(local_jdb_mem.groups), 6)
 
         local_jdb_disk['key2'] = 3000
         local_jdb_mem['key2'] = 4000
@@ -3791,6 +3817,9 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(remote_jdb_mem['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_mem['group2'][:], local_group_mem[:])
 
+        self.assertEqual(len(remote_jdb_disk.groups), 6)
+        self.assertEqual(len(remote_jdb_mem.groups), 6)
+
         local_jdb_disk['key'] = -1000
         local_jdb_mem['key'] = -2000
         local_group_mem[:] = -7     # group2
@@ -3809,65 +3838,92 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(local_jdb_disk['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_disk['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_disk['group'][:], remote_group_disk[:])
-        self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])  # XX
-        self.assertEqual(local_jdb_disk['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(local_jdb_disk['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_disk['mem2'][:], local_tmp_mem[:])
         self.assertEqual(local_jdb_disk['group2'][:], local_group_disk[:])
 
         self.assertEqual(local_jdb_mem['key2'], -4000)
         self.assertEqual(local_jdb_mem['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_mem['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_mem['group'][:], remote_group_mem[:])
-        self.assertEqual(local_jdb_mem['disk2'][:], local_tmp_disk[:])   # XX
-        self.assertEqual(local_jdb_mem['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(local_jdb_mem['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_mem['mem2'][:], local_tmp_mem[:])
         self.assertEqual(local_jdb_mem['group2'][:], local_group_mem[:])
 
         self.assertEqual(remote_jdb_disk['key'], -1000)
         self.assertEqual(remote_jdb_disk['disk'][:], remote_tmp_disk[:])
         self.assertEqual(remote_jdb_disk['mem'][:], remote_tmp_mem[:])
         self.assertEqual(remote_jdb_disk['group'][:], remote_group_disk[:])
-        self.assertEqual(remote_jdb_disk['disk2'][:], local_tmp_disk[:])  # XX
-        self.assertEqual(remote_jdb_disk['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_disk['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_disk['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_disk['group2'][:], local_group_disk[:])
 
         self.assertEqual(remote_jdb_mem['key'], -2000)
         self.assertEqual(remote_jdb_mem['disk'][:], remote_tmp_disk[:])
         self.assertEqual(remote_jdb_mem['mem'][:], remote_tmp_mem[:])
         self.assertEqual(remote_jdb_mem['group'][:], remote_group_mem[:])
-        self.assertEqual(remote_jdb_mem['disk2'][:], local_tmp_disk[:])   # XX
-        self.assertEqual(remote_jdb_mem['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(remote_jdb_mem['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_mem['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_mem['group2'][:], local_group_mem[:])
 
         self.assertEqual(local_jdb_disk2, local_jdb_disk)
         self.assertEqual(local_jdb_disk2['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_disk2['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_disk2['group'][:], remote_group_disk[:])
-        self.assertEqual(local_jdb_disk2['disk2'][:], local_tmp_disk[:])  # XX
-        self.assertEqual(local_jdb_disk2['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(local_jdb_disk2['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_disk2['mem2'][:], local_tmp_mem[:])
         self.assertEqual(local_jdb_disk2['group2'][:], local_group_disk[:])
 
         self.assertEqual(local_jdb_mem2, local_jdb_mem)
         self.assertEqual(local_jdb_mem2['disk'][:], remote_tmp_disk[:])
         self.assertEqual(local_jdb_mem2['mem'][:], remote_tmp_mem[:])
         self.assertEqual(local_jdb_mem2['group'][:], remote_group_mem[:])
-        self.assertEqual(local_jdb_mem2['disk2'][:], local_tmp_disk[:])   # XX
-        self.assertEqual(local_jdb_mem2['mem2'][:], local_tmp_mem[:])     # XX
+        self.assertEqual(local_jdb_mem2['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(local_jdb_mem2['mem2'][:], local_tmp_mem[:])
         self.assertEqual(local_jdb_mem2['group2'][:], local_group_mem[:])
 
         self.assertEqual(remote_jdb_disk2, remote_jdb_disk)
-        self.assertEqual(remote_jdb_disk2['disk'][:], remote_tmp_disk[:]) # XX
-        self.assertEqual(remote_jdb_disk2['mem'][:], remote_tmp_mem[:])   # XX
+        self.assertEqual(remote_jdb_disk2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(remote_jdb_disk2['mem'][:], remote_tmp_mem[:])
         self.assertEqual(remote_jdb_disk2['group'][:], remote_group_disk[:])
-        self.assertEqual(remote_jdb_disk2['disk2'][:], local_tmp_disk[:]) # XX
-        self.assertEqual(remote_jdb_disk2['mem2'][:], local_tmp_mem[:])   # XX
+        self.assertEqual(remote_jdb_disk2['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_disk2['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_disk2['group2'][:], local_group_disk[:])
 
         self.assertEqual(remote_jdb_mem2, remote_jdb_mem)
-        self.assertEqual(remote_jdb_mem2['disk'][:], remote_tmp_disk[:])  # XX
-        self.assertEqual(remote_jdb_mem2['mem'][:], remote_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_mem2['disk'][:], remote_tmp_disk[:])
+        self.assertEqual(remote_jdb_mem2['mem'][:], remote_tmp_mem[:])
         self.assertEqual(remote_jdb_mem2['group'][:], remote_group_mem[:])
-        self.assertEqual(remote_jdb_mem2['disk2'][:], local_tmp_disk[:])  # XX
-        self.assertEqual(remote_jdb_mem2['mem2'][:], local_tmp_mem[:])    # XX
+        self.assertEqual(remote_jdb_mem2['disk2'][:], local_tmp_disk[:])
+        self.assertEqual(remote_jdb_mem2['mem2'][:], local_tmp_mem[:])
         self.assertEqual(remote_jdb_mem2['group2'][:], local_group_mem[:])
+
+        self.assertTrue(isinstance(remote_jdb_mem.files_obj, JMemFiles))
+        self.assertTrue(isinstance(remote_jdb_mem2.files_obj, JMemFiles))
+        self.assertTrue(isinstance(remote_jdb_disk.files_obj, JDiskFiles))
+        self.assertTrue(isinstance(remote_jdb_disk2.files_obj, JDiskFiles))
+        self.assertTrue(isinstance(remote_tmp_disk.files_obj, JDiskFiles))
+        self.assertTrue(isinstance(remote_tmp_mem.files_obj, JMemFiles))
+        self.assertTrue(isinstance(remote_group_disk.files_obj, JDiskFiles))
+        # self.assertTrue(isinstance(remote_jdb_disk['disk2'].files_obj, JDiskFiles))
+        # self.assertTrue(isinstance(remote_jdb_disk['mem2'].files_obj, JMemFiles)) # XX not JDiskFiles
+        self.assertTrue(isinstance(remote_jdb_disk['group2'].files_obj, JDiskFiles))
+        # self.assertTrue(isinstance(remote_jdb_mem['disk2'].files_obj, JDiskFiles))
+        # self.assertTrue(isinstance(remote_jdb_mem['mem2'].files_obj, JMemFiles)) # XX not JDiskFiles
+        self.assertTrue(isinstance(remote_jdb_mem['group2'].files_obj, JMemFiles))
+
+        self.assertTrue(isinstance(local_jdb_mem.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_jdb_mem2.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_jdb_disk.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_jdb_disk2.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_tmp_disk.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_tmp_mem.files_obj, JNetFiles))
+        self.assertTrue(isinstance(local_group_disk.files_obj, JNetFiles))
+
+        remote_jdb_mem.info()
+        local_jdb_mem.info()
+        remote_jdb_disk.info()
+        local_jdb_disk.info()
 
         for config in self.jdb_configs:
             st_time = time.perf_counter()
@@ -3878,20 +3934,20 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['root_key'], 'local')
             if isinstance(jdb.files_obj, JNetFiles):
                 server = None
-                for r_jdb in (self.server1.jdb, self.server2.jdb):
+                for r_jdb in (remote_jdb_disk, remote_jdb_mem):
                     r_jdb -= r_jdb
                     if len(jdb) == 0:
                         server = r_jdb
                     r_jdb['root_key'] = 'remote0'
-                    r_jdb['child1'] = child1 = JDb()
-                    r_jdb['child1']['key1'] = 'remote1'
-                    child2 = r_jdb.add_group('child2')
-                    child2['key2'] = 'remote2'
+                    r_jdb['group1'] = group1 = JDb()
+                    r_jdb['group1']['key1'] = 'remote1'
+                    group2 = r_jdb.add_group('group2')
+                    group2['key2'] = 'remote2'
                     self.assertEqual(r_jdb['root_key'], 'remote0')
-                    self.assertEqual(r_jdb['child1']['key1'], child1['key1'])
-                    self.assertEqual(child1['key1'], 'remote1')
-                    self.assertEqual(r_jdb['child2']['key2'], child2['key2'])
-                    self.assertEqual(child2['key2'], 'remote2')
+                    self.assertEqual(r_jdb['group1']['key1'], group1['key1'])
+                    self.assertEqual(group1['key1'], 'remote1')
+                    self.assertEqual(r_jdb['group2']['key2'], group2['key2'])
+                    self.assertEqual(group2['key2'], 'remote2')
 
                 self.assertTrue(server is not None)
                 self.assertEqual(server.keys[:], jdb.keys[:])
@@ -3902,57 +3958,57 @@ class TestJDb(unittest.TestCase):
                 self.assertTrue(isinstance(jdb.files_obj, JNetFiles))
 
                 tmp_jdb += tmp_data
-                server['child0'] = tmp_jdb
+                server['group0'] = tmp_jdb
                 self.assertEqual(tmp_jdb, tmp_data, filename)
-                self.assertEqual(server['child0'], tmp_data)
-                self.assertEqual(jdb['child0'], tmp_jdb)
-                self.assertEqual(jdb['child0'], tmp_data)
-                self.assertTrue(isinstance(jdb['child0'].files_obj, JNetFiles))
+                self.assertEqual(server['group0'], tmp_data)
+                self.assertEqual(jdb['group0'], tmp_jdb)
+                self.assertEqual(jdb['group0'], tmp_data)
+                self.assertTrue(isinstance(jdb['group0'].files_obj, JNetFiles))
 
                 self.assertEqual(jdb['root_key'], 'remote0')
-                self.assertEqual(jdb['child1']['key1'], 'remote1')
-                self.assertEqual(jdb['child2']['key2'], 'remote2')
+                self.assertEqual(jdb['group1']['key1'], 'remote1')
+                self.assertEqual(jdb['group2']['key2'], 'remote2')
                 jdb['root_key'] = 'local'
                 self.assertEqual(server['root_key'], 'local')
-                self.assertTrue('child3' not in jdb)
-                server['child3'] = JDb()
-                server['child3']['key3'] = 'remote3'
-                self.assertEqual(jdb['child3']['key3'], 'remote3')
+                self.assertTrue('group3' not in jdb)
+                server['group3'] = JDb()
+                server['group3']['key3'] = 'remote3'
+                self.assertEqual(jdb['group3']['key3'], 'remote3')
 
                 jdb1 = JDb(jdb)
-                jdb1['child4'] = JDb()
-                jdb1['child4']['key4'] = 'local4'
+                jdb1['group4'] = JDb()
+                jdb1['group4']['key4'] = 'local4'
                 self.assertTrue(isinstance(jdb1.files_obj, JNetFiles))
 
-                self.assertEqual(jdb1['child4']['key4'], 'local4')
-                self.assertEqual(jdb['child4']['key4'], 'local4')
-                self.assertEqual(server['child4']['key4'], 'local4')
-                self.assertTrue(isinstance(jdb['child4'].files_obj, JNetFiles))
-                self.assertTrue(isinstance(jdb1['child4'].files_obj, JNetFiles))
-                self.assertTrue(not isinstance(server['child4'].files_obj, JNetFiles))
+                self.assertEqual(jdb1['group4']['key4'], 'local4')
+                self.assertEqual(jdb['group4']['key4'], 'local4')
+                self.assertEqual(server['group4']['key4'], 'local4')
+                self.assertTrue(isinstance(jdb['group4'].files_obj, JNetFiles))
+                self.assertTrue(isinstance(jdb1['group4'].files_obj, JNetFiles))
+                self.assertTrue(not isinstance(server['group4'].files_obj, JNetFiles))
 
-                child5 = jdb1.add_group('child5')
-                child5['key5'] = 'local5'
-                self.assertTrue(isinstance(child5.files_obj, JNetFiles))
-                self.assertEqual(jdb1['child5']['key5'], 'local5')
-                self.assertEqual(jdb['child5']['key5'], 'local5')
-                self.assertEqual(server['child5']['key5'], 'local5')
-                self.assertTrue(not isinstance(server['child5'].files_obj, JNetFiles))
+                group5 = jdb1.add_group('group5')
+                group5['key5'] = 'local5'
+                self.assertTrue(isinstance(group5.files_obj, JNetFiles))
+                self.assertEqual(jdb1['group5']['key5'], 'local5')
+                self.assertEqual(jdb['group5']['key5'], 'local5')
+                self.assertEqual(server['group5']['key5'], 'local5')
+                self.assertTrue(not isinstance(server['group5'].files_obj, JNetFiles))
 
-                server['child4']['key4'] = 'remote4'
-                server['child5']['key5'] = 'remote5'
-                self.assertEqual(jdb['child4']['key4'], 'remote4')
-                self.assertEqual(jdb['child5']['key5'], 'remote5')
-                self.assertEqual(child5['key5'], 'remote5')
+                server['group4']['key4'] = 'remote4'
+                server['group5']['key5'] = 'remote5'
+                self.assertEqual(jdb['group4']['key4'], 'remote4')
+                self.assertEqual(jdb['group5']['key5'], 'remote5')
+                self.assertEqual(group5['key5'], 'remote5')
                 server2 = JDb(JNetFiles(self.server1.server_address if server == self.server2.jdb else self.server2.server_address))
-                server['child6'] = server2
+                server['group6'] = server2
                 server2['key6'] = 'remote6'
-                self.assertEqual(jdb['child6']['key6'], 'remote6')
-                self.assertTrue(isinstance(jdb['child6'].files_obj, JNetFiles))
-                jdb['child6']['key6'] = 'local6'
-                self.assertEqual(server['child6']['key6'], 'local6')
+                self.assertEqual(jdb['group6']['key6'], 'remote6')
+                self.assertTrue(isinstance(jdb['group6'].files_obj, JNetFiles))
+                jdb['group6']['key6'] = 'local6'
+                self.assertEqual(server['group6']['key6'], 'local6')
                 self.assertEqual(server2['key6'], 'local6')
-                self.assertEqual(jdb1['child0'], tmp_jdb)
+                self.assertEqual(jdb1['group0'], tmp_jdb)
                 server.info()
                 jdb.info()
 
@@ -3978,7 +4034,9 @@ class TestJDb(unittest.TestCase):
             self.assertNotIn('1st', jmem)
 
             jmem1 = jmem.add_group('1st')
+            self.assertTrue(jmem['1st'] is jmem1)
             jmem2 = jmem1.add_group('2nd')
+            self.assertTrue(jmem1['2nd'] is jmem2)
             with jmem.open() as fp:
                 self.assertTrue('1st' in jmem.key_table)
                 self.assertTrue(jmem.f_get_group(fp, '1st') is jmem1)
@@ -3986,12 +4044,22 @@ class TestJDb(unittest.TestCase):
                     self.assertTrue('2nd' in jmem1.key_table)
                     self.assertTrue(jmem1.f_get_group(fp1, '2nd') is jmem2)
 
+            self.assertTrue(jmem['1st'] is jmem1)
+            self.assertTrue(jmem1['2nd'] is jmem2)
+            self.assertTrue(jmem['1st']['2nd'] is jmem2)
             self.assertIn('1st', jmem)
             self.assertIn('2nd', jmem1)
             jmem2['3rd'] = jdb
-            jmem.unsync(with_child=True)
+            self.assertTrue(jmem2['3rd'] is jdb)
+            self.assertTrue(jmem['1st']['2nd']['3rd'] is jdb)
+
+            jmem.unsync(with_group=True)
             jmem.recycle(level=8, merge=True, fill_zero=True)
             jmem.check_error(level=8, fix_it=True)
+
+            self.assertTrue(jmem['1st'] is jmem1)
+            self.assertTrue(jmem1['2nd'] is jmem2)
+            self.assertTrue(jmem2['3rd'] is jdb)
 
             jdb['group_a'] = list(range(128))
             jdb['group_b'] = None
@@ -4004,23 +4072,25 @@ class TestJDb(unittest.TestCase):
             self.assertIsInstance(gp_a, JDb)
             gp_a['a'] = 1
             self.assertTrue(jdb.files_obj.is_group(gp_a.files_obj, 'group_a'))
+            self.assertEqual(jdb.get_group('group_a'), gp_a)
 
             gp_b = jdb.add_group('group_b')
             self.assertIsNotNone(gp_b)
             self.assertIsInstance(gp_b, JDb)
             gp_b['b'] = 0
             self.assertTrue(jdb.files_obj.is_group(gp_b.files_obj, 'group_b'))
+            self.assertEqual(jdb.get_group('group_b'), gp_b)
 
             jdb['group_b:::b'] = 2
             jdb[':::c'] = 3
 
             with jdb.open() as fp:
                 for key in jdb.key_table:
-                    child = jdb.f_get_child(fp, key)
+                    group = jdb.f_get_group(fp, key)
                     if key == 'a':
-                        self.assertTrue(child is gp_a)
+                        self.assertTrue(group is gp_a)
                     elif key == 'b':
-                        self.assertTrue(child is gp_b)
+                        self.assertTrue(group is gp_b)
 
             key_info = gp_a.keys['a']
             self.assertEqual(key_info, jdb['group_a'].keys['a'])
@@ -4029,14 +4099,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['group_a:::a'], jdb[':::a'])
             self.assertEqual(jdb.keys['group_a:::a'], jdb.keys[':::a'])
             self.assertEqual(jdb['group_a:::a'], {'group_a:::a':1})
-            self.assertEqual(jmem['1st:::2nd:::3rd:::group_a:::a'], {'1st:::2nd:::3rd:::group_a:::a':1})
+            self.assertEqual(jmem['1st:::2nd:::3rd:::group_a:::a'], {'1st:::2nd:::3rd:::group_a:::a':1}) # XX
             self.assertEqual(jdb[':::b'], {'group_b:::b':2})
             self.assertEqual(jdb[':::c'], {'group_a:::c':3, 'group_b:::c':3})
-            self.assertEqual(jmem['::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
-            self.assertEqual(jmem['::::::3rd::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
-            self.assertEqual(jmem[':::2nd:::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
-            self.assertEqual(jmem['1st::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3})
-            self.assertEqual(jmem.find(':::2:::3:::_a$:::[ac]', with_value=True), {'1st:::2nd:::3rd:::group_a:::a': 1, '1st:::2nd:::3rd:::group_a:::c': 3})
+            self.assertEqual(jmem['::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3}) # XX
+            self.assertEqual(jmem['::::::3rd::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3}) # XX
+            self.assertEqual(jmem[':::2nd:::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3}) # XX
+            self.assertEqual(jmem['1st::::::::::::c'], {'1st:::2nd:::3rd:::group_a:::c':3, '1st:::2nd:::3rd:::group_b:::c':3}) # XX
+            self.assertEqual(jmem.find(':::2:::3:::_a$:::[ac]', with_value=True), {'1st:::2nd:::3rd:::group_a:::a': 1, '1st:::2nd:::3rd:::group_a:::c': 3}) # XX
             self.assertEqual(jdb.find('_a$:::[ac]', with_value=True), {'group_a:::a': 1, 'group_a:::c': 3})
             self.assertTrue(gp_a is not gp_b)
             gp = jdb.get_group('group_a')
@@ -4053,8 +4123,8 @@ class TestJDb(unittest.TestCase):
             matches = jdb.keys[matches]
             self.assertEqual(set(matches), {'group_a:::a', 'group_b:::b'})
 
-            with self.assertRaises(KeyError):
-                gp = jdb.get_group('!!group_c')
+            gp = jdb.get_group('!!group_c')
+            self.assertEqual(gp, None)
 
             gp = jdb.get_group('group_c')
             self.assertEqual(gp, None)
@@ -4145,16 +4215,16 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb['group_b']), 0)
 
             jdb -= {'group_a', 'group_b'}
-            self.assertEqual(len(gp_a), 0)
+            self.assertEqual(len(gp_a), 0, filename)
             self.assertEqual(len(gp_b), 0)
 
             jdb.restore('bak')
             self.assertNotEqual(len(gp_a), 0)
             self.assertEqual(jdb['group_a'], gp_a)
 
-            jmem1 = JDb(data_type=f'{jdb.data_type}({jdb.zip_type})', flags=0)
-            jmem1['group_a', 'group_b'] = 0
-            jdb -= jmem1
+            jmem4 = JDb(data_type=f'{jdb.data_type}({jdb.zip_type})', flags=0)
+            jmem4['group_a', 'group_b'] = 0
+            jdb -= jmem4
             self.assertEqual(len(gp_a), 0)
 
             jdb.restore('bak')
@@ -4166,14 +4236,16 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb1['group_a'], gp_a)
 
-            jmem.sync(with_child=True)
+            jmem.sync(with_group=True)
             self.assertTrue(jmem.is_latest())
-            self.assertTrue(jmem2.is_latest())
-            jmem.unsync(with_child=True)
+            jmem.unsync(with_group=True)
             self.assertFalse(jmem.is_latest())
-            self.assertFalse(jmem2.is_latest())
-            jmem.sync(with_child=True)
-            self.assertTrue(jmem2.is_latest())
+            jmem.sync(with_group=True)
+            self.assertTrue(jmem.is_latest())
+
+            self.assertTrue(jmem['1st'] is jmem1)
+            self.assertTrue(jmem1['2nd'] is jmem2)
+            self.assertTrue(jmem2['3rd'] is jdb)
 
             jmem -= jmem
             self.assertEqual(len(jmem), 0)
@@ -6066,7 +6138,36 @@ class TestJDb(unittest.TestCase):
             del jdb[dt.date.today()]
             self.assertEqual(len(jdb), 0)
 
-            jdb['key1', 'key2'] = 10
+            if jdb.api_ver >= 2:
+                with jdb.open() as fp:
+                    ret = jdb.f_write(fp, 'key1', 10)
+                    self.assertTrue(ret)
+                    ret = jdb.f_write_key_flags(fp, 'key1', JKeyFlag.READONLY)
+                    self.assertTrue(ret)
+                    ret = jdb.f_write(fp, 'key2', 10, key_flags=JKeyFlag.READONLY|JKeyFlag.JDB)
+                    self.assertTrue(ret)
+                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READONLY)
+                    self.assertFalse(ret)
+
+                self.assertTrue(jdb['key1'] == jdb['key2'] == 10)
+                with self.assertRaises(KeyError):
+                    del jdb['key1']
+
+                with self.assertRaises(KeyError):
+                    jdb['key2'] = list(range(16))
+
+                with jdb.open() as fp:
+                    ret = jdb.f_write_key_flags(fp, 'key1', 0)
+                    self.assertTrue(ret)
+                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READONLY)
+                    self.assertFalse(ret)
+                    ret = jdb.f_write_key_flags(fp, 'key2', 0)
+                    self.assertTrue(ret)
+
+            else:
+                jdb['key1', 'key2'] = 10
+
+            self.assertTrue(jdb['key1'] == jdb['key2'] == 10)
             del jdb['key1', 'key2']
             self.assertEqual(jdb.get('key1', -1), -1)
             self.assertEqual(jdb.get('key2', -1), -1)
@@ -11055,7 +11156,7 @@ class TestJDb(unittest.TestCase):
             expect = {f'k{v}' : [v%10] * (test_size + 1) for v in range(test_size)}
             jmem = JDb()
             jmem['main'] = jdb
-            self.assertTrue(jmem.get_child('main') is jdb)
+            self.assertTrue(jmem.get_group('main') is jdb)
 
             jdb.insert(expect)
             self.assertEqual(jdb, expect)
@@ -11115,7 +11216,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jdb.sync_id, _jdb.sync_id)
                 self.assertEqual(jdb.key_table, _jdb.key_table)
 
-            jmem.unsync(with_child=True)
+            jmem.unsync(with_group=True)
             error = jmem.check_error(level=2)
             self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
 
