@@ -84,9 +84,9 @@ class JDbKey2(JDbKey):
                 grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                 f_get_group = jdb.f_get_group
                 if not grp_name:
-                    for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                    for (grp_name, file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                         if has_SIGINT(): break
-                        if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                        if not kflags & JKeyFlag.JDB: continue
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDb):
                             group_jdb.keys[jdb_key] = val
@@ -431,9 +431,9 @@ class JDb(JDbReader):
                         if not grp_name:
                             has_SIGINT = self.file_lock.has_SIGINT
                             io, fp, key_fp = self.f_get_fp(fp)
-                            for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                            for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                                 if has_SIGINT(): break
-                                if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                                if not kflags & JKeyFlag.JDB: continue
                                 group_jdb = f_get_group(fp, grp_name)
                                 if isinstance(group_jdb, JDb):
                                     group_jdb[jdb_key] = val
@@ -637,9 +637,9 @@ class JDb(JDbReader):
                         f_get_group = self.f_get_group
                         if not grp_name:
                             has_SIGINT = self.file_lock.has_SIGINT
-                            for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                            for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                                 if has_SIGINT(): break
-                                if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                                if not kflags & JKeyFlag.JDB: continue
                                 group_jdb = f_get_group(fp, grp_name)
                                 if isinstance(group_jdb, JDb):
                                     del group_jdb[jdb_key]
@@ -1375,7 +1375,7 @@ class JDb(JDbReader):
                 f_get_group = self.f_get_group
                 for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                     if has_SIGINT(): return
-                    if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+                    if kflags & JKeyFlag.JDB:
                         group = f_get_group(fp, grp_name)
                         if isinstance(group, JDb):
                             full_key = f'{SEP_SYM}{grp_name}' if not parent else f'{parent}{SEP_SYM}{grp_name}'
@@ -1597,8 +1597,8 @@ class JDb(JDbReader):
             io, fp, key_fp = self.f_get_fp(fp)
             files_obj = self.files_obj
             f_get_group = self.f_get_group
-            for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+            for (grp_name, file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                if kflags & JKeyFlag.JDB:
                     group_jdb = f_get_group(fp, grp_name)
                     if isinstance(group_jdb, JDb) and files_obj.is_group(group_jdb.files_obj, grp_name):
                         group_jdb.clear(agree='yes', wait_sec=0)
@@ -2228,7 +2228,7 @@ class JDb(JDbReader):
                                 api_ver=api_ver,
                                 key_codec=key_codec,
                                 val_codec=val_codec, **kwargs)
-                        else:
+                        else: # pragma: no cover
                             dst_write(dst_fp, key, src_group, overwrite=True, flags=0)
 
                         continue
@@ -3413,7 +3413,7 @@ class JDb(JDbReader):
         keys = {}
         cnt = 0
         is_unsync = self.fsize == 0
-        with self.open(read_only=not fix_it) as fp: # pragma: no cover
+        with self.open(read_only=not fix_it) as fp:
             has_SIGINT = self.file_lock.has_SIGINT
             self._cache.clear()
             io, fp, key_fp = self.f_get_fp(fp)
@@ -3425,7 +3425,7 @@ class JDb(JDbReader):
             if level > 0: # pragma: no cover
                 for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                     if has_SIGINT(): return error
-                    if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+                    if kflags & JKeyFlag.JDB:
                         group = f_get_group(fp, grp_name)
                         if isinstance(group, JDb):
                             full_key = f'{SEP_SYM}{grp_name}' if not parent else f'{parent}{SEP_SYM}{grp_name}'
@@ -3455,7 +3455,7 @@ class JDb(JDbReader):
                 if row_id >= io.n_records:
                     continue
 
-                if key in keys: # pragma: no cover
+                if key in keys:
                     _row_id = keys.get(key, -1)
                     val_a = val_b = None
                     try:
@@ -3507,7 +3507,7 @@ class JDb(JDbReader):
 
                         curr_file_id = file_id1
                         file_size = io.file_table[curr_file_id]
-                        if head1 > 0:  # pragma: no cover
+                        if head1 > 0:
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|miss. file_id:{curr_file_id} expect:0 diff:{head1:,} tb:{file_size:,}', yellow=1))
                             miss_parts.append((curr_file_id, 0, head1))
 
@@ -3525,7 +3525,7 @@ class JDb(JDbReader):
                         curr_vsize = size1
                         curr_row = row1
                         curr_key = key1
-                    else:  # pragma: no cover
+                    else:
                         if head1 > next_offset:
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|miss.. file_id:{curr_file_id} expect:{next_offset:,} diff:{head1-next_offset:,} tb:{file_size:,}', yellow=1))
                             miss_parts.append((curr_file_id, next_offset, head1-next_offset))
@@ -3608,7 +3608,7 @@ class JDb(JDbReader):
 
                     record_cnt += 1
                     jj = ii + 1
-                    if jj < total:  # pragma: no cover
+                    if jj < total:
                         file_id2, head2, tail2, size2, row2, key2 = cache[jj]
                         if file_id2 == file_id1 and head1 <= head2 < tail1: # row2 overlap row1
                             val_size1 = val_size2 = 0
@@ -3782,7 +3782,7 @@ class JDb(JDbReader):
 
                     print('\nREP:', rep_parts)
 
-        if is_unsync: # pragma: no cover
+        if is_unsync:
             self.unsync()
 
         return error
@@ -3817,10 +3817,7 @@ class JDb(JDbReader):
         :meth:`unremove` can bring it back. Destroying the group's storage is
         :meth:`remove`'s job -- it gates that on :meth:`JFilesBase.is_group` so a
         shared or linked group is never touched.
-
-        Note this is not the same operation as :meth:`JFilesBase.del_group`,
-        which does destroy the storage.
-
+        
         Args:
             key (str): The group's key.
 
@@ -3834,8 +3831,6 @@ class JDb(JDbReader):
             group = self.f_get_group(fp, key)
             if isinstance(group, JDb):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
-                return group
-
             return group
 
     def f_change_days(self, fp_dict:Dict[int,IO], key:str, days:Union[int,float,str,dt_date,datetime]=-1) -> bool:
@@ -4723,7 +4718,7 @@ class JDb(JDbReader):
         set_key_table = []
         # Note the membership test happens BEFORE any pop: the group branch below
         # removes the entry, and unlink_group() must still run for it.
-        is_group_key = key in io.groups or (file_id == 0x10 and row_size == 0) or bool(kflags & JKeyFlag.JDB)
+        is_group_key = key in io.groups or bool(kflags & JKeyFlag.JDB)
         if read_value or is_group_key:
             val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
         else:
@@ -4833,7 +4828,6 @@ class JDb(JDbReader):
 
             break
 
-        kflags |= (JKeyFlag.JDB if file_id == 0x10 and row_size == 0 else 0)
         dead_row = row
         n_lines = io.n_lines
         safe_h = n_records = io.n_records

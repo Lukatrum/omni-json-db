@@ -401,7 +401,7 @@ class KeyTable:
             for _key, row_id in self._item_iter(fp):
                 if key == _key:
                     old_row_id, s_idx, e_idx = find_key(key_array, key)
-                    if old_row_id == row_id:
+                    if old_row_id == row_id: # pragma: no cover
                         del key_array[s_idx:e_idx]
                         self.size -= 1
 
@@ -816,7 +816,7 @@ class LiteKeyTable(KeyTable):
         elif _mode == 4:
             groups_mask = 0xffff
             flags_mask = max(DEF_FLAG_MASK, 8*(2**20)-1)
-        elif _mode == 5: # pragam: no cover
+        elif _mode == 5: # pragma: no cover
             groups_mask = 0xf_ffff
             flags_mask = max(DEF_FLAG_MASK, 8*(2**21)-1)
         else:
@@ -1982,6 +1982,13 @@ class JIo(JIoBase):
 
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
+        if key and file_id == 0x10 and row_size == 0:
+            # JDB describes what the row IS, not what the caller asked for, so
+            # derive it here -- the mirror image of the KEY codecs, which
+            # synthesize it on every loads_v*. Without this the flag and the
+            # inline 0x10 marker can disagree on disk (e.g. a row moved into the
+            # DEAD area, where the other flags are deliberately reset).
+            flags |= int(JKeyFlag.JDB) # plain int: marshal/msgpack cannot encode an IntFlag
         data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days, flags)
         data_size = len(data)
         index_size = self.index_size

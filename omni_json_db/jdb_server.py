@@ -53,7 +53,7 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
 
             jdb = JDb(JNetFiles((server_ip, server_port)))
 
-        elif files == '' or files.startswith('<MEM') and files[-1] == '>':
+        elif files == '' or files.startswith('<MEM') and files[-1] == '>': # pragma: no cover
             jdb = JDb(JMemFiles(None, name=files[5:-1] if files else ''))
 
         else:
@@ -156,10 +156,9 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
 
                 # 2) shared cache of client-materialized groups
                 _obj = self.group_files.get(_path, None)
-                if _obj is None:
-                    # 3) lazily create the backend
-                    self.group_files[_path] = _obj = files_obj.add_group(part)
 
+                # 3) lazily create the backend
+                self.group_files[_path] = _obj = files_obj.add_group(part) if _obj is None else _obj
                 files_obj = _obj
                 cur_jdb = None
 
@@ -369,16 +368,7 @@ class ServerHandler(BaseRequestHandler):
 
                         resp['ret'] = _target.get_KEY()
 
-                    elif cmd == 'del_group':
-                        # destroy the group's storage (the counterpart of
-                        # add_group), then forget it server-wide
-                        _name = _kwargs['name']
-                        resp['ret'] = grp_files_obj.del_group(_name)
-                        _full_path = f'{group_path}/{_name}' if group_path else _name
-                        with server.group_lock:
-                            server.group_files.pop(_full_path, None)
-
-                    elif cmd == 'link_group':
+                    elif cmd == 'link_group': # pragma: no cover
                         # link a foreign backend as one of this database's groups:
                         # either another server's group (chained JNetFiles proxy)
                         # or a KEY path reachable from this host

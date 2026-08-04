@@ -8,8 +8,7 @@ from threading import RLock, get_ident
 from struct import Struct
 from unicodedata import east_asian_width
 from time import perf_counter
-from typing import Any, Union, Optional, Tuple, Set, List, Dict, \
-                Callable, Generator, IO
+from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, KeyTable, API_V2, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
@@ -712,8 +711,8 @@ class JDbKey:
                 grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                 f_get_group = jdb.f_get_group
                 if not grp_name:
-                    for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                        if not kflags & JKeyFlag.JDB: continue
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             for _key,_info in group_jdb.keys.item_iter(jdb_key):
@@ -3133,8 +3132,8 @@ class JDbReader(JDbBase):
                 grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                 f_get_group = self.f_get_group
                 if not grp_name:
-                    for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                        if not kflags & JKeyFlag.JDB: continue
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             for _key,_val in group_jdb.item_iter(jdb_key):
@@ -3371,8 +3370,8 @@ class JDbReader(JDbBase):
                 with self.open(read_only=True) as fp:
                     io, fp, key_fp = self.f_get_fp(fp)
                     f_get_group = self.f_get_group
-                    for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                        if not kflags & JKeyFlag.JDB: continue
                         if not (key_rule and not key_rule.search(grp_name)):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
@@ -3934,8 +3933,8 @@ class JDbReader(JDbBase):
 
             if with_group:
                 io, fp, key_fp = self.f_get_fp(fp)
-                for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                    if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                    if not kflags & JKeyFlag.JDB: continue
                     group_jdb = self.f_get_group(fp, grp_name)
                     if isinstance(group_jdb, JDbReader):
                         group_jdb.sync(force=force, with_group=True)
@@ -3961,8 +3960,8 @@ class JDbReader(JDbBase):
             if with_group:
                 with self.open(read_only=True) as fp:
                     io, fp, key_fp = self.f_get_fp(fp)
-                    for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not (kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0): continue
+                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                        if not kflags & JKeyFlag.JDB: continue
                         group_jdb = self.f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             group_jdb.unsync(with_group=True)
@@ -4433,7 +4432,7 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _days, _kflags = io.read_key(key_fp, row)
-        if _kflags & JKeyFlag.JDB:
+        if _kflags & JKeyFlag.JDB: # pragma: no cover
             io.groups.setdefault(_key, None)
 
         if row_size == 0:
@@ -4887,8 +4886,7 @@ class JDbReader(JDbBase):
 
         ``owned``
             The storage belongs to this database: it was created by
-            :meth:`JFilesBase.add_group` and :meth:`JFilesBase.del_group`
-            destroys it.
+            :meth:`JFilesBase.add_group`            
         ``shared``
             The very same :class:`JFilesBase` object is used, with no copy, so
             both databases read and write one store.
@@ -5019,7 +5017,8 @@ class JDbReader(JDbBase):
 
             return self.io.loads_with_unzip(_bytes[:-1], zip_type=0)
 
-        if file_id == 0x10: # JDb
+        if file_id == 0x10: # pragma: no cover
+            # NEVER: filter by f_decode_value
             io = self.io
             return io.groups.get(key, None)
 

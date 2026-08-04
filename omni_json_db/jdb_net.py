@@ -744,34 +744,7 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
-    def del_group(self, name:str) -> bool:
-        """Ask the remote server to destroy the group ``name``.
-
-        This is the counterpart of :meth:`add_group`: the group's storage is
-        removed, whereas :meth:`unlink_group` only forgets a link.
-
-        Args:
-            name (str): The group name.
-
-        Returns:
-            bool: ``True`` if the server removed something.
-
-        Raises:
-            IOError: If the network socket is disconnected.
-            ValueError: If the remote command fails.
-        """
-        with self.lock:
-            if self.sock and not self.sock._closed:
-                dump_and_send(self.sock, (self._remote_file('KEY'), 'del_group', (), {'name':name}))
-                resp = recv_and_load(self.sock)
-                if resp.get('ok'):
-                    return bool(resp.get('ret', False))
-
-                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
-
-            raise IOError
-
-    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
+    def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase: # pragma: no cover
         """Ask the remote server to link an existing backend as group ``name``.
 
         This is the network counterpart of :meth:`JFilesBase.link_group` and is

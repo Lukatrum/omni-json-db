@@ -48,8 +48,12 @@ class JKeyFlag(IntFlag):
 
     #: ``'j'`` -- the record holds a group (child) database rather than an
     #: ordinary value. Its value is normally the inline ``0x10`` marker, meaning
-    #: the group lives at ``files_obj.add_group(key)``; a legacy record may
-    #: instead store the group's KEY path as a string. Because the flag is on the
+    #: the group lives at ``files_obj.add_group(key)``; a foreign group stores
+    #: its KEY path as a string instead.
+    #:
+    #: The flag is authoritative: :meth:`JIo.write_key` sets it on every inline
+    #: group row and the KEY codecs synthesize it from the marker on every
+    #: ``loads_v*``, so callers test this bit alone and never the raw marker. Because the flag is on the
     #: row itself, ``load_keys()`` can populate :attr:`JIo.groups` straight from
     #: the index, which is what allowed the old separate ``JDb.childs`` registry
     #: to be folded into ``JIo.groups``.

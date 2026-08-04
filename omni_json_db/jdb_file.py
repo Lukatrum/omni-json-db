@@ -261,15 +261,13 @@ except ImportError:
             except (IOError, OSError) as e: # pragma: no cover
                 print(e)
 
-
-try:
-    import resource
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    if soft < 2048 <= hard:
-        resource.setrlimit(resource.RLIMIT_NOFILE, (2048, hard))
-
-except (ImportError, ValueError, OSError): # pragma: no cover
-    pass
+# try:
+#     import resource
+#     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+#     if soft < 2048 <= hard:
+#         resource.setrlimit(resource.RLIMIT_NOFILE, (2048, hard))
+# except (ImportError, ValueError, OSError): # pragma: no cover
+#     pass
 
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -370,12 +368,14 @@ class JBytesIO(RawIOBase):
         total_read = 0
         while True:
             line = self.readline()
-            if not line:
-                break
-            lines.append(line)
-            total_read += len(line)
-            if hint is not None and hint > 0 and total_read > hint:
-                break
+            if line:
+                lines.append(line)
+                total_read += len(line)
+                if hint is not None and hint > 0 and total_read > hint:
+                    break
+                continue
+
+            break
 
         return lines
 
@@ -587,8 +587,6 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool: ...
     @abstractmethod
     def add_group(self, name:str) -> JFilesBase: ...
-    @abstractmethod
-    def del_group(self, name:str) -> bool: ...
 
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing storage backend as the group ``name`` of this database.
@@ -840,28 +838,6 @@ class JMemFiles(JFilesBase):
             files_obj = self.group_table.setdefault(name, JMemFiles(name=f'{self.name}.{name}' if self.name else name))
 
         return files_obj
-
-    def del_group(self, name:str) -> bool:
-        """Destroy the group ``name`` and everything stored in it.
-
-        This is the counterpart of :meth:`add_group`: it removes the group's
-        storage, whereas :meth:`unlink_group` only forgets a link and leaves the
-        linked backend untouched. Dropping the buffers is enough for memory
-        storage -- once no view holds the instance it is collected.
-
-        Args:
-            name (str): The group name.
-
-        Returns:
-            bool: ``True`` if the group existed and was removed.
-        """
-        files_obj = self.group_table.pop(name, None)
-        if files_obj is None:
-            return False
-
-        files_obj.KEY_file = bytearray()
-        files_obj.VAL_table.clear()
-        return True
 
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
@@ -1270,38 +1246,6 @@ class JDiskFiles(JFilesBase):
             return files_obj
 
         return JDiskFiles(self.group_KEY_file.format(group_key=name))
-
-    def del_group(self, name:str) -> bool:
-        """Destroy the group ``name`` and every file backing it.
-
-        This is the counterpart of :meth:`add_group`: it deletes the group's
-        storage, whereas :meth:`unlink_group` only forgets a link and leaves the
-        linked backend untouched. A linked group is unlinked rather than
-        deleted, because its files belong to whoever linked them.
-
-        Args:
-            name (str): The group name.
-
-        Returns:
-            bool: ``True`` if a group was removed.
-        """
-        if self.group_table.pop(name, None) is not None:
-            # linked storage is somebody else's: drop the link only
-            return True
-
-        files_obj = JDiskFiles(self.group_KEY_file.format(group_key=name))
-        removed = False
-        file_id = 0
-        while files_obj.VAL_remove(file_id): # VAL files are allocated in order
-            removed = True
-            file_id += 1
-
-        KEY_path = files_obj.get_KEY()
-        if path_exists(KEY_path):
-            os_remove(KEY_path)
-            removed = True
-
-        return removed
 
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
