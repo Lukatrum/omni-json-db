@@ -267,7 +267,7 @@ class KeyTable:
         self.mask = groups_mask
         self.flags_mask = flags_mask
         self.flags = bitarray(flags_mask+1)
-        self.groups:List[bytearray] = [bytearray() for _ in range(groups_mask+1)]
+        self.groups:List[bytearray] = [None] * (groups_mask+1)
         self.size = -1
         self.found_flags = bitarray()
         self.with_cache = with_cache
@@ -286,7 +286,7 @@ class KeyTable:
         return f'<{type(self).__name__} '\
             f'cache:{len(self.cache) if self.with_cache else "-"} '\
             f'mask:{self.mask:x} '\
-            f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
+            f'used:{(self.flags.nbytes+self.found_flags.nbytes+sum(len(ka) if ka is not None else 0 for ka in self.groups))/1024/1024:.2f}MB+{self.flags.count(1)*100./len(self.flags):.2f}% '\
             f'done:{self.size}/{self.io.n_records}+{self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}% '\
             f'at {hex(id(self))}>'
 
@@ -305,9 +305,14 @@ class KeyTable:
             cache.move_to_end(key, last=True)
             return
 
+        groups = self.groups
         key_hash = xhash(key)
-        key_array = self.groups[key_hash & self.mask]
-        old_row_id, s_idx, e_idx = self._find_key(key_array, key)
+        group_id = key_hash & self.mask
+        key_array = groups[group_id]
+        if key_array is None:
+            groups[group_id] = key_array = bytearray()
+
+        old_row_id, s_idx, e_idx = self._find_key(key_array, key) if key_array else (-1, -1, -1)
         if old_row_id >= 0: # old key
             if old_row_id != row_id:
                 key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
@@ -353,8 +358,12 @@ class KeyTable:
         groups = self.groups
         find_key = self._find_key
         set_found_flag = self._set_found_flag
-        key_array = groups[key_hash & mask]
-        row_id, s_idx, e_idx = find_key(key_array, key)
+        group_id = key_hash & mask
+        key_array = groups[group_id]
+        if key_array is None:
+            groups[group_id] = key_array = bytearray()
+
+        row_id, s_idx, e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
         if row_id >= 0:
             if is_sync:
                 del key_array[s_idx:e_idx]
@@ -431,8 +440,11 @@ class KeyTable:
         mask = self.mask
         groups = self.groups
         find_key = self._find_key
-        key_array = groups[key_hash & mask]
-        row_id, _s_idx, _e_idx = find_key(key_array, key)
+        group_id = key_hash & mask
+        key_array = groups[group_id]
+        if key_array is None:
+            groups[group_id] = key_array = bytearray()
+        row_id, _s_idx, _e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
         if row_id >= 0:
             if self.with_cache:
                 while len(cache) >= jio._key_limit:
@@ -549,7 +561,8 @@ class KeyTable:
         """Purge all memory configurations and reset trackers/bloom filters to zero."""
         if self.size != 0:
             for key_array in self.groups:
-                key_array.clear()
+                if key_array is not None:
+                    key_array.clear()
             self.cache.clear()
             self.found_flags.clear()
             self.flags.setall(0)
@@ -634,9 +647,15 @@ class KeyTable:
             row_id = 0
             for (_key, _f, _o, _r, _v, _s, _d, _kf) in jio.KEY_iter(key_fp, row_id, jio.n_records):
                 if is_empty or not get_found_flag(row_id):
+                    wr_bytes = _msg_dumps((_key, row_id)) or b''
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
-                    groups[key_hash & mask].extend(_msg_dumps((_key, row_id)) or b'')
+                    group_id = key_hash & mask
+                    key_array = groups[group_id]
+                    if key_array:
+                        key_array.extend(wr_bytes)
+                    else:
+                        groups[group_id] = bytearray(wr_bytes)
                     set_found_flag(row_id, True)
                     self.size += 1
 
@@ -797,7 +816,7 @@ class LiteKeyTable(KeyTable):
         elif _mode == 4:
             groups_mask = 0xffff
             flags_mask = max(DEF_FLAG_MASK, 8*(2**20)-1)
-        elif _mode == 5:
+        elif _mode == 5: # pragam: no cover
             groups_mask = 0xf_ffff
             flags_mask = max(DEF_FLAG_MASK, 8*(2**21)-1)
         else:
@@ -1344,7 +1363,7 @@ class JIo(JIoBase):
         Returns:
             str: Identity presentation string block details tracks logs metrics layout context text.
         """
-        return f'<{type(self).__name__}[v{self.api_ver}|{self.data_type_str}|{self.zip_type_str}|{self.key_limit_str}|{self.index_size}|{self.n_records}+{self.n_lines-self.n_records}|k:{self.file_size:,}|s:{self.sync_id}/{self.swap_id}/{self.remv_id}] at {hex(id(self))}>'
+        return f'<{type(self).__name__}[{type(self.files_obj).__name__[1]}|v{self.api_ver}|{self.data_type_str}|{self.zip_type_str}|{self.key_limit_str}|{self.index_size}|{self.n_records}+{self.n_lines-self.n_records}|k:{self.file_size:,}|s:{self.sync_id}/{self.swap_id}/{self.remv_id}] at {hex(id(self))}>'
 
     def init_APIs(self, api_ver:Optional[int], reset:bool=False):
         """Bind the header/KEY/VAL codec methods for the given format version.
@@ -2113,7 +2132,7 @@ class JIo(JIoBase):
         remv_id = self.remv_id
         swap_id = self.swap_id
 
-        is_chg = self._sync_id != sync_id \
+        is_chg = truncate or self._sync_id != sync_id \
             or self._n_records != n_records \
             or self._n_lines != n_lines \
             or self._remv_id != remv_id \

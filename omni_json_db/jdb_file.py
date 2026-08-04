@@ -261,6 +261,16 @@ except ImportError:
             except (IOError, OSError) as e: # pragma: no cover
                 print(e)
 
+
+try:
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft < 2048 <= hard:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (2048, hard))
+
+except (ImportError, ValueError, OSError): # pragma: no cover
+    pass
+
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -576,12 +586,14 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def is_group(self, KEY_file:Union[str,JFilesBase], name:str) -> bool: ...
     @abstractmethod
-    def create_group(self, name:str) -> JFilesBase: ...
+    def add_group(self, name:str) -> JFilesBase: ...
+    @abstractmethod
+    def del_group(self, name:str) -> bool: ...
 
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing storage backend as the group ``name`` of this database.
 
-        After linking, every :meth:`create_group` call with the same ``name``
+        After linking, every :meth:`add_group` call with the same ``name``
         (from this instance or any of its :meth:`copy` chain) resolves to
         ``files_obj`` instead of creating fresh group storage. This is how a
         foreign group database (one whose storage is *not* this database's
@@ -608,7 +620,7 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
         """Remove a group link (or all of them) from the in-process registry.
 
         Called when a group key is deleted so that a later
-        :meth:`create_group` with the same name resolves to fresh group
+        :meth:`add_group` with the same name resolves to fresh group
         storage instead of the stale linked backend.
 
         Args:
@@ -670,7 +682,7 @@ class JMemFiles(JFilesBase):
             timestamp (float, optional): Baseline creation timestamp.
             name (str, optional): The virtual file object name.
             group_table (dict, optional): Shared registry mapping group names to
-                their :class:`JMemFiles` instances, so repeated ``create_group``
+                their :class:`JMemFiles` instances, so repeated ``add_group``
                 calls (from any copy of this object) resolve to the same
                 in-memory buffers — mirroring the path-determinism of
                 :class:`JDiskFiles` groups. Defaults to a new dict.
@@ -807,7 +819,7 @@ class JMemFiles(JFilesBase):
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file.startswith('<MEM.') and KEY_file[-1] == '>'
 
-    def create_group(self, name:str) -> JMemFiles:
+    def add_group(self, name:str) -> JMemFiles:
         """Create (or resolve) a group dataset partition in memory.
 
         Repeated calls with the same ``name`` — from this instance or any of
@@ -829,19 +841,41 @@ class JMemFiles(JFilesBase):
 
         return files_obj
 
+    def del_group(self, name:str) -> bool:
+        """Destroy the group ``name`` and everything stored in it.
+
+        This is the counterpart of :meth:`add_group`: it removes the group's
+        storage, whereas :meth:`unlink_group` only forgets a link and leaves the
+        linked backend untouched. Dropping the buffers is enough for memory
+        storage -- once no view holds the instance it is collected.
+
+        Args:
+            name (str): The group name.
+
+        Returns:
+            bool: ``True`` if the group existed and was removed.
+        """
+        files_obj = self.group_table.pop(name, None)
+        if files_obj is None:
+            return False
+
+        files_obj.KEY_file = bytearray()
+        files_obj.VAL_table.clear()
+        return True
+
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
 
         The link is stored in the shared ``group_table``, so every copy of
         this instance (other :class:`JDb` wrappers, server connections)
-        resolves ``create_group(name)`` to the same linked backend.
+        resolves ``add_group(name)`` to the same linked backend.
 
         Args:
             name (str): The group name. Must be alphanumeric/underscore only.
             files_obj (JFilesBase): The backend to serve as group ``name``.
 
         Returns:
-            JFilesBase: The linked backend (a private :meth:`copy`).
+            JFilesBase: ``files_obj`` itself -- the link shares the backend.
 
         Raises:
             KeyError: If ``name`` violates the group naming constraint.
@@ -853,7 +887,9 @@ class JMemFiles(JFilesBase):
         if not isinstance(files_obj, JFilesBase):
             raise TypeError('files_obj must be a JFilesBase')
 
-        files_obj = files_obj.copy()
+        # Store the object itself, not a copy: linking means "serve THIS backend
+        # as my group `name`", i.e. shared storage. Copying contradicts that, and
+        # for a JNetFiles target copy() opens a whole extra socket per link.
         self.group_table[name] = files_obj
         return files_obj
 
@@ -1216,7 +1252,7 @@ class JDiskFiles(JFilesBase):
         KEY_file = KEY_file.get_KEY() if isinstance(KEY_file, JFilesBase) else KEY_file
         return KEY_file.startswith('<MEM.') or KEY_file == self.group_KEY_file.format(group_key=name)
 
-    def create_group(self, name:str) -> JFilesBase:
+    def add_group(self, name:str) -> JFilesBase:
         """Assemble an isolated disk subdirectory tree configured for a partition group.
 
         If ``name`` was previously linked via :meth:`link_group`, the linked
@@ -1235,11 +1271,43 @@ class JDiskFiles(JFilesBase):
 
         return JDiskFiles(self.group_KEY_file.format(group_key=name))
 
+    def del_group(self, name:str) -> bool:
+        """Destroy the group ``name`` and every file backing it.
+
+        This is the counterpart of :meth:`add_group`: it deletes the group's
+        storage, whereas :meth:`unlink_group` only forgets a link and leaves the
+        linked backend untouched. A linked group is unlinked rather than
+        deleted, because its files belong to whoever linked them.
+
+        Args:
+            name (str): The group name.
+
+        Returns:
+            bool: ``True`` if a group was removed.
+        """
+        if self.group_table.pop(name, None) is not None:
+            # linked storage is somebody else's: drop the link only
+            return True
+
+        files_obj = JDiskFiles(self.group_KEY_file.format(group_key=name))
+        removed = False
+        file_id = 0
+        while files_obj.VAL_remove(file_id): # VAL files are allocated in order
+            removed = True
+            file_id += 1
+
+        KEY_path = files_obj.get_KEY()
+        if path_exists(KEY_path):
+            os_remove(KEY_path)
+            removed = True
+
+        return removed
+
     def link_group(self, name:str, files_obj:JFilesBase) -> JFilesBase:
         """Link an existing backend as group ``name`` (see :meth:`JFilesBase.link_group`).
 
         The link is stored in the shared in-process ``group_table``, so every
-        copy of this instance resolves ``create_group(name)`` to the linked
+        copy of this instance resolves ``add_group(name)`` to the linked
         backend. The link is *not* persisted to disk: a handle opened in
         another process resolves ``name`` to the deterministic group path.
 
@@ -1248,7 +1316,7 @@ class JDiskFiles(JFilesBase):
             files_obj (JFilesBase): The backend to serve as group ``name``.
 
         Returns:
-            JFilesBase: The linked backend (a private :meth:`copy`).
+            JFilesBase: ``files_obj`` itself -- the link shares the backend.
 
         Raises:
             KeyError: If ``name`` violates the group naming constraint.
@@ -1260,7 +1328,9 @@ class JDiskFiles(JFilesBase):
         if not isinstance(files_obj, JFilesBase):
             raise TypeError('files_obj must be a JFilesBase')
 
-        files_obj = files_obj.copy()
+        # Store the object itself, not a copy: linking means "serve THIS backend
+        # as my group `name`", i.e. shared storage. Copying contradicts that, and
+        # for a JNetFiles target copy() opens a whole extra socket per link.
         self.group_table[name] = files_obj
         return files_obj
 

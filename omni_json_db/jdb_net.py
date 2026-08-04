@@ -707,14 +707,20 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
-    def create_group(self, name:str) -> JNetFiles:
-        """Create a network client bound to a group on the remote server.
+    def add_group(self, name:str, kind:Optional[str]=None, KEY:str='') -> JNetFiles:
+        """Create a group on the remote server and return a client bound to it.
 
-        The group's physical files are created lazily by the server (via its
-        own backend's ``create_group``) the first time they are accessed.
+        The group's storage is owned by the server. ``kind`` lets the caller keep
+        the group's own storage kind instead of inheriting the server's: without
+        it, an in-memory database assigned to a disk-backed server would silently
+        become a disk group.
 
         Args:
             name (str): The group namespace; must match contraint.
+            kind (Optional[str], optional): ``'mem'`` or ``'disk'`` to force the
+                server-side storage kind. Defaults to None (the server's own kind).
+            KEY (str, optional): KEY path for ``kind='disk'``, when the group
+                should be served from an existing file reachable by the server.
 
         Returns:
             JNetFiles: A new client whose commands target the group.
@@ -722,11 +728,46 @@ class JNetFiles(JFilesBase):
         Raises:
             KeyError: If ``name`` violates the group naming constraints.
             IOError: If the network socket is disconnected.
-            RuntimeError: If the new socket connection fails.
+            ValueError: If the remote command fails.
+        """
+        if not re_match(r'^\w+$', name):
+            raise KeyError(name)
+
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'add_group', (), {'name':name, 'kind':kind, 'KEY':KEY}))
+                resp = recv_and_load(self.sock)
+                if not resp.get('ok'):
+                    raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
+
+                return JNetFiles(self.server_addr, group_path=self.group_path + (name,))
+
+            raise IOError
+
+    def del_group(self, name:str) -> bool:
+        """Ask the remote server to destroy the group ``name``.
+
+        This is the counterpart of :meth:`add_group`: the group's storage is
+        removed, whereas :meth:`unlink_group` only forgets a link.
+
+        Args:
+            name (str): The group name.
+
+        Returns:
+            bool: ``True`` if the server removed something.
+
+        Raises:
+            IOError: If the network socket is disconnected.
+            ValueError: If the remote command fails.
         """
         with self.lock:
             if self.sock and not self.sock._closed:
-                return JNetFiles(self.server_addr, group_path=self.group_path + (name,))
+                dump_and_send(self.sock, (self._remote_file('KEY'), 'del_group', (), {'name':name}))
+                resp = recv_and_load(self.sock)
+                if resp.get('ok'):
+                    return bool(resp.get('ret', False))
+
+                raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
 
             raise IOError
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from functools import reduce
-from typing import Optional, Any, Dict, Set, List, Tuple, Callable, Union
+from typing import Optional, Any, Dict, Set, List, Tuple, Callable
 from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError, UnpicklingError # nosec B403
 from marshal import loads as marshal_loads, dumps as marshal_dumps # nosec B403
 

@@ -11,7 +11,7 @@ from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, \
                 Callable, Generator, IO
 #-----------------------------------------------------------------------------
-from .jdb_io import JIo, KeyTable, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
+from .jdb_io import JIo, KeyTable, API_V2, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
 from .jdb_query import QUERY_OPS, Condition, \
@@ -1003,8 +1003,9 @@ class JDbReader(JDbBase):
             files_obj = jdb.files_obj.copy()
 
         elif isinstance(KEY_file, str):
-            if not KEY_file: # pragma: no cover
-                files_obj = JMemFiles(None, **kwargs)
+            if not KEY_file or KEY_file.startswith('<MEM') and KEY_file[-1] == '>': # pragma: no cover
+                name = KEY_file[5:-1] if KEY_file else ''
+                files_obj = JMemFiles(None, name=name, **kwargs)
             elif re_match(r'^([12]?\d\d?[:.]){4}(?<=:)\d{1,5}$', KEY_file): # pragma: no cover
                 server_ip, server_port = KEY_file.split(':')
                 server_port = int(server_port)
@@ -1019,7 +1020,8 @@ class JDbReader(JDbBase):
             files_obj = JMemFiles(KEY_file, **kwargs)
 
         elif isinstance(KEY_file, JFilesBase):
-            files_obj = KEY_file.copy()
+            copy_files_obj = kwargs.get('copy_files_obj', True)
+            files_obj = KEY_file.copy() if copy_files_obj else KEY_file
 
         else:
             raise TypeError
@@ -1094,7 +1096,8 @@ class JDbReader(JDbBase):
             str: Descriptive text about the DB instance state and pointers.
         """
         io = self.io
-        return f'<{type(self).__name__}[v{io.api_ver}|{io.data_type_str}|{io.zip_type_str}|{io.key_limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] at {hex(id(self))}>'
+        io_str = '-' if not io.file_size <= 0 else f'{io.n_records}+{io.n_lines-io.n_records}|k:{io.file_size:,}|s:{io.sync_id}/{io.swap_id}/{io.remv_id}'
+        return f'<{type(self).__name__}|{type(self.files_obj).__name__[1]}|v{io.api_ver}|{io.data_type_str}|{io.zip_type_str}|{io.key_limit_str}|{io.index_size:3d}|{io_str}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] at {hex(id(self))}>'
 
     def __len__(self) -> int:
         """
@@ -2067,6 +2070,19 @@ class JDbReader(JDbBase):
             self.lock.release()
 
     @property
+    def groups(self) -> Dict[str,Optional[JDbReader]]:
+        """Dict[str, Optional[JDbReader]]: Deprecated alias of ``self.io.groups``.
+
+        Child databases used to live in two registries: ``io.groups`` for the ones
+        stored inside this database's own group namespace, and ``groups`` for
+        foreign ones held only as a live reference. :attr:`JKeyFlag.JDB` marks every
+        group in its KEY row and :meth:`JFilesBase.link_group` makes a foreign
+        group's storage resolvable as ``add_group(name)``, so the split is no
+        longer needed and both live in ``io.groups``. Prefer ``io.groups``.
+        """
+        return self.io.groups
+
+    @property
     def dir_name(self) -> str:
         """Get the parent directory path of the primary DB file.
 
@@ -2295,7 +2311,7 @@ class JDbReader(JDbBase):
 
         return 0
 
-    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDbReader: # pragma: no cover
+    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None], ref:Optional[JDbReader]=None) -> JDbReader: # pragma: no cover
         """Create a new instance that reuses this database's configuration
         (data_type, zip_type, key_limit, cache_limit, sizes, etc.) but points
         at a different storage target.
@@ -2308,71 +2324,23 @@ class JDbReader(JDbBase):
         Returns:
             JDbReader: The new instance.
         """
+        _ref = ref
         jio = self.io
         return JDbReader(KEY_file=KEY_file,
                     data_type=jio._data_type,
                     zip_type=jio._zip_type,
-                    reserved_rate=jio.reserved_rate,
-                    cache_limit=self._cache_limit,
                     key_limit=jio._key_limit,
-                    min_value_size=jio.min_value_size,
+                    cache_limit=self._cache_limit,
                     max_file_size=jio.max_file_size,
-                    index_size=jio.index_size)
-
-    def rebind(self, src:JDbReader) -> None:
-        """Re-point this database onto another database's storage backend.
-
-        All subsequent reads and writes on this instance go to ``src``'s
-        storage; the previous storage is detached (its files are left intact
-        but no longer used by this instance). Open file pointers are closed,
-        pending locks released, and the read cache cleared. The instance's own
-        behavioral settings (``write_hook``, ``flags``, ``max_wsize``, key
-        iterator) are preserved.
-
-        This is the mechanism behind "adopting" a group database into a
-        parent's group namespace: after the group's records are migrated into
-        the group storage, the group is re-bound onto it so that both the
-        group object and every other view of the group share one storage —
-        e.g. re-binding onto a :class:`JNetFiles` group makes the group a live
-        network client of the server-side group.
-
-        Args:
-            src (JDbReader): The database whose storage backend (``files_obj``,
-                ``io``, ``file_lock``) this instance adopts. ``src`` should be
-                discarded afterwards — the two instances would otherwise share
-                I/O state.
-
-        Raises:
-            TypeError: If ``src`` is not a :class:`JDbReader`.
-        """
-        if not isinstance(src, JDbReader):
-            raise TypeError('src must be a JDbReader')
-
-        if src is self: # pragma: no cover
-            return
-
-        with self.lock:
-            fp_table = self.fp_table
-            if fp_table: # pragma: no cover
-                for _ident,fp_dict in fp_table.items():
-                    for fp in fp_dict.values():
-                        if fp is not None:
-                            fp.close()
-
-                    fp_dict.clear()
-
-                fp_table.clear()
-
-            self.th_table.clear()
-            self.file_lock.release()
-            self._cache.clear()
-            self.chg_keys.clear()
-
-            self.files_obj = src.files_obj
-            self.file_lock = src.file_lock
-            self.io = src.io
-            self.fsize = src.fsize
-            self.safe_line = src.safe_line
+                    min_value_size=jio.min_value_size,
+                    index_size=jio.index_size,
+                    reserved_rate=jio.reserved_rate,
+                    api_ver=jio.api_ver,
+                    max_wsize=self.max_wsize,
+                    flags=self.flags,
+                    val_codec=jio._val_codec,
+                    key_codec=jio._key_codec,
+                    copy_files_obj=False)
 
     def can_lock(self) -> bool:
         """Check whether file locking works on the underlying storage
@@ -3023,10 +2991,6 @@ class JDbReader(JDbBase):
             with self.open(read_only=True) as fp:
                 io = self.io
                 files_obj = self.files_obj
-                files_str = 'DF' if isinstance(files_obj, JDiskFiles) else \
-                            'MF' if isinstance(files_obj, JMemFiles) else \
-                            f'NF:{"/".join(files_obj.group_path)}' if isinstance(files_obj, JNetFiles) else '**'
-
                 path = files_obj.get_KEY()
                 info = f'[KEY] {path}'
                 info += f'\n[JFiles] {files_obj}'
@@ -3052,7 +3016,7 @@ class JDbReader(JDbBase):
 
                 info += '\n' + '='*80
                 print(info)
-                print(f'[v{api_ver}|{type_str}|{zip_str}|{limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] {files_str}:{files_obj.get_name()} | {io.n_records:,}+{io.n_lines-io.n_records:,} |{data_size} s:{io.sync_id}/{io.swap_id}/{io.remv_id}')
+                print(f'[{type(files_obj).__name__[1]}|v{api_ver}|{type_str}|{zip_str}|{limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] {files_obj.get_name()} | {io.n_records:,}+{io.n_lines-io.n_records:,} |{data_size} s:{io.sync_id}/{io.swap_id}/{io.remv_id}')
 
                 for grp_name in sorted(io.groups):
                     group = self.f_get_group(fp, grp_name)
@@ -3070,10 +3034,6 @@ class JDbReader(JDbBase):
                     type_str = io.data_type_str
                     limit_str = io.key_limit_str
                     files_obj = self.files_obj
-                    files_str = 'DF' if isinstance(files_obj, JDiskFiles) else \
-                                'MF' if isinstance(files_obj, JMemFiles) else \
-                                f'NF:{"/".join(files_obj.group_path)}' if isinstance(files_obj, JNetFiles) else '**'
-
                     size = key_fp.seek(0,2)
                     data_size = f' k:{size/(2**30):,.1f}GB |' if size >= (2**30) else \
                                 f' k:{size/(2**20):,.1f}MB |' if size >= (2**20) else \
@@ -3086,7 +3046,7 @@ class JDbReader(JDbBase):
                                     f' v:{size/(2**20):,.1f}MB/{len(io.file_table)} |' if size >= (2**20) else \
                                     f' v:{size/1024:,.1f}KB/{len(io.file_table)} |' if size >= 0 else '')
 
-                    print(prefix+f'[v{api_ver}|{type_str}|{zip_str}|{limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] {key} | {files_str}:{files_obj.get_name()} | {io.n_records:,}+{io.n_lines-io.n_records:,} |{data_size} s:{io.sync_id}/{io.swap_id}/{io.remv_id} ')
+                    print(prefix+f'[{type(files_obj).__name__[1]}|v{api_ver}|{type_str}|{zip_str}|{limit_str}|{io.index_size:3d}|{"H" if self.write_hook else "_"}{"c" if self._cache_limit > 0 else "C" if self._cache_limit < 0 else "_"}{str(self.flags)}] {key} | {files_obj.get_name()} | {io.n_records:,}+{io.n_lines-io.n_records:,} |{data_size} s:{io.sync_id}/{io.swap_id}/{io.remv_id} ')
                     for grp_name,group in sorted(io.groups.items()):
                         if isinstance(group, JDbReader):
                             group.info(prefix + (SEP_SYM if files_obj.is_group(group.files_obj, grp_name) else  '   '), key=grp_name)
@@ -4297,7 +4257,6 @@ class JDbReader(JDbBase):
                 if isinstance(group, JDbReader):
                     return group
 
-        self.io.groups.pop(key, None)
         return None
 
     def _update_cache(self, key:str, val:Any, copy:bool=True):
@@ -4332,28 +4291,40 @@ class JDbReader(JDbBase):
         if val is _MISSING:
             io = self.io
             try:
-                if row_size == 0:
-                    if key_flags & JKeyFlag.JDB:
-                        groups = io.groups
-                        groups.setdefault(key, None)
-                        group_jdb = groups.get(key, None)
-                        if not isinstance(group_jdb, JDbReader):
-                            groups[key] = group_jdb = self.create_jdb(KEY_file=self.files_obj.create_group(key))
+                if key_flags & JKeyFlag.JDB:
+                    groups = io.groups
+                    group_jdb = groups.get(key, None)
+                    if not isinstance(group_jdb, JDbReader):
+                        if row_size == 0 or isinstance(self.files_obj, JNetFiles):
+                            # row_size == 0 -> the inline 0x10 marker: the group is
+                            # at add_group(key) by definition.
+                            #
+                            # A foreign group instead stores its KEY path, but that
+                            # path names storage in the SERVER's process/filesystem.
+                            # A network client must never open it directly (it would
+                            # silently get a private empty '<MEM>' database, or a
+                            # same-machine file the server is not actually serving).
+                            # add_group() asks our server for the group, and the
+                            # server resolves it through its own linked registry.
+                            group_jdb = self.create_jdb(KEY_file=self.files_obj.add_group(key))
+                        else:
+                            val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
+                            path = io.read_value(val_fp, offset, row_size, val_size)
+                            if isinstance(path, str):
+                                group_jdb = self.create_jdb(KEY_file=path)
 
-                        return group_jdb
-                    else:
-                        val = self._decode_row(file_id, offset, key, val_size)
+                        if not isinstance(group_jdb, JDbReader):
+                            raise JTypeError(f'invalid group {key}')
+
+                        group_jdb = self._set_group(key, group_jdb)
+
+                    return group_jdb
+
+                if row_size == 0:
+                    val = self._decode_row(file_id, offset, key, val_size)
                 else:
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
                     val = io.read_value(val_fp, offset, row_size, val_size)
-                    if key_flags & JKeyFlag.JDB:
-                        groups = io.groups
-                        groups.setdefault(key, None)
-                        group_jdb = groups.get(key, None)
-                        if not isinstance(group_jdb, JDbReader) and isinstance(val, str):
-                            groups[key] = group_jdb = self.create_jdb(KEY_file=val)
-
-                        return group_jdb
 
                 if update_cache and with_cache:
                     self._update_cache(key, val, copy=False)
@@ -4908,18 +4879,77 @@ class JDbReader(JDbBase):
                 io.max_vfiles = max(io.max_vfiles, file_id+1)
                 val_fp.close()
 
-    @property
-    def groups(self) -> Dict[str,Optional[JDbReader]]:
-        """Dict[str, Optional[JDbReader]]: Deprecated alias of ``self.io.groups``.
+    def _set_group(self, name:str, group_jdb:JDbReader) -> JDbReader:
+        """Attach ``group_jdb`` as this database's group ``name``.
 
-        Child databases used to live in two registries: ``io.groups`` for the ones
-        stored inside this database's own group namespace, and ``groups`` for
-        foreign ones held only as a live reference. :attr:`JKeyFlag.JDB` marks every
-        group in its KEY row and :meth:`JFilesBase.link_group` makes a foreign
-        group's storage resolvable as ``create_group(name)``, so the split is no
-        longer needed and both live in ``io.groups``. Prefer ``io.groups``.
+        A group's storage falls into one of four relationships, and the whole
+        point of this method is to pick the right one:
+
+        ``owned``
+            The storage belongs to this database: it was created by
+            :meth:`JFilesBase.add_group` and :meth:`JFilesBase.del_group`
+            destroys it.
+        ``shared``
+            The very same :class:`JFilesBase` object is used, with no copy, so
+            both databases read and write one store.
+        ``linked``
+            A remote view of storage that some server owns or shares.
+        ``cloned``
+            The server creates its own storage of the same kind and the records
+            are copied into it; the assigned database keeps its own storage and
+            is *not* modified.
+
+        Which one applies:
+
+        ==================================== ================ ================ ================ ================
+        Action                               Local(JNetFiles) Remote(JMemFiles) Remote(JDiskFiles) Remote(JNetFiles)
+        ==================================== ================ ================ ================ ================
+        ``Local.add_group('g')``             linked JNetFiles owned JMemFiles  owned JDiskFiles linked JNetFiles
+        ``Local['g'] = JDb(JMemFiles())``    cloned JNetFiles owned JMemFiles  owned JMemFiles  linked JNetFiles
+        ``Local['g'] = JDb(JDiskFiles())``   cloned JNetFiles owned JDiskFiles owned JDiskFiles linked JNetFiles
+        ``Remote.add_group('g')``            linked JNetFiles owned JMemFiles  owned JDiskFiles linked JNetFiles
+        ``Remote['g'] = JDb(JMemFiles())``   linked JNetFiles shared JMemFiles shared JMemFiles cloned JNetFiles
+        ``Remote['g'] = JDb(JDiskFiles())``  linked JNetFiles shared JDiskFiles shared JDiskFiles cloned JNetFiles
+        ==================================== ================ ================ ================ ================
+
+        In standalone mode assignment always *shares*: ``add_group`` gives an
+        owned store, and assigning a database reuses its storage object as-is.
+
+        Note that assignment never mutates ``group_jdb``. A network parent
+        clones the records to the server and keeps its own client for the group;
+        the caller's object still points at the storage it always did, so
+        assigning one database to two parents yields two independent groups.
+
+        Args:
+            name (str): The group name (a key of this database).
+            group_jdb (JDbReader): The database being attached as that group.
         """
-        return self.io.groups
+        jio = self.io
+        files_obj = self.files_obj
+        group_files = group_jdb.files_obj
+
+        if files_obj.is_group(group_files, name):
+            # already this database's own group storage: nothing to attach
+            jio.groups[name] = group_jdb
+            return group_jdb
+
+        if not isinstance(files_obj, JNetFiles):
+            # standalone: share the storage object itself, no copy
+            try:
+                files_obj.link_group(name, group_files)
+            except (NotImplementedError, TypeError, KeyError): # pragma: no cover
+                pass
+
+            jio.groups[name] = group_jdb
+            return group_jdb
+
+        # Network parent. The server owns its groups, so it creates storage of
+        # the group's own kind and the records are copied over: the server
+        # cannot reach this process's memory, and a path it could open would
+        # make two owners of one store.
+        group_KEY = group_files.get_KEY()
+        jio.groups[name] = remote_jdb = self.create_jdb(files_obj.add_group(name, kind='mem' if group_KEY.startswith('<MEM') else 'disk', KEY=group_KEY), ref=group_jdb)
+        return remote_jdb
 
     def _decode_row(self, file_id:int, offset:int, key:str, val_size:int=0) -> Any:
         """
@@ -4991,13 +5021,7 @@ class JDbReader(JDbBase):
 
         if file_id == 0x10: # JDb
             io = self.io
-            group_jdb = io.groups.get(key, None)
-            if not isinstance(group_jdb, JDbReader):
-                # create_group() honours link_group(), so this resolves to the
-                # group's real storage when one was linked
-                io.groups[key] = group_jdb = self.create_jdb(KEY_file=self.files_obj.create_group(key))
-
-            return group_jdb
+            return io.groups.get(key, None)
 
         if file_id == 0x18: # dt.date
             return dt_date.fromordinal(offset)
@@ -5076,10 +5100,15 @@ class JDbReader(JDbBase):
             # 0x10 ~ 0x1f
             if is_jdb:
                 io = self.io
-                if key not in io.groups and self.files_obj.is_group(val.files_obj, key):
-                    io.groups[key] = val
+                grp_files_obj = val.files_obj
+                if io.api_ver < API_V2 or not isinstance(grp_files_obj, JDiskFiles) \
+                        or self.files_obj.is_group(grp_files_obj, key):
+                    return (0x10, 0, 0)
 
-                return (0x10, 0, 0)
+                _bytes = io.dumps_with_zip(grp_files_obj.get_KEY(), zip_type=0)
+                n_bytes = len(_bytes)
+                zip_type = io._zip_type
+                return (-1, _bytes if zip_type == 0 else io.zip(_bytes, zip_type=zip_type), n_bytes)
 
             _type = type(val)
 
@@ -5122,7 +5151,7 @@ class JDbReader(JDbBase):
             type_val, type_id = _UInt64_x2_unpack(_bytes)
             return (type_id, type_val, n_bytes)
 
-
-        return (-1, _bytes if io._zip_type == 0 else io.zip(_bytes, zip_type=io._zip_type), n_bytes)
+        zip_type = io._zip_type
+        return (-1, _bytes if zip_type == 0 else io.zip(_bytes, zip_type=zip_type), n_bytes)
 
 #

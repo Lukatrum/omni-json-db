@@ -21,7 +21,7 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
         port (int, optional): The port number for the server to listen on. Defaults to 59898.
         files (Union[str, bytearray, JFilesBase, JDbReader, None], optional):
             The specified source for the database file:
-                - str: Uses JMemFiles() if empty; otherwise, parses as JDiskFiles(path).
+                - str: Uses JMemFiles(JMemFiles() if empty; otherwise, parses as JDiskFiles(path).
                 - bytearray: Uses JMemFiles(KEY_file).
                 - JFilesBase: Various file objects (JDiskFiles, JMemFiles, JNetFiles).
                 - JDbReader: An existing JDbReader object.
@@ -52,8 +52,12 @@ def run_files_server(host:str='127.0.0.1', port:int=59898, files:Union[str,bytea
                 raise TypeError
 
             jdb = JDb(JNetFiles((server_ip, server_port)))
+
+        elif files == '' or files.startswith('<MEM') and files[-1] == '>':
+            jdb = JDb(JMemFiles(None, name=files[5:-1] if files else ''))
+
         else:
-            jdb = JDb(JDiskFiles(files) if files else JMemFiles())
+            jdb = JDb(JDiskFiles(files))
     else:
         raise TypeError
 
@@ -115,7 +119,7 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
            write lock (taking it here would deadlock).
         2. Fall back to the shared ``group_files`` cache (groups first
            materialized by a network client).
-        3. Create the backend via ``create_group`` and cache it.
+        3. Create the backend via ``add_group`` and cache it.
 
         Args:
             group_path (str): Slash-separated group names, e.g. ``'grp_a/grp_b'``.
@@ -154,7 +158,7 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
                 _obj = self.group_files.get(_path, None)
                 if _obj is None:
                     # 3) lazily create the backend
-                    self.group_files[_path] = _obj = files_obj.create_group(part)
+                    self.group_files[_path] = _obj = files_obj.add_group(part)
 
                 files_obj = _obj
                 cur_jdb = None
@@ -345,8 +349,34 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'is_group':
                         resp['ret'] = grp_files_obj.is_group(*_args, **_kwargs)
 
-                    elif cmd == 'create_group': # pragma: no cover
-                        resp['ret'] = grp_files_obj.create_group(*_args, **_kwargs).get_KEY()
+                    elif cmd == 'add_group':
+                        # Materialize the group on the server and publish it in
+                        # the shared registry, so every connection resolves the
+                        # same backend. `kind` lets the caller keep the group's
+                        # own storage kind instead of inheriting the server's.
+                        _name = _kwargs['name']
+                        _kind = _kwargs.get('kind', None)
+                        _target = grp_files_obj.add_group(_name)
+                        if _kind == 'mem' and not isinstance(_target, JMemFiles):
+                            _target = grp_files_obj.link_group(_name, JMemFiles(name=_name))
+
+                        elif _kind == 'disk' and not isinstance(_target, JDiskFiles):
+                            _target = grp_files_obj.link_group(_name, JDiskFiles(_kwargs['KEY']))
+
+                        _full_path = f'{group_path}/{_name}' if group_path else _name
+                        with server.group_lock:
+                            server.group_files[_full_path] = _target
+
+                        resp['ret'] = _target.get_KEY()
+
+                    elif cmd == 'del_group':
+                        # destroy the group's storage (the counterpart of
+                        # add_group), then forget it server-wide
+                        _name = _kwargs['name']
+                        resp['ret'] = grp_files_obj.del_group(_name)
+                        _full_path = f'{group_path}/{_name}' if group_path else _name
+                        with server.group_lock:
+                            server.group_files.pop(_full_path, None)
 
                     elif cmd == 'link_group':
                         # link a foreign backend as one of this database's groups:
@@ -356,8 +386,15 @@ class ServerHandler(BaseRequestHandler):
                         _addr = _kwargs.get('addr', None)
                         if _addr is not None:
                             _target = JNetFiles((str(_addr[0]), int(_addr[1])), group_path=tuple(_kwargs.get('group_path', ())))
-                        else: # pragma: no cover
-                            _target = JDiskFiles(_kwargs['KEY'])
+                        else:
+                            _KEY = _kwargs['KEY']
+                            # Keep the group's own storage kind: an in-memory
+                            # database reports a '<MEM...>' KEY, which is a label
+                            # and not a path -- opening it as JDiskFiles would
+                            # create a junk file named '<MEM>'. The client sends
+                            # its records over separately, since the server cannot
+                            # reach the client's memory.
+                            _target = JMemFiles(name=_name) if _KEY.startswith('<MEM') else JDiskFiles(_KEY)
 
                         _target = grp_files_obj.link_group(_name, _target)
                         # refresh the server-wide registry so other connections

@@ -17,7 +17,6 @@ from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         JKeyFlag, JFlag, USER_FLAG_MASK
 from .jdb_file import JFilesBase
-from .jdb_net import JNetFiles
 from .jdb_query import Condition
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
@@ -1106,7 +1105,7 @@ class JDb(JDbReader):
 
         return self
 
-    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]) -> JDb:
+    def create_jdb(self, KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None], ref:Optional[JDbReader]=None) -> JDb:
         """Create a new :class:`JDb` instance reusing this database's configuration.
         
         See :meth:`JDbReader.create_jdb` for details.
@@ -1118,15 +1117,26 @@ class JDb(JDbReader):
             JDb: A new JDb instance.
         """
         jio = self.io
-        return JDb(KEY_file=KEY_file,
+        jdb = JDb(KEY_file=KEY_file,
                     data_type=jio._data_type,
                     zip_type=jio._zip_type,
-                    reserved_rate=jio.reserved_rate,
-                    cache_limit=self._cache_limit,
                     key_limit=jio._key_limit,
-                    min_value_size=jio.min_value_size,
+                    cache_limit=self._cache_limit,
                     max_file_size=jio.max_file_size,
-                    index_size=jio.index_size)
+                    min_value_size=jio.min_value_size,
+                    index_size=jio.index_size,
+                    reserved_rate=jio.reserved_rate,
+                    api_ver=jio.api_ver,
+                    max_wsize=self.max_wsize,
+                    flags=self.flags,
+                    val_codec=jio._val_codec,
+                    key_codec=jio._key_codec,
+                    copy_files_obj=False)
+
+        if isinstance(ref, JDbReader):
+            jdb += ref
+
+        return jdb
 
     def pop(self, key:str, default_val:Optional[Any]=None) -> Any:
         """Retrieve a record and delete it from the database atomically.
@@ -1362,27 +1372,27 @@ class JDb(JDbReader):
             io, fp, key_fp = self.f_get_fp(fp)
             has_SIGINT = self.file_lock.has_SIGINT
             if level > 0:
-                for key in sorted(io.groups):
-                    if has_SIGINT():
-                        return
-
-                    jdb = self.f_get_group(fp, key)
-                    if isinstance(jdb, JDb):
-                        full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
-                        print(Style(f'Recycling .. {full_key} (merge={merge}, fill_zero={fill_zero})', green=1))
-                        jdb.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
+                f_get_group = self.f_get_group
+                for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                    if has_SIGINT(): return
+                    if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+                        group = f_get_group(fp, grp_name)
+                        if isinstance(group, JDb):
+                            full_key = f'{SEP_SYM}{grp_name}' if not parent else f'{parent}{SEP_SYM}{grp_name}'
+                            print(Style(f'Recycling .. {full_key} (merge={merge}, fill_zero={fill_zero})', green=1))
+                            group.recycle(parent=full_key, level=level-1, merge=merge, fill_zero=fill_zero)
 
             if io.n_records == 0:
                 io.update_file_table()
                 for file_id in io.file_table:
                     self.files_obj.VAL_remove(file_id)
 
-                io.n_lines = 0
                 io.file_table.clear()
                 io.key_table.clear()
+                io.groups.clear()
                 self._cache.clear()
                 io.seek(key_fp, 0)
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                io.n_lines = io.sync_id = io.swap_id = io.remv_id = 0
                 self.fsize = io.write_header(key_fp, truncate=True)
                 print(f'[Done|{"M" if merge else "C"}] empty! all VAL files removed, row:{io.n_records:,}/{io.n_lines:,} tb:{len(io.file_table)}')
                 return
@@ -1578,7 +1588,6 @@ class JDb(JDbReader):
 
         swap_id = remv_id = (int(time() * 1000 + randrange(1000)) * 2) % 1000
         file_table = {}
-        groups = {}
         with self.open(read_only=False, no_raise=True) as fp:
             io, fp, key_fp = self.f_get_fp(fp)
             io.update_file_table()
@@ -1586,11 +1595,17 @@ class JDb(JDbReader):
             swap_id += io.swap_id % 2
             remv_id += io.remv_id % 2
             io, fp, key_fp = self.f_get_fp(fp)
+            files_obj = self.files_obj
             f_get_group = self.f_get_group
-            for key in io.groups:
-                _jdb = f_get_group(fp, key)
-                if not isinstance(_jdb, JDbReader): continue
-                groups[key] = _jdb
+            for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+                    group_jdb = f_get_group(fp, grp_name)
+                    if isinstance(group_jdb, JDb) and files_obj.is_group(group_jdb.files_obj, grp_name):
+                        group_jdb.clear(agree='yes', wait_sec=0)
+                    try:
+                        files_obj.unlink_group(grp_name)
+                    except (NotImplementedError, TypeError, ValueError, IOError): # pragma: no cover
+                        pass
 
             io.data_type        = kwargs.get('data_type', io._data_type)
             io.zip_type         = kwargs.get('zip_type', io._zip_type)
@@ -1600,12 +1615,14 @@ class JDb(JDbReader):
             io.max_file_size    = kwargs.get('max_file_size', io.max_file_size)
             io.index_size       = kwargs.get('index_size', io.index_size)
             io.reserved_rate    = kwargs.get('reserved_rate', io.reserved_rate)
+            io._val_codec       = kwargs.get('val_codec', io._val_codec)
+            io._key_codec       = kwargs.get('key_codec', io._key_codec)
             io.sync_id          = 0
             io.swap_id          = swap_id + 1
             io.remv_id          = remv_id + 1
 
             for file_id in file_table:
-                if self.files_obj.VAL_remove(file_id):
+                if files_obj.VAL_remove(file_id):
                     print(f'\nremoved VAL file -> {file_id}') # pragma: no cover
 
             io.change_APIs(io.api_ver, io._data_type, io._zip_type, reset=True)
@@ -1613,8 +1630,14 @@ class JDb(JDbReader):
             io.load_keys(key_fp, force=True)
             self.fsize = io.file_size
 
-            for key,jdb in groups.items():
-                jdb.clear(agree='yes', wait_sec=0, **kwargs)
+            # Forget the group links too, the way upgrade() does. Clearing only
+            # the records would leave `group_table` pointing at the old
+            # backends, so a later add_group() with the same name would resolve
+            # to storage this database no longer owns instead of a fresh group.
+            try:
+                files_obj.unlink_group(None)
+            except (NotImplementedError, TypeError, ValueError, IOError): # pragma: no cover
+                pass
 
         return True
 
@@ -1701,7 +1724,7 @@ class JDb(JDbReader):
             io, fp, key_fp, _chg = self.f_get_write_fp(fp)
             n_lines = io.n_lines
             data_type_s = KEY_type_u + old_data_type_s[1:]
-            tmp_jdb = JDb(data_type=data_type_s, zip_type=io._zip_type, api_ver=api_ver, index_size=MIN_INDEX_SIZE)
+            tmp_jdb = JDb(data_type=data_type_s, zip_type=io._zip_type, api_ver=api_ver, index_size=MIN_INDEX_SIZE, val_codec=io._val_codec, key_codec=io._key_codec)
             with tmp_jdb.open(read_only=False) as dst_fp:
                 tmp_io, dst_fp, tmp_key_fp = tmp_jdb.f_get_fp(dst_fp)
                 tmp_io.sync_id = io.sync_id
@@ -1798,16 +1821,19 @@ class JDb(JDbReader):
         Returns:
             JDb: This database, after the upgrade.
         """
+        io = self.io
         if zip_type is None:
-            zip_type = self.io._zip_type
+            zip_type = io._zip_type
 
         if data_type is None:
-            data_type = self.io._data_type
+            data_type = io._data_type
 
         if not folder: # pragma: no cover
             folder = 'bak'
 
-        kwargs['api_ver'] = kwargs.get('api_ver', self.io.api_ver)
+        kwargs['api_ver'] = kwargs.get('api_ver', io.api_ver)
+        kwargs['val_codec'] = kwargs.get('val_codec', io._val_codec)
+        kwargs['key_codec'] = kwargs.get('key_codec', io._key_codec)
         path = self.files_obj.get_path(folder=folder)
         bak_jdb = JDb(path if path else None, data_type=data_type, zip_type=zip_type, **kwargs)
         bak_jdb = self.clone_to(bak_jdb, signal='b', data_type=data_type, zip_type=zip_type, fast_mode=fast_mode, **kwargs)
@@ -1991,10 +2017,35 @@ class JDb(JDbReader):
         target_jdb = JDb(path if path else None, zip_type=zip_type, data_type=data_type, **kwargs)
         return self.clone_to(target_jdb, data_type=data_type,  zip_type=zip_type, fast_mode=fast_mode, **kwargs)
 
-    def clone_to(self, target:Union[JDb,JFilesBase,str], signal:str='.', fast_mode:bool=True, max_file_size:Optional[int]=None, min_value_size:Optional[int]=None, index_size:Optional[int]=None, reserved_rate:Optional[float]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, cache_limit:int=0, api_ver:Optional[int]=None, val_codec:Optional[Any]=None, key_codec:Optional[Any]=None, **kwargs) -> JDb:
+    def clone_to(self, \
+            target:Union[JDb,JFilesBase,str], \
+            signal:str='.', \
+            fast_mode:bool=True, \
+            max_file_size:Optional[int]=None, \
+            min_value_size:Optional[int]=None, \
+            index_size:Optional[int]=None, \
+            reserved_rate:Optional[float]=None, \
+            data_type:Union[str,int,None]=None, \
+            zip_type:Union[str,int,None]=None, \
+            cache_limit:int=0, \
+            api_ver:Optional[int]=None, \
+            val_codec:Optional[Any]=None, \
+            key_codec:Optional[Any]=None, **kwargs) -> JDb:
+
         """Copy the entire database to a new target with optional format/config changes.
-        
+
         ``target`` can be a file path, a :class:`JFilesBase` object, or an existing :class:`JDb` to overwrite.
+
+        Groups are copied according to who owns their storage:
+
+        * An **owned** group (one living in this database's own group namespace,
+          per :meth:`JFilesBase.is_group`) is recreated under the target and
+          cloned recursively, so the copy is independent of the source.
+        * A **foreign** group (a separate database merely referenced by this one)
+          is re-referenced, not duplicated -- the target ends up pointing at the
+          very same database. Writes through either parent are therefore visible
+          to both, and copying a parent never silently duplicates a database it
+          does not own.
 
         Args:
             target (Union[JDb, JFilesBase, str]): Destination path, :class:`JFilesBase`, or an existing :class:`JDb` to overwrite.
@@ -2104,10 +2155,11 @@ class JDb(JDbReader):
 
                 old_file_table = dst_io.file_table.copy()
 
+                dst_files_obj = jdb.files_obj
                 for key in tuple(dst_io.groups):
-                    _jdb = jdb.f_get_group(dst_fp, key)
-                    if isinstance(_jdb, JDb):
-                        _jdb.clear(agree='yes', wait_sec=0)
+                    group = jdb.f_get_group(dst_fp, key)
+                    if isinstance(group, JDb) and dst_files_obj.is_group(group.files_obj, key):
+                        group.clear(agree='yes', wait_sec=0)
 
                 rand_id = (int(time() * 1000 + randrange(1000))) % 1000 + 1
                 swap_id = rand_id * 2 + dst_io.swap_id % 2 + 1
@@ -2138,7 +2190,8 @@ class JDb(JDbReader):
                 src_io_unpad = src_io.unpad
                 src_decode_row = self._decode_row
                 src_get_val_fp = self.f_get_val_fp
-                src_groups = src_io.groups
+                src_get_group = self.f_get_group
+                src_files_obj = self.files_obj
 
                 dst_io_write_key = dst_io.write_key
                 dst_io_pad = dst_io.pad
@@ -2147,20 +2200,39 @@ class JDb(JDbReader):
                 dst_groups = dst_io.groups
                 dst_files_obj = jdb.files_obj
                 dst_create_jdb = jdb.create_jdb
+                dst_write = jdb.f_write
                 dst_groups.clear()
-                dst_io.groups.clear()
-
-                src_files_obj = self.files_obj
-                for src_name, src_jdb in src_groups.items(): # pragma: no cover
-                    # an owned group must resolve to the DESTINATION's own storage,
-                    # so register the name only and let it be created lazily
-                    dst_groups[src_name] = None if src_jdb is None \
-                            or src_files_obj.is_group(src_jdb.files_obj, src_name) else src_jdb
 
                 if signal:
                     print(signal, end='', flush=True)
 
                 for (key, file_id, offset, row_size, val_size, _ver, days, kflags) in src_io.KEY_iter(key_fp_s, 0, src_io.n_records):
+                    if signal and ((dst_io.n_records + 1) % 1000) == 0: # pragma: no cover
+                        print(signal, end='', flush=True)
+
+                    if kflags & JKeyFlag.JDB:
+                        src_group = src_get_group(src_fp, key)
+                        if isinstance(src_group, JDbReader) and src_files_obj.is_group(src_group.files_obj, key):
+                            dst_group = dst_create_jdb(KEY_file=dst_files_obj.add_group(key))
+                            dst_write(dst_fp, key, dst_group, overwrite=True, flags=0)
+                            src_group.clone_to(dst_group,
+                                signal=signal,
+                                fast_mode=fast_mode,
+                                max_file_size=max_file_size,
+                                min_value_size=min_value_size,
+                                index_size=index_size,
+                                reserved_rate=reserved_rate,
+                                data_type=data_type,
+                                zip_type=zip_type,
+                                cache_limit=cache_limit,
+                                api_ver=api_ver,
+                                key_codec=key_codec,
+                                val_codec=val_codec, **kwargs)
+                        else:
+                            dst_write(dst_fp, key, src_group, overwrite=True, flags=0)
+
+                        continue
+
                     if row_size == 0:
                         try:
                             val = src_decode_row(file_id, offset, key, val_size)
@@ -2168,11 +2240,6 @@ class JDb(JDbReader):
                         except: # pragma: no cover
                             print(Style(f'Skip to read value {key} file_id:{file_id}+{offset} size:{val_size}/{row_size}', yellow=1))
                             continue
-
-                        if file_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
-                            val = dst_io.groups.get(key, None)
-                            if val is None:
-                                val = dst_io.groups[key] = dst_create_jdb(dst_files_obj.create_group(key))
 
                         if fast_mode:
                             dst_io.n_lines += 1 # before write key
@@ -2195,6 +2262,7 @@ class JDb(JDbReader):
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
                                 dst_io.max_vfiles = max(dst_io.max_vfiles, file_id_d+1)
+
                     else:
                         val_fp, __i, __o  = src_get_val_fp(src_fp, file_id)
                         if fast_mode:
@@ -2244,13 +2312,6 @@ class JDb(JDbReader):
                     dst_io.sync_id = (dst_io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     dst_io.n_records += 1
 
-                    group_jdb = src_groups.get(key, None)
-                    if isinstance(group_jdb, JDbReader) and not src_files_obj.is_group(group_jdb.files_obj, key): # pragma: no cover
-                        dst_groups[key] = group_jdb
-
-                    if signal and ((dst_io.n_records + 1) % 1000) == 0: # pragma: no cover
-                        print(signal, end='', flush=True)
-
                 key_fp_d.truncate()
                 jdb.fsize = dst_io.file_size = 0
                 files_obj = jdb.files_obj
@@ -2274,19 +2335,6 @@ class JDb(JDbReader):
                             if val_fp is not None:
                                 files_obj.fsync(val_fp.fileno())
                                 val_fp.close()
-
-                for key,s_jdb in src_io.groups.items():
-                    if isinstance(s_jdb, JDb):
-                        d_jdb = jdb.f_get_group(dst_fp, key)
-                        s_jdb.clone_to(d_jdb,
-                            signal=signal,
-                            data_type=data_type,
-                            zip_type=zip_type,
-                            max_file_size=max_file_size,
-                            min_value_size=min_value_size,
-                            index_size=index_size,
-                            reserved_rate=reserved_rate,
-                            cache_limit=cache_limit, **kwargs)
 
                 if src_io.swap_id == dst_io.swap_id:
                     dst_io.swap_id += (rand_id + 1)
@@ -2453,7 +2501,7 @@ class JDb(JDbReader):
         """Merge `patch` into every record (dict value) matching `condition`.
         
         Args:
-            conditon (Condition | dict): Condition for key/date/value filtering.
+            condition (Condition | dict): Condition for key/date/value filtering.
             patch (dict | Callable[[str,Any],Dict[str,Any]]): if condition is matched, update the corresponding value.
 
                 >>> patch = {'age': None} # delete 'age'
@@ -2742,8 +2790,6 @@ class JDb(JDbReader):
             parquet_file (Union[str, IO]): Source file path, or an open file-like/``pyarrow.NativeFile`` object.
             key (Optional[str], optional): Column to use as the record key. Defaults to the first schema column.
             columns (Optional[List[str]], optional): Subset of columns to read (column pruning); reads all columns if None.
-            flags (Optional[JFlag], optional): strategic operational behavioral modifiers flags. Defaults to None.
-            max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
             batch_size (int, optional): Rows fetched per ``RecordBatch`` while streaming. Defaults to 65536.
             **kwargs: Extra arguments passed through to ``pyarrow.parquet.ParquetFile``.
 
@@ -3375,19 +3421,19 @@ class JDb(JDbReader):
                 print(Style(f'[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{parent}] checking #{io.n_records:,}/{io.n_lines:,} [fix:{"Y" if fix_it else "N"}]', bright=1))
 
             io_read_key = io.read_key
+            f_get_group = self.f_get_group
             if level > 0: # pragma: no cover
-                for key in sorted(io.groups):
-                    if has_SIGINT():
-                        return error
+                for (grp_name, file_id, _offset, row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                    if has_SIGINT(): return error
+                    if kflags & JKeyFlag.JDB or file_id == 0x10 and row_size == 0:
+                        group = f_get_group(fp, grp_name)
+                        if isinstance(group, JDb):
+                            full_key = f'{SEP_SYM}{grp_name}' if not parent else f'{parent}{SEP_SYM}{grp_name}'
+                            _error = group.check_error(parent=full_key, level=level-1, fix_it=fix_it, verbose=False)
+                            for _row, _key in _error.items():
+                                error[f'{full_key}#{_row}'] = _key
 
-                    group = self.f_get_group(fp, key)
-                    if isinstance(group, JDb):
-                        full_key = f'{SEP_SYM}{key}' if not parent else f'{parent}{SEP_SYM}{key}'
-                        _error = group.check_error(parent=full_key, level=level-1, fix_it=fix_it, verbose=False)
-                        for _row, _key in _error.items():
-                            error[f'{full_key}#{_row}'] = _key
-
-                        print(Style(f'[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{full_key}] #{group.n_records:,}/{group.n_lines:,}! {len(_error)} -> {len(error)}', red=len(_error) > 0, green=not _error, bright=1))
+                            print(Style(f'[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{full_key}] #{group.n_records:,}/{group.n_lines:,}! {len(_error)} -> {len(error)}', red=len(_error) > 0, green=not _error, bright=1))
 
             for row_id in range(io.n_lines):
                 if has_SIGINT():
@@ -3757,33 +3803,40 @@ class JDb(JDbReader):
             raise KeyError
 
         with self.open(read_only=True) as fp:
-            jdb = self.f_get_group(fp, key)
-            if jdb is None:
-                jdb = self._decode_row(0x10, 0, key, 0)
-                self.f_write(fp, key, jdb)
-                self.io.groups[key] = jdb
+            group = self.f_get_group(fp, key)
+            if group is None:
+                group = self.create_jdb(KEY_file=self.files_obj.add_group(key))
+                self.f_write(fp, key, group)
 
-            return jdb
+            return group
 
     def del_group(self, key:str) -> Optional[JDb]:
-        """Delete a group (nested database).
+        """Remove the group record ``key`` from this database.
 
-        Returns the deleted group, or ``None`` if it doesn't exist.
+        Only the record is removed; the group's own data is left intact so that
+        :meth:`unremove` can bring it back. Destroying the group's storage is
+        :meth:`remove`'s job -- it gates that on :meth:`JFilesBase.is_group` so a
+        shared or linked group is never touched.
+
+        Note this is not the same operation as :meth:`JFilesBase.del_group`,
+        which does destroy the storage.
 
         Args:
             key (str): The group's key.
 
         Returns:
-            Optional[JDb]: The deleted group, or None if it doesn't exist.
+            Optional[JDb]: The removed group, or ``None`` if it doesn't exist.
         """
-        with self.open(read_only=True) as fp:
-            jdb = self.f_get_group(fp, key)
-            if isinstance(jdb, JDb):
-                self.f_delete(fp, key, read_value=False, flags=JFlag(0))
-                self.io.groups.pop(key, None)
-                return jdb
+        if not re_match(r'^\w+$', key):
+            raise KeyError
 
-        return None
+        with self.open(read_only=True) as fp:
+            group = self.f_get_group(fp, key)
+            if isinstance(group, JDb):
+                self.f_delete(fp, key, read_value=False, flags=JFlag(0))
+                return group
+
+            return group
 
     def f_change_days(self, fp_dict:Dict[int,IO], key:str, days:Union[int,float,str,dt_date,datetime]=-1) -> bool:
         """
@@ -4234,23 +4287,19 @@ class JDb(JDbReader):
                 if old_kflags & JKeyFlag.READONLY:
                     raise JKeyError(f'key[{key}] is read-only')
 
-                _type_id, _type_val, _type_size = self._encode_row(key, val)
-                # JDB is a property of the VALUE, never of the row's previous state.
-                # Derive it once here so every branch below -- inline row, VAL row,
-                # dead/new row -- agrees instead of only the inline ones.
+                # Attach BEFORE encoding: for a network-backed parent
+                # _set_group() creates the group on the server, which changes
+                # the files_obj that _encode_row() then inspects.
                 new_kflags = (int(key_flags) if key_flags is not None else old_kflags) & USER_FLAG_MASK
                 if isinstance(val, JDbReader):
                     new_kflags |= JKeyFlag.JDB
-                    if _type_id == 0x10:
-                        self._set_group(key, val)
+                    val = self._set_group(key, val)
 
+                _type_id, _type_val, _type_size = self._encode_row(key, val)
                 # (Exist + Header)
                 if row_size == 0:
                     if not checked and _type_id == file_id and _type_val == offset and _type_size == val_size:
                         # (Exist + Header == CHG + Header)
-                        if file_id == 0x10 and isinstance(val, JDbReader): # pragma: no cover
-                            self._set_group(key, val)
-
                         if cache_limit != 0:
                             self._update_cache(key, val, copy=True)
 
@@ -4480,14 +4529,14 @@ class JDb(JDbReader):
             break
 
         # (Not Exist)
-        _type_id, _type_val, _type_size = self._encode_row(key, val)
-
+        # attach BEFORE encoding (see f_write): creating the group changes the
+        # files_obj that _encode_row() then inspects
         new_kflags = 0 if key_flags is None else (int(key_flags) & USER_FLAG_MASK)
         if isinstance(val, JDbReader):
             new_kflags |= JKeyFlag.JDB
-            if _type_id == 0x10:
-                self._set_group(key, val)
+            val = self._set_group(key, val)
 
+        _type_id, _type_val, _type_size = self._encode_row(key, val)
         if _type_id >= 0:
             # [Not Exist, ADD + Header] -> use dead/new row
             safe_line, dead_row, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, 0, flags=flags, max_wsize=max_wsize)
@@ -4601,8 +4650,7 @@ class JDb(JDbReader):
         # JDB is a property of the VALUE, never of the caller's key_flags.
         if isinstance(val, JDbReader):
             new_kflags |= JKeyFlag.JDB
-            if _type_id == 0x10:
-                self._set_group(key, val)
+            val = self._set_group(key, val)
 
         if _type_id >= 0:
             # [Not Exist, ADD + Header] -> new row
@@ -4683,7 +4731,7 @@ class JDb(JDbReader):
 
         if is_group_key:
             # deleting a group: also drop any in-process group link so a later
-            # create_group()/add_group() with the same name resolves to fresh
+            # add_group() with the same name resolves to fresh
             # storage instead of the stale linked backend
             try:
                 self.files_obj.unlink_group(key)
@@ -4765,7 +4813,7 @@ class JDb(JDbReader):
             io_read_key = io.read_key
             if row is None:
                 _row = io.n_records
-                for (_key, file_id, offset, row_size, val_size, _ver, days, _kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
+                for (_key, file_id, offset, row_size, val_size, _ver, days, kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
                     if _key == key:
                         row = _row
                         break
@@ -4774,7 +4822,7 @@ class JDb(JDbReader):
                 if row is None:
                     return None
             else:
-                _key, file_id, offset, row_size, val_size, _ver, days, _kflags = io_read_key(key_fp, row)
+                _key, file_id, offset, row_size, val_size, _ver, days, kflags = io_read_key(key_fp, row)
                 if _key != key:
                     return None
 
@@ -4785,6 +4833,7 @@ class JDb(JDbReader):
 
             break
 
+        kflags |= (JKeyFlag.JDB if file_id == 0x10 and row_size == 0 else 0)
         dead_row = row
         n_lines = io.n_lines
         safe_h = n_records = io.n_records
@@ -4815,8 +4864,12 @@ class JDb(JDbReader):
 
         self._cache.pop(key, None)
 
+        if file_id == 0x10 and row_size == 0:
+            io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
+            kflags |= JKeyFlag.JDB
+
         # undelete key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
-        io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days)
+        io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days, flags=kflags)
 
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4853,7 +4906,7 @@ class JDb(JDbReader):
 
             if row is None:
                 _row = io.n_records
-                for (_key, file_id, offset, row_size, val_size, _ver, days, _kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
+                for (_key, file_id, offset, row_size, val_size, _ver, days, kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
                     if _key == key:
                         row = _row
                         break
@@ -4865,7 +4918,7 @@ class JDb(JDbReader):
                 if row < io.n_records:
                     return None
 
-                _key, file_id, offset, row_size, val_size, _ver, days, _kflags = io_read_key(key_fp, row)
+                _key, file_id, offset, row_size, val_size, _ver, days, kflags = io_read_key(key_fp, row)
                 if _key != key:
                     return None
 
@@ -4888,10 +4941,14 @@ class JDb(JDbReader):
             return None
 
         io_write_key = io.write_key
+        if file_id == 0x10 and row_size == 0:
+            io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
+            kflags |= JKeyFlag.JDB
+
         # old value: REC[n]-> DEAD[n]
         # new value -> REC[n]
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
-        io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days, flags=None)
+        io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days, flags=kflags)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         if key in self.chg_keys:
             self.chg_keys.remove(key)
@@ -4997,73 +5054,6 @@ class JDb(JDbReader):
 
         self.safe_line = io.n_records
         return io, fp_dict, key_fp, sync_id != io.sync_id
-
-    def _set_group(self, name:str, group_jdb:JDbReader) -> None:
-        """Attach ``group_jdb`` as this database's group ``name``.
-
-        The goal is that *every* view of this database — this handle, fresh
-        handles over the same storage, the server, and other network clients —
-        resolves ``name`` to the group's live storage:
-
-        - Network-backed parent (:class:`JNetFiles`) + standalone group: the
-          group's records are migrated into the server-side group and the
-          object is re-bound (:meth:`JDbReader.rebind`) onto that group via
-          :class:`JNetFiles`, becoming a live network client of the server's
-          storage. A locally-held group would be invisible to other
-          connections and to the server itself.
-        - Network-backed parent + group already backed by :class:`JNetFiles`
-          (e.g. previously assigned to another server): no data is moved; the
-          server is asked to :meth:`~JNetFiles.link_group` the group's remote
-          location, serving it as a chained proxy.
-        - Local parent: the live reference is kept in ``io.groups`` and the
-          group's storage is linked into the parent's in-process group
-          registry (:meth:`JFilesBase.link_group`), so fresh handles and
-          server connections resolve ``name`` to the group's actual storage.
-
-        Args:
-            name (str): The group name (a key of this database).
-            group_jdb (JDbReader): The database being attached as that group.
-
-        """
-        io = self.io
-        groups = io.groups
-        files_obj = self.files_obj
-        if name in groups or files_obj.is_group(group_jdb.files_obj, name):
-            # already this database's group namespace: nothing to link
-            groups[name] = group_jdb
-            return
-
-        if isinstance(files_obj, JNetFiles):
-            group_files = group_jdb.files_obj
-            if isinstance(group_files, JNetFiles):
-                # the group already lives on a server (possibly a different
-                # one): don't move its data — tell OUR server to serve group
-                # `name` by connecting to the group's remote location
-                # (chained JNetFiles proxy). Every view of this database then
-                # resolves `name` to the group's live storage.
-                files_obj.link_group(name, group_files)
-
-            else:
-                # standalone group: migrate its records into the server-side
-                # group, then re-bind the object itself onto that remote group
-                # via JNetFiles — it becomes a live network client of the
-                # server storage, so later writes are seen by the server and
-                # by every other connection
-                remote_jdb = self.create_jdb(files_obj.create_group(name))
-                remote_jdb += group_jdb # OMG clone again
-                group_jdb.rebind(remote_jdb)
-
-        else:
-            # local parent: link the group's storage into this parent's group
-            # registry so that fresh handles over the same storage (and network
-            # clients through the server) resolve `name` to the group's actual
-            # storage instead of an empty deterministic group
-            try:
-                files_obj.link_group(name, group_jdb.files_obj)
-            except (NotImplementedError, TypeError, KeyError): # pragma: no cover
-                pass
-
-        groups[name] = group_jdb
 
     @staticmethod
     def z_upgrade_API(KEY_path:Union[str,JDb]) -> JDb: # pragma: no cover

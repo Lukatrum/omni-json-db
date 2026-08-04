@@ -522,7 +522,6 @@ def run_omnijdb(mode, csv_path, k, workdir):
     MT.mark('point_query')
     res['point_query_r'] = total
 
-    # sum(old_data[k]['price'] for k in ids) != total and breakpoint()
     # -- filter_query: lambda full scan -----------------------------------------
     def filter_query():
         cnt = 0
@@ -583,8 +582,7 @@ def run_omnijdb(mode, csv_path, k, workdir):
 
     res['bulk_update_s'], _ = timed(bulk_update)
     MT.mark('bulk_update')
-    # any(v['price'] * 1.1 != jdb[k]['price'] for k,v in old_data.items() if v['category']  == 'toys') and breakpoint()
-
+    
     # -- point_insert: K single-key inserts -------------------------------------
     new_items = {str(n_rows + j): {'name': f'new-{j}',
                  'category': 'inserted', 'price': 9.99, 'qty': 1,
