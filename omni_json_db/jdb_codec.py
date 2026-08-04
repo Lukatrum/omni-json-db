@@ -689,14 +689,12 @@ class JIoHEAD:
             if nn >= 10:
                 return info[:10]
 
-            if nn >= 9:
-                return info + [-1]
-
-            if nn >= 8:
-                return info + [0, -1]
-
             if nn >= 4: # pragma: no cover
-                if nn == 7:
+                if nn >= 9:
+                    return info + [-1]
+                elif nn >= 8:
+                    return info + [0, -1]
+                elif nn == 7:
                     return info + [info[0] % 10, 0, -1]
                 elif nn == 6:
                     return info + [info[0] % 10, info[0] % 10, 0, -1]

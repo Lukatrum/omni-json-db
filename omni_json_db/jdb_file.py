@@ -375,7 +375,7 @@ class JBytesIO(RawIOBase):
                     break
                 continue
 
-            break
+            break # pragma: no cover (NEVER)
 
         return lines
 

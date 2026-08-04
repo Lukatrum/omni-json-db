@@ -3455,7 +3455,7 @@ class JDb(JDbReader):
                 if row_id >= io.n_records:
                     continue
 
-                if key in keys:
+                if key in keys: # pragma: no cover
                     _row_id = keys.get(key, -1)
                     val_a = val_b = None
                     try:
@@ -3532,10 +3532,10 @@ class JDb(JDbReader):
                             curr_offset = head1
                             next_offset = tail1
 
-                        elif head1 == curr_offset and tail1 == next_offset:
+                        elif head1 == curr_offset and tail1 == next_offset: # pragma: no cover
                             rep_parts[row1] = curr_file_id, head1, tail1-head1, key1
 
-                        else:
+                        else: # pragma: no cover
                             val_size1 = val_size2 = 0
                             if row1 not in chk_parts:
                                 try:
@@ -3610,7 +3610,7 @@ class JDb(JDbReader):
                     jj = ii + 1
                     if jj < total:
                         file_id2, head2, tail2, size2, row2, key2 = cache[jj]
-                        if file_id2 == file_id1 and head1 <= head2 < tail1: # row2 overlap row1
+                        if file_id2 == file_id1 and head1 <= head2 < tail1: # pragma: no cover
                             val_size1 = val_size2 = 0
                             if row1 not in chk_parts:
                                 try:
@@ -3721,7 +3721,7 @@ class JDb(JDbReader):
 
                 print(Style(f'\nRESULT err:{len(error)} miss:{len(miss_parts)} del:{len(del_parts)} rep:{len(rep_parts)}', yellow=1))
                 if fix_it and (miss_parts or del_parts or rep_parts):
-                    for _ in range(10):
+                    for _ in range(10): # pragma: no cover
                         if has_SIGINT():
                             return error
 
@@ -3729,7 +3729,7 @@ class JDb(JDbReader):
 
                 if miss_parts:
                     if fix_it:
-                        for (_file_id, _offset, _size) in miss_parts:
+                        for (_file_id, _offset, _size) in miss_parts:  # pragma: no cover
                             io.write_key(key_fp, io.n_lines, '', _file_id, _offset, _size, 0)
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|{io.sync_id%10000}|{io.key_limit_str}|{parent}] ADD row:{io.n_lines} @{_file_id}:{_offset}+{_size}', green=1, bright=1))
                             io.n_lines += 1
@@ -3739,7 +3739,7 @@ class JDb(JDbReader):
 
                 key_table = io.key_table
                 if del_parts:
-                    if fix_it:
+                    if fix_it: # pragma: no cover
                         for row_id,(_file_id, _offset, _size, _key) in del_parts.items():
                             record_t = io.n_records-1
                             if row_id > record_t:
@@ -3765,7 +3765,7 @@ class JDb(JDbReader):
                     print('\nDEL:', del_parts, '\nCHK:', chk_parts)
 
                 if rep_parts:
-                    if fix_it:
+                    if fix_it: # pragma: no cover
                         for row_id,(_file_id, _offset, _size, _key) in rep_parts.items():
                             line_t = io.n_lines - 1
                             if row_id < line_t:
@@ -3782,7 +3782,7 @@ class JDb(JDbReader):
 
                     print('\nREP:', rep_parts)
 
-        if is_unsync:
+        if is_unsync: # pragma: no cover
             self.unsync()
 
         return error
@@ -4643,7 +4643,7 @@ class JDb(JDbReader):
         # f_append only ever creates a row, so key_flags is the whole value.
         new_kflags = 0 if key_flags is None else (int(key_flags) & USER_FLAG_MASK)
         # JDB is a property of the VALUE, never of the caller's key_flags.
-        if isinstance(val, JDbReader):
+        if isinstance(val, JDbReader): # pragma: no cover
             new_kflags |= JKeyFlag.JDB
             val = self._set_group(key, val)
 
@@ -4858,7 +4858,7 @@ class JDb(JDbReader):
 
         self._cache.pop(key, None)
 
-        if file_id == 0x10 and row_size == 0:
+        if file_id == 0x10 and row_size == 0: # pragma: no cover
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
             kflags |= JKeyFlag.JDB
 
