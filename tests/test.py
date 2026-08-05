@@ -334,6 +334,261 @@ class TestJDb(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
+    def test_key_flag(self):
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            self.assertEqual(len(jdb), 0)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            # --------------------------------------------
+            # letter table: every flag owns a unique letter and round-trips
+            self.assertEqual(JKeyFlag('r'), JKeyFlag.READ_ONLY)
+            self.assertEqual(JKeyFlag('j'), JKeyFlag.JDB)
+            self.assertEqual(JKeyFlag('a'), JKeyFlag.APPEND_ONLY)
+            self.assertEqual(JKeyFlag('c'), JKeyFlag.NO_CACHE)
+            self.assertEqual(JKeyFlag('v'), JKeyFlag.NO_REVERT)
+            self.assertEqual(JKeyFlag('ac'), JKeyFlag.APPEND_ONLY | JKeyFlag.NO_CACHE)
+            self.assertEqual(JKeyFlag('RV'), JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT)
+            self.assertEqual(JKeyFlag('?'), JKeyFlag(0))  # unknown letters ignored
+            self.assertEqual(str(JKeyFlag('rv')), 'r___v')
+            self.assertEqual(str(JKeyFlag(0)), '_' * len(list(JKeyFlag)))
+            # NO_CACHE/NO_REVERT share an initial: __str__ must not collide
+            self.assertEqual(len({str(f) for f in JKeyFlag}), len(list(JKeyFlag)))
+            self.assertEqual(len({JKeyFlag(str(f).replace('_', '')) for f in JKeyFlag}), len(list(JKeyFlag)))
+
+            test_size = 32
+            expect = {f'key{v}': list(range(v+1)) for v in range(test_size)}
+            self.assertEqual(jdb.insert(expect), expect)
+            self.assertEqual(jdb, expect)
+
+            if jdb.api_ver < 2:
+                # no room in the index for flags: every request degrades silently
+                self.assertEqual(jdb.keys.set_flags(None, read_only=True, append_only=True,\
+                                                    no_cache=True, no_revert=True), {})
+
+                self.assertEqual(JKeyFlag(jdb.keys['key3'][7]), JKeyFlag(0))
+                jdb['key3'] = 'still writable'
+                self.assertEqual(jdb['key3'], 'still writable')
+                del jdb['key3']
+                self.assertFalse('key3' in jdb)
+
+                error = jdb.check_error()
+                self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
+                used_s = time.perf_counter() - st_time
+                fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+                print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+                continue
+
+            # ---------------- READ_ONLY ----------------
+            ro_key = 'key3'
+            ro_val = jdb[ro_key]
+            self.assertEqual(jdb.set_key_flags(ro_key, read_only=True), {ro_key: int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.get_key_flags(ro_key), {ro_key: int(JKeyFlag.READ_ONLY)})
+
+            jdb[ro_key] = 'blocked'                   # refused silently
+            self.assertEqual(jdb[ro_key], ro_val)
+            del jdb[ro_key]                           # refused silently
+            self.assertTrue(ro_key in jdb)
+            self.assertEqual(jdb.remove(ro_key), {})  # a locked row is never reported as deleted
+            self.assertTrue(ro_key in jdb)
+            self.assertEqual(jdb.pop(ro_key, -1), ro_val)
+            self.assertTrue(ro_key in jdb)
+            self.assertEqual(jdb.unmodify(ro_key), {})
+            self.assertEqual(jdb[ro_key], ro_val)
+            self.assertEqual(jdb, expect)
+
+            # set_flags is privileged: it is the only way back out
+            self.assertEqual(jdb.keys.set_flags(ro_key, read_only=False), {ro_key: 0})
+            jdb[ro_key] = 'writable again'
+            self.assertEqual(jdb[ro_key], 'writable again')
+            jdb.unmodify(ro_key)
+            self.assertEqual(jdb, expect)
+
+            # ---------------- JDB ----------------
+            sub_expect = {'g1': 1, 'g2': [2, 3]}
+            grp = jdb.add_group('grp')
+            self.assertTrue(isinstance(grp, JDb))
+            grp.insert(sub_expect)
+            self.assertEqual(grp, sub_expect)
+            self.assertEqual(jdb.keys.get_flags('grp'), {'grp': int(JKeyFlag.JDB)})
+
+            # the derived JDB bit must survive any flag rewrite, or the group
+            # becomes unreadable
+            self.assertEqual(jdb.keys.set_flags('grp', no_cache=True),\
+                             {'grp': int(JKeyFlag.JDB | JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb['grp'], sub_expect)
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write_key_flags(fp, 'grp', JKeyFlag.READ_ONLY))
+
+            self.assertEqual(JKeyFlag(jdb.keys['grp'][7]), JKeyFlag.READ_ONLY | JKeyFlag.JDB)
+            self.assertEqual(jdb['grp'], sub_expect)
+            self.assertEqual(jdb.keys.set_flags('grp', read_only=False), {'grp': int(JKeyFlag.JDB)})
+
+            # ... and it is never accepted from a caller either
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'plain', 10, key_flags=JKeyFlag.JDB | JKeyFlag.NO_CACHE))
+
+            self.assertEqual(jdb.keys.get_flags('plain'), {'plain': int(JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb['plain'], 10)
+
+            # a group-scoped selector is routed to the child index
+            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=True),\
+                             {'grp:::g1': int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(grp.keys.get_flags('g1'), {'g1': int(JKeyFlag.READ_ONLY)})
+
+            grp['g1'] = 'blocked'
+            self.assertEqual(grp, sub_expect)
+            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=False), {'grp:::g1': 0})
+
+            # ---------------- APPEND_ONLY ----------------
+            log_key = 'audit'
+            jdb[log_key] = [1]
+            self.assertEqual(jdb.keys.set_flags(log_key, append_only=True), {log_key: int(JKeyFlag.APPEND_ONLY)})
+
+            jdb[log_key] = [1, 2]                     # strict extension -> allowed
+            self.assertEqual(jdb[log_key], [1, 2])
+            jdb[log_key] = [1]                        # truncation -> refused
+            jdb[log_key] = [9, 2, 3]                  # rewrites history -> refused
+            jdb[log_key] = [1, 2]                     # equal is not growth -> refused
+            jdb[log_key] = 'not a list'               # type change -> refused
+            jdb[log_key] = [1, 2, 3, 4]               # extension -> allowed
+            self.assertEqual(jdb[log_key], [1, 2, 3, 4])
+
+            del jdb[log_key]                          # append-only forbids removal
+            self.assertTrue(log_key in jdb)
+            self.assertEqual(jdb.remove(log_key), {})
+            self.assertEqual(jdb.unmodify(log_key), {})  # and the unwrite back door
+            self.assertEqual(jdb[log_key], [1, 2, 3, 4])
+
+            jdb['txt'] = 'ab'
+            self.assertEqual(jdb.keys.set_flags('txt', append_only=True), {'txt': int(JKeyFlag.APPEND_ONLY)})
+            jdb['txt'] = 'abc'
+            self.assertEqual(jdb['txt'], 'abc')
+            jdb['txt'] = 'xabc'                       # not a suffix append -> refused
+            self.assertEqual(jdb['txt'], 'abc')
+
+            jdb['map'] = {'a': 1}
+            self.assertEqual(jdb.keys.set_flags('map', append_only=True), {'map': int(JKeyFlag.APPEND_ONLY)})
+            jdb['map'] = {'a': 1, 'b': 2}
+            self.assertEqual(jdb['map'], {'a': 1, 'b': 2})
+            jdb['map'] = {'a': 9, 'b': 2}             # changed an existing key -> refused
+            jdb['map'] = {'b': 2}                     # dropped an existing key -> refused
+            self.assertEqual(jdb['map'], {'a': 1, 'b': 2})
+
+            self.assertEqual(jdb.keys.set_flags(log_key, append_only=False), {log_key: 0})
+            jdb[log_key] = []
+            self.assertEqual(jdb[log_key], [])
+
+            # ---------------- NO_CACHE ----------------
+            blob = 'x' * 256
+            jdb['blob'] = blob
+            self.assertEqual(jdb['blob'], blob)
+            if cache_limit != 0:
+                self.assertTrue('blob' in jdb._cache)
+
+            self.assertEqual(jdb.keys.set_flags('blob', no_cache=True), {'blob': int(JKeyFlag.NO_CACHE)})
+            self.assertFalse('blob' in jdb._cache)    # turning it on evicts immediately
+            self.assertEqual(jdb['blob'], blob)
+            self.assertFalse('blob' in jdb._cache)    # a read never re-populates
+            jdb['blob'] = blob * 2
+            self.assertFalse('blob' in jdb._cache)    # nor does a write
+            self.assertEqual(jdb['blob'], blob * 2)
+
+            # neighbouring records keep using the cache
+            jdb['hot'] = 'hot'
+            self.assertEqual(jdb['hot'], 'hot')
+            self.assertEqual('hot' in jdb._cache, cache_limit != 0)
+
+            self.assertEqual(jdb.keys.set_flags('blob', no_cache=False), {'blob': 0})
+            self.assertEqual(jdb['blob'], blob * 2)
+            self.assertEqual('blob' in jdb._cache, cache_limit != 0)
+
+            # ---------------- NO_REVERT ----------------
+            # NOTE: adding a NEW key consumes the SAFE region, so create both
+            # rows first and only then give an existing key a history to protect.
+            jdb['cnt'] = 0
+            jdb['ctl'] = 0
+            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=True), {'cnt': int(JKeyFlag.NO_REVERT)})
+
+            hist_key = 'key5'
+            hist_val = jdb[hist_key]
+            jdb[hist_key] = 'changed'
+            n_lines = jdb.n_lines
+
+            for i in range(1, 64):
+                jdb['cnt'] = i
+
+            self.assertEqual(jdb['cnt'], 63)
+            self.assertEqual(jdb.n_lines, n_lines)     # not one dead row consumed
+            self.assertEqual(jdb.unmodify('cnt'), {})  # nothing was ever parked
+            self.assertEqual(jdb['cnt'], 63)
+
+            # the decision is per-row: another key's pending history survived
+            self.assertTrue(hist_key in jdb.unmodify(hist_key))
+            self.assertEqual(jdb[hist_key], hist_val)
+
+            # a control key without the flag does keep a previous version
+            for i in range(1, 64):
+                jdb['ctl'] = i
+
+            self.assertEqual(jdb['ctl'], 63)
+            self.assertTrue('ctl' in jdb.unmodify('ctl'))  # a previous version WAS parked
+            self.assertNotEqual(jdb['ctl'], 63)
+
+            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=False), {'cnt': 0})
+            jdb['cnt'] = 64
+            self.assertTrue('cnt' in jdb.unmodify('cnt'))
+            self.assertEqual(jdb['cnt'], 63)
+
+            # ---------------- flags survive a delete/undelete round-trip ----------------
+            jdb['ghost'] = 1
+            ghost_flags = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT)
+            self.assertEqual(jdb.keys.set_flags('ghost', no_cache=True, no_revert=True), {'ghost': ghost_flags})
+            del jdb['ghost']
+            self.assertFalse('ghost' in jdb)
+            self.assertTrue('ghost' in jdb.unremove('ghost'))
+            self.assertEqual(jdb['ghost'], 1)
+            self.assertEqual(jdb.keys.get_flags('ghost'), {'ghost': int(ghost_flags)})
+
+            # ---------------- set_flags: selectors and tri-state ----------------
+            jdb['sel1', 'sel2'] = 1
+            both = int(JKeyFlag.NO_CACHE)
+            self.assertEqual(jdb.keys.set_flags(['sel1', 'sel2'], no_cache=True), {'sel1': both, 'sel2': both})
+            self.assertEqual(jdb.keys.set_flags(re.compile(r'sel[12]$'), no_cache=True), {})  # already set
+            self.assertEqual(jdb.keys.set_flags('sel1'), {})                                  # all None -> no-op
+
+            both = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT)
+            self.assertEqual(jdb.keys.set_flags(Query().startswith('sel'), no_revert=True),\
+                             {'sel1': both, 'sel2': both})                                    # no_cache untouched
+            self.assertEqual(jdb.keys.set_flags('sel1', no_cache=False), {'sel1': int(JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb.keys.set_flags(lambda k: k.startswith('sel'), no_cache=False, no_revert=False),\
+                             {'sel1': 0, 'sel2': 0})
+
+            # a reader has no index to write to
+            self.assertRaises(AttributeError, JDbReader(jdb).set_key_flags, 'sel1', True)
+
+            # ---------------- teardown: unlock everything ----------------
+            jdb.keys.set_flags(None, read_only=False, append_only=False, no_cache=False, no_revert=False)
+            for _key, _meta in jdb.keys.items():
+                self.assertEqual(JKeyFlag(_meta[7]) & ~JKeyFlag.JDB, JKeyFlag(0), _key)
+
+            del jdb['grp:::g1']
+            self.assertEqual(grp, {'g2': [2, 3]})
+            jdb.remove(jdb)
+            self.assertEqual(len(jdb), 0)
+
+            error = jdb.check_error()
+            self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
     def test_graph(self):
         nodes = {
             'A': {'name': 'Alice', 'age': 25, 'email': 'alice@example.com', 'role': 'admin', 'tags': ['python', 'database']},
@@ -6319,11 +6574,11 @@ class TestJDb(unittest.TestCase):
                 with jdb.open() as fp:
                     ret = jdb.f_write(fp, 'key1', 10)
                     self.assertTrue(ret)
-                    ret = jdb.f_write_key_flags(fp, 'key1', JKeyFlag.READONLY)
+                    ret = jdb.f_write_key_flags(fp, 'key1', JKeyFlag.READ_ONLY)
                     self.assertTrue(ret)
-                    ret = jdb.f_write(fp, 'key2', 10, key_flags=JKeyFlag.READONLY|JKeyFlag.JDB)
+                    ret = jdb.f_write(fp, 'key2', 10, key_flags=JKeyFlag.READ_ONLY|JKeyFlag.JDB)
                     self.assertTrue(ret)
-                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READONLY)
+                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READ_ONLY)
                     self.assertFalse(ret)
 
                 ret = jdb.keys.set_flags(Query().endswith(('y1', 'y2')), read_only=False)
@@ -6346,7 +6601,7 @@ class TestJDb(unittest.TestCase):
                 with jdb.open() as fp:
                     ret = jdb.f_write_key_flags(fp, 'key1', 0)
                     self.assertTrue(ret)
-                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READONLY)
+                    ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READ_ONLY)
                     self.assertFalse(ret)
                     ret = jdb.f_write_key_flags(fp, 'key2', 0)
                     self.assertTrue(ret)

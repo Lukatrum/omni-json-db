@@ -16,7 +16,7 @@ from .jdb_net import JNetFiles
 from .jdb_query import QUERY_OPS, Condition, \
             sorted_by_rules, parse_group_by, grouped_by_rules, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
-from .utils import FileLock, Style, JError, JKeyError, JValueError, \
+from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeError, \
                 JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -165,9 +165,9 @@ class JDbKey:
             val (Any): The value payload to assign.
 
         Raises:
-            AttributeError: Always raised to enforce read-only integrity.
+            JAttributeError: Always raised to enforce read-only integrity.
         """
-        raise AttributeError('read only')
+        raise JAttributeError('read only')
 
     def __delitem__(self, key:Any):
         """Prevent item deletion from a read-only key interface.
@@ -176,9 +176,9 @@ class JDbKey:
             key (Any): The storage key to remove.
 
         Raises:
-            AttributeError: Always raised to enforce read-only integrity.
+            JAttributeError: Always raised to enforce read-only integrity.
         """
-        raise AttributeError('read only')
+        raise JAttributeError('read only')
 
     def __len__(self) -> int:
         """Get the total number of records in the associated database.
@@ -610,8 +610,57 @@ class JDbKey:
         """
         return self.jdb.has_all(keys)
 
-    def set_flags(self, key:Union[str,Any], read_only:Optional[bool]=None) -> Dict[str,int]:
-        raise AttributeError('read only')
+    def get_flags(self, key:Union[str,Any]=None) -> Dict[str,int]:
+        """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
+
+        Thin wrapper over :meth:`JDbReader.get_key_flags`; see there for the
+        full contract.
+
+        Args:
+            key (Union[str, Any], optional): Selector accepted by
+                :meth:`item_iter`. ``None`` matches every record. Defaults to None.
+
+        Returns:
+            Dict[str, int]: ``{key: flags}``, always a dict even for a single
+            key name. Values are plain ints; wrap them in :class:`JKeyFlag` to
+            test individual bits.
+
+        Example:
+            >>> jdb.keys.get_flags('audit/2026-08')
+            {'audit/2026-08': 20}
+        """
+        return self.jdb.get_key_flags(key)
+
+    def set_flags(self, key:Union[str,Any]=None,\
+                        read_only:Optional[bool]=None,\
+                        append_only:Optional[bool]=None,\
+                        no_cache:Optional[bool]=None,\
+                        no_revert:Optional[bool]=None) -> Dict[str,int]:
+        """Set or clear :class:`JKeyFlag` bits on every record matching ``key``.
+
+        Thin wrapper over :meth:`JDb.set_key_flags`; see there for the full
+        contract. Raises :class:`JAttributeError` on a read-only database.
+
+        Args:
+            key (Union[str, Any], optional): Selector accepted by
+                :meth:`item_iter`. ``None`` matches every record. Defaults to None.
+            read_only (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.READ_ONLY`. Defaults to None.
+            append_only (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.APPEND_ONLY`. Defaults to None.
+            no_cache (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.NO_CACHE`. Defaults to None.
+            no_revert (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.NO_REVERT`. Defaults to None.
+
+        Returns:
+            Dict[str, int]: ``{key: new_flags}`` for the records that changed.
+
+        Example:
+            >>> jdb.keys.set_flags('audit/2026-08', append_only=True, no_revert=True)
+            {'audit/2026-08': 20}
+        """
+        return self.jdb.set_key_flags(key, read_only, append_only, no_cache, no_revert)
 
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,tuple], None, None]:
         """
@@ -1827,7 +1876,7 @@ class JDbReader(JDbBase):
                     is_dirty = file_lock.mode == 'w'
                     for fp in fp_dict.values():
                         if fp is not None:
-                            if is_dirty and JFlag.FSYNC in flags: # pragma: no cover
+                            if is_dirty and JFlag.FSYNC & flags: # pragma: no cover
                                 files_obj.fsync(fp.fileno())
                             fp.close()
 
@@ -1943,6 +1992,10 @@ class JDbReader(JDbBase):
                 if not no_raise:
                     raise TypeError from e
 
+            except JAttributeError as e: # pragma: no cover
+                if not no_raise:
+                    raise AttributeError from e
+
             except JError as e: # pragma: no cover
                 if not no_raise:
                     raise RuntimeError from e
@@ -2017,7 +2070,7 @@ class JDbReader(JDbBase):
                         is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
                         for fp in fp_dict.values():
                             if fp is not None:
-                                if is_dirty and JFlag.FSYNC in flags:
+                                if is_dirty and JFlag.FSYNC & flags:
                                     files_obj.fsync(fp.fileno())
                                 fp.close()
 
@@ -3995,6 +4048,69 @@ class JDbReader(JDbBase):
             self.f_load_keys(fp, force=force)
             return self.io.key_table, self.io.file_table
 
+    def get_key_flags(self, key:Union[str,Any]=None) -> Dict[str,int]:
+        """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
+
+        Read-only and cheap: only KEY index rows are touched, values are never
+        decoded. On an API v0/v1 database, which has nowhere to store flags,
+        every record reports ``0``.
+
+        Note the return shape differs from ``jdb.keys['name']``: this always
+        yields a dict, even for a single key name, so one call site can handle
+        every selector. Values are plain ints rather than :class:`JKeyFlag`, to
+        stay comparable with the raw ``kflags`` field of a metadata tuple; wrap
+        them yourself to test individual bits.
+
+        Args:
+            key (Union[str, Any], optional): Selector accepted by
+                :meth:`JDbKey.item_iter` -- key name, ``'grp:::name'``, row
+                index, version, slice, date, ``Condition``, ``re.Pattern``,
+                callable or iterable. ``None`` matches every record.
+                Defaults to None.
+
+        Returns:
+            Dict[str, int]: ``{key: flags}`` for every matched record.
+
+        Example:
+            >>> jdb.get_key_flags('audit/2026-08')
+            {'audit/2026-08': 20}
+            >>> JKeyFlag(jdb.get_key_flags('audit/2026-08')['audit/2026-08'])
+            <JKeyFlag.APPEND_ONLY|NO_REVERT: 20>
+        """
+        has_SIGINT = self.file_lock.has_SIGINT
+        matched_keys = {}
+        for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate) in self.keys.item_iter(key):
+            if has_SIGINT():
+                break
+
+            matched_keys[_key] = old_kflags
+
+        return matched_keys
+
+    def set_key_flags(self, key:Union[str,Any]=None,\
+                        read_only:Optional[bool]=None,\
+                        append_only:Optional[bool]=None,\
+                        no_cache:Optional[bool]=None,\
+                        no_revert:Optional[bool]=None) -> Dict[str,int]:
+
+        """Not available on a reader: writing flags mutates the KEY index.
+
+        Overridden by :meth:`JDb.set_key_flags` on a writable database. The
+        signature is kept in sync so the two are interchangeable for typing.
+
+        Args:
+            key (Union[str, Any], optional): Unused. Defaults to None.
+            read_only (Optional[bool], optional): Unused. Defaults to None.
+            append_only (Optional[bool], optional): Unused. Defaults to None.
+            no_cache (Optional[bool], optional): Unused. Defaults to None.
+            no_revert (Optional[bool], optional): Unused. Defaults to None.
+
+        Raises:
+            JAttributeError: Always. It subclasses ``AttributeError``, so
+                ``except AttributeError`` still catches it.
+        """
+        raise JAttributeError('read only')
+
     def get(self, key:str, default_val:Any=None, copy:bool=True) -> Any:
         """Safely fetch a value for a specific key, returning a default if not found.
 
@@ -4261,7 +4377,7 @@ class JDbReader(JDbBase):
 
         return None
 
-    def _update_cache(self, key:str, val:Any, copy:bool=True):
+    def _update_cache(self, key:str, val:Any, copy:bool=True, key_flags:int=0):
         """Store a value in the in-memory read cache with LRU eviction: when
         the cache is full the least-recently-used entry is evicted, and the
         stored key is moved to the most-recently-used position. Does nothing
@@ -4272,7 +4388,18 @@ class JDbReader(JDbBase):
             val (Any): The deserialized value to cache.
             copy (bool, optional): Store a deep copy instead of the object
                 itself. Defaults to ``True``.
+            key_flags (int, optional): The record's :class:`JKeyFlag` bits. When
+                :attr:`JKeyFlag.NO_CACHE` is set the value is not stored and any
+                stale entry for ``key`` is evicted, so turning the flag on for a
+                record that is already cached takes effect immediately.
+                Defaults to ``0``.
         """
+        if key_flags & JKeyFlag.NO_CACHE:
+            # checked before cache_limit so a record that opted out is evicted
+            # even if the limit was lowered to 0 after it was cached
+            self._cache.pop(key, None)
+            return
+
         cache_limit = self._cache_limit
         if cache_limit != 0:
             _cache = self._cache
@@ -4288,7 +4415,12 @@ class JDbReader(JDbBase):
             _cache.move_to_end(key, last=True)
 
     def f_decode_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int, key_flags:int, update_cache:bool=True, copy:bool=False) -> Any:
-        with_cache = self._cache_limit != 0
+        if key_flags & JKeyFlag.NO_CACHE:
+            self._cache.pop(key, None)
+            with_cache = update_cache = False
+        else:
+            with_cache = self._cache_limit != 0
+
         val = self._cache.get(key, _MISSING) if with_cache else _MISSING
         if val is _MISSING:
             io = self.io
@@ -4329,7 +4461,7 @@ class JDbReader(JDbBase):
                     val = io.read_value(val_fp, offset, row_size, val_size)
 
                 if update_cache and with_cache:
-                    self._update_cache(key, val, copy=False)
+                    self._update_cache(key, val, copy=False, key_flags=key_flags)
 
             except Exception as e:
                 raise JTypeError from e

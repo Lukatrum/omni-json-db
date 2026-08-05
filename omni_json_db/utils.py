@@ -26,6 +26,9 @@ class JValueError(JError, ValueError):
 
 class JTypeError(JError, TypeError):
     pass
+
+class JAttributeError(JError, AttributeError):
+    pass
 #-----------------------------------------------------------------------------
 KEY_FLAG_MASK = 0xFFFF # on-disk width reserved for JKeyFlag
 
@@ -42,29 +45,38 @@ class JKeyFlag(IntFlag):
     the section, which Sphinx reports as a duplicate object description.
     """
 
-    #: ``'r'`` -- the record cannot be modified or deleted. Only whole-database
-    #: operations (``clear()`` / re-init) may remove it.
-    READONLY = 0x01
+    #: ``'r'`` -- the record cannot be modified or deleted.
+    READ_ONLY    = 0x01
 
-    #: ``'j'`` -- the record holds a group (child) database rather than an
-    #: ordinary value. Its value is normally the inline ``0x10`` marker, meaning
-    #: the group lives at ``files_obj.add_group(key)``; a foreign group stores
-    #: its KEY path as a string instead.
-    #:
-    #: The flag is authoritative: :meth:`JIo.write_key` sets it on every inline
-    #: group row and the KEY codecs synthesize it from the marker on every
-    #: ``loads_v*``, so callers test this bit alone and never the raw marker. Because the flag is on the
-    #: row itself, ``load_keys()`` can populate :attr:`JIo.groups` straight from
-    #: the index, which is what allowed the old separate ``JDb.childs`` registry
-    #: to be folded into ``JIo.groups``.
-    JDB      = 0x02
+    #: ``'j'`` -- the record holds a group (child) database. Always derived
+    #: from the stored value, never taken from a caller's ``key_flags``.
+    JDB         = 0x02
+
+    #: ``'a'`` -- the value may only grow. A write is accepted only when the
+    #: new value is a strict extension of the stored one (see
+    #: :func:`is_value_extension`); delete and unwrite are refused. Complements
+    #: :attr:`READ_ONLY`, which forbids growth as well.
+    APPEND_ONLY = 0x04
+
+    #: ``'c'`` -- never place this record's value in the LRU read cache, and
+    #: evict it if it is already there. For large blobs that would otherwise
+    #: flush ``cache_limit`` worth of small hot records.
+    NO_CACHE    = 0x08
+
+    #: ``'v'`` -- do not keep a previous version of this record. ``f_write``
+    #: rewrites the row in place even when :attr:`JFlag.REVERT` is active, so a
+    #: high-frequency counter does not grow the DEAD region without bound.
+    #: Only applies when the row can be reused (header->header, or
+    #: value->value that still fits); a write that changes the storage class
+    #: must move the row and still parks the old value for reclamation.
+    NO_REVERT   = 0x10
 
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
 
-        ``'r'`` = READONLY, ``'j'`` = JDB (e.g. ``JKeyFlag('rj')``). Unknown
-        letters are ignored.
+        e.g. ``JKeyFlag('ac')`` == ``APPEND_ONLY | NO_CACHE``. Unknown letters
+        are ignored.
 
         Args:
             value (Any): The letter string (case-insensitive) or an int.
@@ -73,12 +85,10 @@ class JKeyFlag(IntFlag):
             JKeyFlag: The combined flag instance.
         """
         if isinstance(value, str):
+            _by_letter = KEY_FLAG_BY_LETTER
             _value = 0
             for ch in value.lower():
-                if ch == 'r':
-                    _value |= JKeyFlag.READONLY
-                elif ch == 'j':
-                    _value |= JKeyFlag.JDB
+                _value |= _by_letter.get(ch, 0)
 
             value = _value
 
@@ -87,23 +97,87 @@ class JKeyFlag(IntFlag):
     def __str__(self) -> str:
         """Return a compact string showing which flags are active.
 
-        Each position holds the flag's lowercase initial when set, or ``'_'``
-        when not -- e.g. ``'rj'``, ``'r_'``, ``'__'``.
+        One position per entry of :data:`KEY_FLAG_LETTERS`, holding the flag's
+        letter when set and ``'_'`` when not -- e.g. ``'r_a_v'``.
 
         Returns:
             str: The flag summary string.
         """
-        return ''.join(flag.name[0].lower() if flag in self else '_' for flag in JKeyFlag)
+        return ''.join(ch if flag in self else '_' for flag, ch in KEY_FLAG_LETTERS.items())
 
+
+#: Canonical flag -> letter table. The order defines the layout of
+#: ``str(JKeyFlag)``: append new entries at the END so existing string
+#: positions stay stable for anything that parses them.
+KEY_FLAG_LETTERS = {
+    JKeyFlag.READ_ONLY:   'r',
+    JKeyFlag.JDB:         'j',
+    JKeyFlag.APPEND_ONLY: 'a',
+    JKeyFlag.NO_CACHE:    'c',
+    JKeyFlag.NO_REVERT:   'v',
+}
+
+KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
+
+# Guard against two flags claiming the same letter, which would make
+# JKeyFlag('x') silently resolve to only one of them and make __str__ ambiguous.
+# Deliberately not an ``assert``: those are stripped under ``python -O``.
+if len(KEY_FLAG_BY_LETTER) != len(KEY_FLAG_LETTERS): # pragma: no cover
+    raise RuntimeError(f'duplicate JKeyFlag letter in KEY_FLAG_LETTERS: {list(KEY_FLAG_LETTERS.values())}')
 
 # Bits a caller is allowed to set. JKeyFlag.JDB is excluded because it describes
 # what the stored VALUE is, not what the caller asked for, so it is always derived.
 #
 # NOTE: use this instead of ``~JKeyFlag.JDB``. On an IntFlag ``~`` complements
-# within the *defined* flags, so ``~JKeyFlag.JDB`` is ``JKeyFlag.READONLY`` (1),
-# not 0xFFFD -- ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
+# within the *defined* flags, so ``~JKeyFlag.JDB`` is not 0xFFFD --
+# ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
 USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.JDB)
 
+#: Flags that refuse a destructive rewrite or removal of an existing record.
+WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
+
+def is_value_extension(old: Any, new: Any) -> bool:
+    """Return ``True`` when *new* only adds to *old*.
+
+    Enforces :attr:`JKeyFlag.APPEND_ONLY`: a write is allowed only when every
+    element already stored is still present, unchanged, and in the same
+    position. Types with no meaningful append (scalars, ``bool``) always
+    return ``False``, which makes an append-only scalar effectively read-only.
+
+    Args:
+        old (Any): The currently stored value.
+        new (Any): The value the caller wants to write.
+
+    Returns:
+        bool: ``True`` if *new* is a strict extension of *old*.
+
+    Example:
+        >>> is_value_extension([1, 2], [1, 2, 3])
+        True
+        >>> is_value_extension([1, 2], [9, 2, 3])
+        False
+    """
+    if old is None:
+        return new is not None
+
+    if type(old) is not type(new):
+        return False
+
+    if isinstance(old, (str, bytes, bytearray)):
+        return len(new) > len(old) and new.startswith(old)
+
+    if isinstance(old, (list, tuple)):
+        return len(new) > len(old) and new[:len(old)] == old
+
+    if isinstance(old, dict):
+        return len(new) > len(old) and all(k in new and new[k] == v for k, v in old.items())
+
+    if isinstance(old, (set, frozenset)):
+        return len(new) > len(old) and old <= new
+
+    return False
+
+#-----------------------------------------------------------------------------
 class JFlag(IntFlag):
     """Enumeration flag to control write/delete behavior in database operations."""
 

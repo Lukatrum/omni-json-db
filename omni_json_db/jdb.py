@@ -15,11 +15,16 @@ from .jdb_io import JIo, KeyTable, MAX_INDEX_SIZE, \
         API_V2, g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
-        JKeyFlag, JFlag, USER_FLAG_MASK
+        JKeyFlag, JFlag, USER_FLAG_MASK, WRITE_LOCK_MASK, is_value_extension
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
+
+#: Returned by :meth:`JDb.f_delete` when the record carries a
+#: :data:`WRITE_LOCK_MASK` bit. A distinct object, because ``None`` is a
+#: legal stored value and callers must not report a locked row as deleted.
+_LOCKED = object()
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -51,7 +56,7 @@ class JDbKey2(JDbKey):
             val = JIo.z_conv_days(val) << NEW_DAY_SHIFT
 
         if not isinstance(val, int):
-            raise TypeError
+            raise JTypeError('invalid value')
 
         if isinstance(key, Pattern):
             is_matched = key.search
@@ -203,32 +208,6 @@ class JDbKey2(JDbKey):
                 row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
                 if row_id >= 0:
                     jdb.f_change_days(fp, key, val)
-
-    def set_flags(self, key:Union[str,Any], read_only:Optional[bool]=None) -> Dict[str,int]:
-        if read_only is not  None:
-            matched_keys = {}
-            for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate)  in self.item_iter(key):
-                new_kflags = old_kflags
-                if read_only is not None:
-                    if bool(new_kflags & JKeyFlag.READONLY) != bool(read_only):
-                        new_kflags ^= JKeyFlag.READONLY
-
-                if new_kflags != old_kflags:
-                    matched_keys[_key] = new_kflags
-
-            if matched_keys:
-                _matched_keys = {}
-                jdb = self.jdb
-                with jdb.open(read_only=False) as fp:
-                    f_write_key_flags = jdb.f_write_key_flags
-                    for _key,kflags in matched_keys.items():
-                        kflags = int(kflags)
-                        if f_write_key_flags(fp, _key, kflags):
-                            _matched_keys[_key] = kflags
-
-                return _matched_keys
-
-        return {}
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1181,7 +1160,8 @@ class JDb(JDbReader):
         """
         with self.open(read_only=True) as fp:
             try:
-                return self.f_delete(fp, key)
+                val = self.f_delete(fp, key)
+                return val if val is not _LOCKED else self.f_read(fp, key)
 
             # Not a gzipped file
             except OSError: # pragma: no cover
@@ -2370,6 +2350,110 @@ class JDb(JDbReader):
 
         return jdb
 
+    def set_key_flags(self, key:Union[str,Any]=None,\
+                        read_only:Optional[bool]=None,\
+                        append_only:Optional[bool]=None,\
+                        no_cache:Optional[bool]=None,\
+                        no_revert:Optional[bool]=None) -> Dict[str,int]:
+
+        """Set or clear :class:`JKeyFlag` bits on every record matching ``key``.
+
+        Only the KEY index rows are rewritten; values are never touched and no
+        row is allocated. Each keyword is tri-state: ``True`` sets the bit,
+        ``False`` clears it, ``None`` (the default) leaves it as it is, so
+        several flags can be adjusted in one pass without disturbing the rest.
+
+        This is a privileged operation: it deliberately ignores
+        :attr:`JKeyFlag.READ_ONLY` and :attr:`JKeyFlag.APPEND_ONLY`, because it
+        is the only way to unlock a record again.
+        :attr:`JKeyFlag.JDB` is derived from the stored value and is always
+        preserved. Records living inside a group (``'grp:::name'``) are routed
+        to that group's own index. Silently does nothing on an API v0/v1
+        database, which has nowhere to store flags, and stops early on SIGINT,
+        returning whatever it managed to write.
+
+        Overrides :meth:`JDbReader.set_key_flags`, which always raises.
+
+        Args:
+            key (Union[str, Any], optional): Selector accepted by
+                :meth:`JDbKey.item_iter` -- key name, ``'grp:::name'``, row index,
+                version, slice, date, ``Condition``, ``re.Pattern``, callable
+                or iterable. ``None`` matches every record. Defaults to None.
+            read_only (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.READ_ONLY`. Defaults to None.
+            append_only (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.APPEND_ONLY`. Defaults to None.
+            no_cache (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.NO_CACHE`. Defaults to None.
+            no_revert (Optional[bool], optional): Toggle
+                :attr:`JKeyFlag.NO_REVERT`. Defaults to None.
+
+        Returns:
+            Dict[str, int]: ``{key: new_flags}`` for the records that actually
+            changed. Records already holding the requested flags, and records
+            whose database predates API v2, are omitted.
+
+        Example:
+            >>> jdb.set_key_flags('audit/2026-08', append_only=True, no_revert=True)
+            {'audit/2026-08': 20}
+            >>> jdb.set_key_flags(re.compile(r'^blob/'), no_cache=True)
+            {'blob/model.bin': 8, 'blob/index.bin': 8}
+            >>> jdb.set_key_flags('audit/2026-08', append_only=False)
+            {'audit/2026-08': 16}
+        """
+        set_mask = clr_mask = 0
+        for _want, _bit in zip((read_only, append_only, no_cache, no_revert),
+                            (JKeyFlag.READ_ONLY, JKeyFlag.APPEND_ONLY, JKeyFlag.NO_CACHE, JKeyFlag.NO_REVERT)):
+
+            if _want is not None:
+                if _want:
+                    set_mask |= int(_bit)
+                else:
+                    clr_mask |= int(_bit)
+
+        if set_mask or clr_mask:
+            set_mask &= USER_FLAG_MASK
+            clr_mask &= USER_FLAG_MASK
+            pending = {}    # own records:  key -> new_flags
+            deferred = {}   # group records: grp_name -> {sub_key: new_flags}
+            for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate) in self.keys.item_iter(key):
+                new_kflags = ((int(old_kflags) | set_mask) & ~clr_mask) & USER_FLAG_MASK
+                new_kflags |= int(old_kflags) & int(JKeyFlag.JDB)
+                if new_kflags != int(old_kflags):
+                    idx = _key.find(SEP_SYM)
+                    if idx >= 0:
+                        # item_iter walked into a group; that row belongs to the child
+                        # index, so the parent's f_write_key_flags would never find it.
+                        deferred.setdefault(_key[:idx], {})[_key[idx+SEP_LEN:]] = new_kflags
+                    else:
+                        pending[_key] = new_kflags
+
+            matched_keys = {}
+            if pending:
+                has_SIGINT = self.file_lock.has_SIGINT
+                with self.open(read_only=False) as fp:
+                    f_write_key_flags = self.f_write_key_flags
+                    for _key,new_kflags in pending.items():
+                        if has_SIGINT():
+                            break
+
+                        if f_write_key_flags(fp, _key, new_kflags):
+                            matched_keys[_key] = new_kflags
+
+            for grp_name,sub_keys in deferred.items():
+                # copy=False: we need the live child handle, not a snapshot of it
+                group_jdb = self.get(grp_name, None, copy=False)
+                if isinstance(group_jdb, JDbReader):
+                    for _key,new_kflags in group_jdb.set_key_flags(
+                            list(sub_keys),
+                            read_only=read_only, append_only=append_only,
+                            no_cache=no_cache, no_revert=no_revert).items():
+                        matched_keys[grp_name + SEP_SYM + _key] = new_kflags
+
+            return matched_keys
+
+        return {}
+
     def setdefault(self, key:str, val:Any):
         """Set ``key`` to ``val`` only if ``key`` does not already exist.
 
@@ -3258,10 +3342,13 @@ class JDb(JDbReader):
                         f_delete = self.f_delete
                         io, fp, key_fp = self.f_get_fp(fp)
                         io_read_key = io.read_key
+                        key_table = io.key_table
                         for row_id in range(io.n_records-1, -1, -1):
                             if has_SIGINT(): break
                             key, _file_id, _offset, _row_size, _val_size, _ver, _days, _kflags = io_read_key(key_fp, row_id)
-                            ret[key] = f_delete(fp, key, row=row_id)
+                            val = f_delete(fp, key, row=row_id)
+                            if val is not _LOCKED:
+                                ret[key] = val
                     return ret
 
                 for kk in key:
@@ -3302,13 +3389,14 @@ class JDb(JDbReader):
                         # cleanup the sub database
                         jdb.remove_fast(jdb)
 
-                    ret[key] = val
+                    if val is not _LOCKED:
+                        ret[key] = val
 
                 except OSError: # pragma: no cover
-                    val = f_delete(fp, key, read_value=False)
+                    f_delete(fp, key, read_value=False)
                     ret[key] = None
 
-                except KeyError: # pragma: no cover
+                except (KeyError, ValueError, TypeError): # pragma: no cover
                     pass
 
             return ret
@@ -3925,7 +4013,7 @@ class JDb(JDbReader):
         io = self.io
         n_lines = io.n_lines
         n_records = io.n_records
-        if JFlag.REVERT in flags:
+        if JFlag.REVERT & flags:
             start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
             chg_keys = self.chg_keys
             if key not in chg_keys:
@@ -3939,7 +4027,7 @@ class JDb(JDbReader):
             row, file_id, offset, row_size = io.get_dead_row(safe_line, req_size)
             if n_lines > row >= safe_line:
                 if row_size >= req_size > 0:
-                    if JFlag.SPLIT in flags:
+                    if JFlag.SPLIT & flags:
                         min_value_size = io.min_value_size
                         split_size = max(min_value_size, int(req_size * (1 + io.reserved_rate)))
                         if row_size >= (split_size + max(64, min_value_size)):
@@ -3965,7 +4053,7 @@ class JDb(JDbReader):
                             return start_line, row, file_id, offset, row_size
 
                     elif row_size >= req_size:
-                        if JFlag.SPLIT in flags:
+                        if JFlag.SPLIT & flags:
                             min_value_size = io.min_value_size
                             split_size = max(min_value_size, int(req_size * (1 + io.reserved_rate)))
                             if row_size >= (split_size + max(64, min_value_size)):
@@ -3995,29 +4083,40 @@ class JDb(JDbReader):
         matches what is stored, so that fast path does not silently swallow an
         explicit ``key_flags`` request.
 
-        Unlike :meth:`f_write`, this does **not** honour :attr:`JKeyFlag.READONLY`.
-        That is deliberate -- it is the only way to clear the flag again -- so treat
-        it as a privileged operation.
+        Unlike :meth:`f_write`, this does **not** honour :attr:`JKeyFlag.READ_ONLY`
+        or :attr:`JKeyFlag.APPEND_ONLY`. That is deliberate -- it is the only way
+        to clear those flags again -- so treat it as a privileged operation.
 
         Args:
             fp_dict (Dict[int, IO]): Open file handles.
-            key (str): The record key, used to confirm ``row`` still holds it.
-            new_flags (int | JKeyFlag ): The flags to store, replacing whatever is there.
+            key (str): The record key, used to confirm the row still holds it.
+            new_flags (Union[int, JKeyFlag]): The flags to store, replacing
+                whatever is there. :attr:`JKeyFlag.JDB` is masked out and
+                re-taken from the stored row, so a group can never be turned
+                into an unreadable ordinary record by accident.
 
         Returns:
             bool: ``True`` if the row was rewritten, ``False`` if there was nothing
-            to change, ``row`` no longer holds ``key``, or the database is too old
+            to change, the row no longer holds ``key``, or the database is too old
             to store flags.
         """
         if self.io.api_ver >= API_V2:
             io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
             key_table = io.key_table
             row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
-            if row >= 0:
+            if io.n_records > row >= 0:
                 _key, file_id, offset, row_size, val_size, ver, days, old_kflags = io.read_key(key_fp, row)
+                # JDB describes what the VALUE is, so it is never taken from the
+                # caller. write_key() re-derives it for an inline group (0x10 +
+                # row_size 0) but NOT for a foreign group, whose value is a KEY
+                # path -- dropping the bit there would make the group unreadable.
+                new_flags = (int(new_flags) & USER_FLAG_MASK) | (int(old_kflags) & int(JKeyFlag.JDB))
                 if _key == key and old_kflags != new_flags:
                     io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, ver, days, flags=new_flags)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                    if new_flags & JKeyFlag.NO_CACHE:
+                        self._cache.pop(key, None)
+
                     return True
 
         return False
@@ -4042,7 +4141,22 @@ class JDb(JDbReader):
                 on a database older than API v2.
 
         Returns:
-            bool: True if the write succeeded, False otherwise.
+            bool: True if the write succeeded, False otherwise. A write is
+            *refused silently* (returns False, nothing is written) when the
+            stored record carries :attr:`JKeyFlag.READ_ONLY`, or when it carries
+            :attr:`JKeyFlag.APPEND_ONLY` and ``val`` is not a strict extension of
+            the stored value -- see :func:`is_value_extension`. Enforcing an
+            APPEND_ONLY row costs one extra value read, paid only by records that
+            opted in.
+
+            A record carrying :attr:`JKeyFlag.NO_REVERT` is rewritten in place
+            instead of parking its previous version in a dead row, even when
+            :attr:`JFlag.REVERT` is active. This applies only where the row can
+            be reused (header->header, or value->value that still fits); a write
+            that changes the storage class must move the row and still parks the
+            old value, because that dead row is what makes the old VAL bytes
+            reclaimable. The decision is per-row and never touches
+            :attr:`safe_line`, so the pending history of other keys survives.
 
         Raises:
             TypeError: If ``write_hook`` rejects the key/value.
@@ -4062,9 +4176,8 @@ class JDb(JDbReader):
         if len(key) > MAX_KEY_SIZE:
             raise JKeyError(f'key[{key}] too long (max={MAX_KEY_SIZE})')
 
-
-        flags = self.flags if flags is None else JFlag(flags)
-        can_revert = JFlag.REVERT in flags
+        flags = int(self.flags) if flags is None else int(flags)
+        can_revert = bool(JFlag.REVERT & flags)
         _cache = self._cache
         cache_limit = self._cache_limit
         checked = overwrite
@@ -4083,14 +4196,17 @@ class JDb(JDbReader):
                     checked = True
 
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-                if can_revert:
-                    safe_line = min(max(self.safe_line, io.n_records), io.n_lines)
-                else:
-                    safe_line = self.safe_line = io.n_records
-
                 _key, file_id, offset, row_size, val_size, _ver, old_days, old_kflags = row_info = io.read_key(key_fp, row)
-                if old_kflags & JKeyFlag.READONLY:
+                if old_kflags & JKeyFlag.READ_ONLY:
                     return False
+
+                if old_kflags & JKeyFlag.APPEND_ONLY:
+                    # The one flag that has to inspect the stored value; the extra
+                    # read is paid solely by records that opted in. Checked BEFORE
+                    # _set_group() so swapping a value for a group is refused too.
+                    _old_val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, old_kflags, update_cache=False, copy=False)
+                    if not is_value_extension(_old_val, val):
+                        return False
 
                 # Attach BEFORE encoding: for a network-backed parent
                 # _set_group() creates the group on the server, which changes
@@ -4100,13 +4216,21 @@ class JDb(JDbReader):
                     new_kflags |= JKeyFlag.JDB
                     val = self._set_group(key, val)
 
+                # NO_REVERT is a per-ROW decision: it selects the same-row rewrite
+                # branch below without clearing can_revert and without touching
+                # self.safe_line, so the pending history of every OTHER key in this
+                # session survives. self.safe_line is collapsed once per session by
+                # open(), never per write.
+                row_revert = can_revert and (new_kflags & JKeyFlag.NO_REVERT) == 0
+
+                safe_line = min(max(self.safe_line, io.n_records), io.n_lines)
                 _type_id, _type_val, _type_size = self._encode_row(key, val)
                 # (Exist + Header)
                 if row_size == 0:
                     if not checked and _type_id == file_id and _type_val == offset and _type_size == val_size:
                         # (Exist + Header == CHG + Header)
                         if cache_limit != 0:
-                            self._update_cache(key, val, copy=True)
+                            self._update_cache(key, val, copy=True, key_flags=new_kflags)
 
                         return self.f_write_key_flags(fp_dict, key, new_kflags) if new_kflags != old_kflags else False
 
@@ -4123,7 +4247,7 @@ class JDb(JDbReader):
 
                     if _type_id >= 0:
                         # (Exist + Header != CHG + Header) -> use dead/new row
-                        if not can_revert or key in self.chg_keys:
+                        if not row_revert or key in self.chg_keys:
                             # use same row
                             n_lines = io.n_lines
                             io.write_key(key_fp, row, key, _type_id, _type_val, 0, _type_size, days=old_days|CHG_DAY_FLAG, flags=new_kflags)
@@ -4148,7 +4272,7 @@ class JDb(JDbReader):
                         # without change key table and file table
                         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                         if cache_limit != 0:
-                            self._update_cache(key, val, copy=True)
+                            self._update_cache(key, val, copy=True, key_flags=new_kflags)
                         return True
 
                     # (Exist + Header != CHG + Value) -> use dead/new row
@@ -4184,7 +4308,7 @@ class JDb(JDbReader):
                     io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
+                        self._update_cache(key, val, copy=True, key_flags=new_kflags)
                     return True
 
                 new_row_size = row_size
@@ -4220,7 +4344,7 @@ class JDb(JDbReader):
                     # without change key table and file table
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
+                        self._update_cache(key, val, copy=True, key_flags=new_kflags)
                     return True
 
                 # (Exist + Value vs CHG + Value)
@@ -4264,7 +4388,7 @@ class JDb(JDbReader):
                             # (Exist + Value == CHG + Value)
                             if is_same:
                                 if cache_limit != 0:
-                                    self._update_cache(key, val, copy=True)
+                                    self._update_cache(key, val, copy=True, key_flags=new_kflags)
 
                                 # the value is unchanged, but an explicit key_flags still must land
                                 return self.f_write_key_flags(fp_dict, key, new_kflags) if new_kflags != old_kflags else False
@@ -4280,7 +4404,7 @@ class JDb(JDbReader):
                     if _row_info != row_info:
                         continue
 
-                if row_size >= new_val_size and (not can_revert or key in self.chg_keys):
+                if row_size >= new_val_size and (not row_revert or key in self.chg_keys):
                     # use same row
                     n_lines = io.n_lines
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
@@ -4289,7 +4413,7 @@ class JDb(JDbReader):
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG, flags=new_kflags)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                     if cache_limit != 0:
-                        self._update_cache(key, val, copy=True)
+                        self._update_cache(key, val, copy=True, key_flags=new_kflags)
                     return True
 
                 safe_line, dead_row, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
@@ -4321,7 +4445,7 @@ class JDb(JDbReader):
                 io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 if cache_limit != 0:
-                    self._update_cache(key, val, copy=True)
+                    self._update_cache(key, val, copy=True, key_flags=new_kflags)
                 return True
 
             # (Not Exist)
@@ -4397,7 +4521,7 @@ class JDb(JDbReader):
             io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
 
         if cache_limit != 0:
-            self._update_cache(key, val, copy=True)
+            self._update_cache(key, val, copy=True, key_flags=new_kflags)
 
         self.safe_line += (1 if not can_revert else 0)
         io.n_records += 1
@@ -4493,7 +4617,12 @@ class JDb(JDbReader):
             flags (Optional[JFlag], optional): strategic behavioral modifiers flags. Defaults to None.
 
         Returns:
-            Any: The deleted value, or the group :class:`JDb` if the key was a group.
+            Any: The deleted value, or the group :class:`JDb` if the key was a
+            group. Returns the private ``_LOCKED`` sentinel -- and deletes
+            nothing -- when the record carries :attr:`JKeyFlag.READ_ONLY` or
+            :attr:`JKeyFlag.APPEND_ONLY`. Callers that report what was removed
+            must test ``val is not _LOCKED`` rather than ``val is not None``,
+            because ``None`` is a legal stored value.
         """
         key = str(key) if not isinstance(key, str) else key
         self._cache.pop(key, None)
@@ -4513,11 +4642,12 @@ class JDb(JDbReader):
                 return None
 
         flags = self.flags if flags is None else JFlag(flags)
-        can_revert = JFlag.REVERT in flags
+        can_revert = bool(JFlag.REVERT & flags)
 
         _key, file_id, offset, row_size, val_size, _ver, days, kflags = io.read_key(key_fp, row)
-        if kflags & JKeyFlag.READONLY:
-            return None
+        if kflags & WRITE_LOCK_MASK:
+            # READ_ONLY and APPEND_ONLY both forbid removal
+            return _LOCKED
 
         if not key:
             key = _key
@@ -4576,7 +4706,7 @@ class JDb(JDbReader):
                 _safe_bytes = io.copy_key(key_fp, safe_t, record_t)
 
         # del key -> SAFE[t]
-        io.write_key(key_fp, safe_t, key, file_id, offset, row_size, val_size, days=days)
+        io.write_key(key_fp, safe_t, key, file_id, offset, row_size, val_size, days=days, flags=kflags & USER_FLAG_MASK)
         io.swap_id = swap_id
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4605,7 +4735,7 @@ class JDb(JDbReader):
             return None
 
         flags = self.flags if flags is None else flags
-        can_revert = JFlag.REVERT in flags
+        can_revert = bool(JFlag.REVERT & flags)
         self._cache.pop(key, None)
         tmp_row = row
         io = self.io
@@ -4670,7 +4800,9 @@ class JDb(JDbReader):
 
         if file_id == 0x10 and row_size == 0: # pragma: no cover
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
-            kflags |= JKeyFlag.JDB
+            kflags = (kflags & USER_FLAG_MASK) | JKeyFlag.JDB
+        else:
+            kflags &= USER_FLAG_MASK
 
         # undelete key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
         io.write_key(key_fp, safe_h, key, file_id, offset, row_size, val_size, days=days, flags=kflags)
@@ -4698,7 +4830,7 @@ class JDb(JDbReader):
 
         self._cache.pop(key, None)
         flags = self.flags if flags is None else JFlag(flags)
-        _can_revert = JFlag.REVERT in flags
+        _can_revert = bool(JFlag.REVERT & flags)
         file_id = offset = row_size = val_size = days = 0
         tmp_row = row
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
@@ -4741,7 +4873,8 @@ class JDb(JDbReader):
             return None
 
         _key, old_file_id, old_offset, old_row_size, old_val_size, _old_ver, old_days, old_kflags = io_read_key(key_fp, old_row)
-        if _key != key or old_kflags & JKeyFlag.READONLY:
+        if _key != key or old_kflags & WRITE_LOCK_MASK:
+            # reverting an APPEND_ONLY record would shrink it through the back door
             return None
 
         io_write_key = io.write_key
@@ -4749,6 +4882,7 @@ class JDb(JDbReader):
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
             new_kflags = (old_kflags & USER_FLAG_MASK) | JKeyFlag.JDB
         else:
+            io.groups.pop(key, None)
             new_kflags = old_kflags & USER_FLAG_MASK
 
         # old value: REC[n]-> DEAD[n]
