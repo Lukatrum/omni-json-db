@@ -204,6 +204,32 @@ class JDbKey2(JDbKey):
                 if row_id >= 0:
                     jdb.f_change_days(fp, key, val)
 
+    def set_flags(self, key:Union[str,Any], read_only:Optional[bool]=None) -> Dict[str,int]:
+        if read_only is not  None:
+            matched_keys = {}
+            for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate)  in self.item_iter(key):
+                new_kflags = old_kflags
+                if read_only is not None:
+                    if bool(new_kflags & JKeyFlag.READONLY) != bool(read_only):
+                        new_kflags ^= JKeyFlag.READONLY
+
+                if new_kflags != old_kflags:
+                    matched_keys[_key] = new_kflags
+
+            if matched_keys:
+                _matched_keys = {}
+                jdb = self.jdb
+                with jdb.open(read_only=False) as fp:
+                    f_write_key_flags = jdb.f_write_key_flags
+                    for _key,kflags in matched_keys.items():
+                        kflags = int(kflags)
+                        if f_write_key_flags(fp, _key, kflags):
+                            _matched_keys[_key] = kflags
+
+                return _matched_keys
+
+        return {}
+
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -3735,7 +3761,7 @@ class JDb(JDbReader):
                             io.n_lines += 1
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
 
-                    print('\nMISS:', miss_parts)
+                    print('\nMISS:', miss_parts, '\nDEL:', del_parts, '\nCHK:', chk_parts, '\nREP:', rep_parts)
 
                 key_table = io.key_table
                 if del_parts:
@@ -3762,8 +3788,6 @@ class JDb(JDbReader):
                             io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                             io.remv_id = (io.remv_id + 1) & 0X_7FF_FFFF_FFFF
 
-                    print('\nDEL:', del_parts, '\nCHK:', chk_parts)
-
                 if rep_parts:
                     if fix_it: # pragma: no cover
                         for row_id,(_file_id, _offset, _size, _key) in rep_parts.items():
@@ -3779,8 +3803,6 @@ class JDb(JDbReader):
                                 key_table.pop(_key, fp=key_fp)
                             else:
                                 key_table.pop(_key, 0)
-
-                    print('\nREP:', rep_parts)
 
         if is_unsync: # pragma: no cover
             self.unsync()
@@ -3965,7 +3987,7 @@ class JDb(JDbReader):
 
         return start_line, -1, 0, 0, 0
 
-    def f_write_key_flags(self, fp_dict:Dict[int,IO], key:str, new_flags:int) -> bool:
+    def f_write_key_flags(self, fp_dict:Dict[int,IO], key:str, new_flags:Union[int,JKeyFlag]) -> bool:
         """Replace the :class:`JKeyFlag` bits on one record, leaving its value alone.
 
         Only the KEY index row is rewritten: the VAL files are untouched and no row
@@ -3980,7 +4002,7 @@ class JDb(JDbReader):
         Args:
             fp_dict (Dict[int, IO]): Open file handles.
             key (str): The record key, used to confirm ``row`` still holds it.
-            new_flags (int): The flags to store, replacing whatever is there.
+            new_flags (int | JKeyFlag ): The flags to store, replacing whatever is there.
 
         Returns:
             bool: ``True`` if the row was rewritten, ``False`` if there was nothing
@@ -3999,218 +4021,6 @@ class JDb(JDbReader):
                     return True
 
         return False
-
-    def f_write_bytes(self, fp_dict:Dict[int,IO], key:str, val:bytes, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, key_flags:Optional[int]=None) -> bool:
-        """Internal: write a raw (already-serialized) byte value directly, bypassing normal encoding.
-
-        Args:
-            fp_dict (Dict[int, IO]): Open file handles.
-            key (str): The record key.
-            val (bytes): The raw bytes to write.
-            days (int, optional): Timestamp (days) to store with the record. Defaults to -1.
-            flags (Optional[JFlag], optional): Behavioral modifiers. Defaults to None.
-            max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
-            key_flags (Optional[int], optional): :class:`JKeyFlag` bits to store on
-                the record's KEY row. ``None`` (the default) keeps whatever the row
-                already has, and starts a new record at ``0``. Any other value
-                *replaces* the stored flags outright. :attr:`JKeyFlag.JDB` is never
-                taken from here -- it describes what the value is, so it is always
-                re-derived and any JDB bit passed in is ignored. Silently dropped
-                on a database older than API v2.
-
-        Returns:
-            bool: True if the write succeeded, False otherwise.
-        """
-        if isinstance(days, str): # pragma: no cover
-            try:
-                days = JIo.z_conv_str_to_days(days)
-            except ValueError: # pragma: no cover
-                days = -1
-
-        key = str(key) if not isinstance(key, str) else key
-        val = bytes(val) if isinstance(val, bytearray) else val
-        if not isinstance(val, bytes): # pragma: no cover
-            raise JTypeError('invalid value type')
-
-        if len(key) > MAX_KEY_SIZE:
-            raise JKeyError(f'key[{key}] too long (max={MAX_KEY_SIZE})')
-
-        flags = self.flags if flags is None else JFlag(flags)
-        can_revert = JFlag.REVERT in flags
-        _cache = self._cache
-        io = self.io
-        key_table = io.key_table
-        key_fp = fp_dict[-1] if fp_dict else None
-        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
-        while True:
-            if row >= 0:
-                # (Exist + Value|Header)
-                io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-                if can_revert:
-                    safe_line = min(max(self.safe_line, io.n_records), io.n_lines)
-                else:
-                    safe_line = self.safe_line = io.n_records
-
-                _key, file_id, offset, row_size, val_size, _ver, old_days, old_kflags = row_info = io.read_key(key_fp, row)
-                if old_kflags & JKeyFlag.READONLY:
-                    raise JKeyError(f'key[{key}] is read-only')
-
-                # raw bytes can never be a group JDb: drop any stale JDB bit
-                new_kflags = (int(key_flags) if key_flags is not None else old_kflags) & USER_FLAG_MASK
-
-                # (Exist + Header)
-                if row_size == 0:
-                    # (Exist + Header != CHG + Header/Value)
-                    io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
-                    if sync_chg: # pragma: no cover
-                        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
-                        if not io.n_records > row >= 0:
-                            continue
-
-                        _row_info = io.read_key(key_fp, row)
-                        if _row_info != row_info:
-                            continue
-
-                    # (Exist + Header != CHG + Value) -> use dead/new row
-                    data = val
-                    new_val_size = len(data)
-                    safe_line, dead_row, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
-                    n_lines = io.n_lines
-                    safe_h = io.n_records # n_records =
-                    if dead_row < 0: # use new_row
-                        dead_row = n_lines
-                        io.n_lines = n_lines = n_lines + 1 # MUST call write_key first
-                        data = io.pad(data, max_size=0)
-                        new_row_size = len(data)
-                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size) # create new space
-
-                    else: # use dead row
-                        new_file_id = dead_file_id
-                        new_offset = dead_offset
-                        new_row_size = dead_row_size
-                        val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
-
-                    val_fp.seek(new_offset)
-                    _write_size = val_fp.write(data)
-
-                    dead_h = safe_line
-                    if dead_row > dead_h: # pragma: no cover
-                        # DEAD[h] -> DEAD[t+1] or DEAD[m]
-                        _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)
-
-                    # old value -> DEAD[h]
-                    # new value -> REC[n]
-                    io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
-                    io.write_key(key_fp, row, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG, flags=new_kflags)
-                    _cache.pop(key, None)
-                    io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                    io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    return True
-
-                # (Exist + Value vs CHG + Value)
-                new_row_size = row_size
-                data = val
-                new_val_size = len(data)
-                if new_row_size >= new_val_size and val_size == new_val_size: # pragma: no cover
-                    # (Exist + Value != CHG + Value) use dead/new row
-                    io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
-                    if sync_chg:
-                        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
-                        if not io.n_records > row >= 0:
-                            continue
-
-                        _row_info = io.read_key(key_fp, row)
-                        if _row_info != row_info:
-                            continue
-
-                if row_size >= new_val_size and (not can_revert or key in self.chg_keys):
-                    # use same row
-                    _cache.pop(key, None)
-                    n_lines = io.n_lines
-                    val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
-                    val_fp.seek(offset)
-                    _write_size = val_fp.write(data)
-                    io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, days=old_days|CHG_DAY_FLAG, flags=new_kflags)
-                    io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                    return True
-
-                safe_line, dead_row, dead_file_id, dead_offset, dead_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
-                n_lines = io.n_lines
-                if dead_row < 0: # use new row
-                    dead_row = n_lines
-                    io.n_lines = n_lines = n_lines + 1  # MUST call write_key first
-                    data = io.pad(data, max_size=0)
-                    new_row_size = len(data)
-                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
-
-                else: # use dead row
-                    new_file_id = dead_file_id
-                    new_offset = dead_offset
-                    new_row_size = dead_row_size
-                    val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
-
-                val_fp.seek(new_offset)
-                _write_size = val_fp.write(data)
-                dead_h = safe_line
-                if dead_row > dead_h:
-                    # DEAD[h] -> DEAD[t+1] or DEAD[m]
-                    _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)
-
-                # old value -> DEAD[h]
-                # new value -> REC[n]
-                io.write_key(key_fp, dead_h, key, file_id, offset, row_size, val_size, days=old_days)
-                io.write_key(key_fp, row, key, new_file_id, new_offset, new_row_size, new_val_size, days=old_days|CHG_DAY_FLAG, flags=new_kflags)
-                _cache.pop(key, None)
-                io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                return True
-
-            # (Not Exist)
-            io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
-            if sync_chg: # pragma: no cover
-                row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
-                if row >= 0:
-                    continue
-
-            break
-
-        new_kflags = 0 if key_flags is None else (int(key_flags) & USER_FLAG_MASK)
-        # (Not Exist, ADD + Value) -> use dead/new row
-        data = val
-        new_val_size = len(data)
-        safe_line, dead_row, new_file_id, new_offset, new_row_size = self._get_dead_row(key_fp, key, new_val_size, flags=flags, max_wsize=max_wsize)
-        safe_h = io.n_records
-        n_lines = io.n_lines
-        if dead_row < 0: # use new row
-            dead_row = n_lines
-            io.n_lines = n_lines = n_lines + 1  # MUST call write_key first
-            data = io.pad(data, max_size=0)
-            new_row_size = len(data)
-            val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
-
-        # use dead row
-        else: # pragma: no cover
-            val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
-
-        val_fp.seek(new_offset)
-        _write_size = val_fp.write(data)
-        dead_h = safe_line
-        if dead_row > dead_h:
-            # DEAD[h] -> DEAD[t+1] or DEAD[m]
-            _dead_bytes = io.copy_key(key_fp, dead_h, dead_row)
-
-        # SAFE[h] -> DEAD[h]
-        _safe_bytes = io.copy_key(key_fp, safe_h, dead_h) if dead_h > safe_h else None
-
-        # new key -> SAFE[h] (= REC[t+1])
-        io.write_key(key_fp, safe_h, key, new_file_id, new_offset, new_row_size, new_val_size, days=days if days < 0 or days & NEW_DAY_MASK else days|CHG_DAY_FLAG, flags=new_kflags)
-        io.file_table[new_file_id] = max(io.file_table[new_file_id], new_offset + new_row_size)
-        _cache.pop(key, None)
-        self.safe_line += (1 if not can_revert else 0)
-        io.n_records += 1
-        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        io.key_table[key] = safe_h
-        return True
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, days:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False, key_flags:Optional[int]=None) -> bool:
         """Internal: serialize and write a value to the database (used by :meth:`set`, :meth:`add`, etc.).
@@ -4280,7 +4090,7 @@ class JDb(JDbReader):
 
                 _key, file_id, offset, row_size, val_size, _ver, old_days, old_kflags = row_info = io.read_key(key_fp, row)
                 if old_kflags & JKeyFlag.READONLY:
-                    raise JKeyError(f'key[{key}] is read-only')
+                    return False
 
                 # Attach BEFORE encoding: for a network-backed parent
                 # _set_group() creates the group on the server, which changes
@@ -4707,7 +4517,7 @@ class JDb(JDbReader):
 
         _key, file_id, offset, row_size, val_size, _ver, days, kflags = io.read_key(key_fp, row)
         if kflags & JKeyFlag.READONLY:
-            raise JKeyError(f'key[{_key}] is read-only')
+            return None
 
         if not key:
             key = _key
@@ -4930,19 +4740,21 @@ class JDb(JDbReader):
         if not io.n_records > old_row >= 0:
             return None
 
-        _key, old_file_id, old_offset, old_row_size, old_val_size, _old_ver, old_days, _kflags = io_read_key(key_fp, old_row)
-        if _key != key:
+        _key, old_file_id, old_offset, old_row_size, old_val_size, _old_ver, old_days, old_kflags = io_read_key(key_fp, old_row)
+        if _key != key or old_kflags & JKeyFlag.READONLY:
             return None
 
         io_write_key = io.write_key
         if file_id == 0x10 and row_size == 0:
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
-            kflags |= JKeyFlag.JDB
+            new_kflags = (old_kflags & USER_FLAG_MASK) | JKeyFlag.JDB
+        else:
+            new_kflags = old_kflags & USER_FLAG_MASK
 
         # old value: REC[n]-> DEAD[n]
         # new value -> REC[n]
         io_write_key(key_fp, dead_row, key, old_file_id, old_offset, old_row_size, old_val_size, days=old_days)
-        io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days, flags=kflags)
+        io_write_key(key_fp, old_row, key, file_id, offset, row_size, val_size, days=days, flags=new_kflags)
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         if key in self.chg_keys:
             self.chg_keys.remove(key)

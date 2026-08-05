@@ -257,16 +257,16 @@ class TestJDb(unittest.TestCase):
             {'KEY_file':'db/test_x9z1.jdb', 'api_ver':2, 'data_type':'S+J', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<8'},
 
                 # {'KEY_file':'db/test_10.jdb',    'api_ver':1, 'data_type':'S+P', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x10br.jdb', 'api_ver':2, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'<4'},
+            {'KEY_file':'db/test_x10br.jdb', 'api_ver':2, 'data_type':'S+P', 'zip_type':'br', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'bt'},
 
                 # {'KEY_file':'db/test_11.jdb',    'api_ver':1, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x11.jdb',  'api_ver':2, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' :  64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'bt'},
+            {'KEY_file':'db/test_x11.jdb',  'api_ver':2, 'data_type':'J+Y', 'zip_type':'no', 'max_file_size' :  64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'--'},
 
                 # {'KEY_file':'db/test_12.jdb',    'api_ver':1, 'data_type':'S+Y', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x12lz.jdb',  'api_ver':2, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l4'},
+            {'KEY_file':'db/test_x12lz.jdb',  'api_ver':2, 'data_type':'S+Y', 'zip_type':'lz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'--'},
 
                 # {'KEY_file':'db/test_13.jdb',    'api_ver':1, 'data_type':'J+U', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
-            {'KEY_file':'db/test_x13gz.jdb',  'api_ver':2, 'data_type':'J+U', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l3'},
+            {'KEY_file':'db/test_x13gz.jdb',  'api_ver':2, 'data_type':'J+U', 'zip_type':'gz', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'--'},
 
                 # {'KEY_file':'db/test_14.jdb',    'api_ver':1, 'data_type':'S+U', 'zip_type':'no', 'max_file_size' : 64 * 100, 'reserved_rate':None, 'cache_limit': 0, 'min_value_size': 16, 'index_size':256, 'key_limit':'--'},
             {'KEY_file':'db/test_x14z1.jdb',  'api_ver':2, 'data_type':'S+U', 'zip_type':'z1', 'max_file_size' : 64 * 100, 'reserved_rate': 0.2, 'cache_limit':0, 'min_value_size':128, 'index_size':64, 'key_limit':'l2'},
@@ -5355,9 +5355,9 @@ class TestJDb(unittest.TestCase):
             with jdb.open() as src_fp:
                 with jmem.open(read_only=False) as dst_fp:
                     for key in jdb.key_table:
-                        _bytes = jdb.f_read_bytes(src_fp, key)
+                        _bytes = jdb.io.VAL_dumps(jdb.f_read(src_fp, key))
                         self.assertTrue(len(_bytes) > 0)
-                        _ret = jmem.f_write_bytes(dst_fp, key, _bytes, max_wsize=0, flags=JFlag(0))
+                        _ret = jmem.f_write(dst_fp, key, jdb.io.VAL_loads(_bytes), max_wsize=0, flags=JFlag(0))
                         self.assertTrue(_ret)
 
                     # test nest file lock in write mode
@@ -5390,22 +5390,31 @@ class TestJDb(unittest.TestCase):
             with jmem.open(read_only=False) as fp:
                 for key,val in expect.items():
                     val_bytes = dumps(val, jmem.data_type[-1])
-                    jmem.f_write_bytes(fp, key, val_bytes, flags=JFlag.REVERT if key.endswith('1') else None)
+                    _val = loads(val_bytes, jmem.data_type[-1])
+                    self.assertEqual(val, _val)
+                    jmem.f_write(fp, key, _val, flags=JFlag.REVERT if key.endswith('1') else None)
+                    self.assertEqual(jmem.f_read(fp, key), val)
 
             self.assertEqual(jmem, expect)
 
             with jmem.open(read_only=False) as fp:
                 for key,val in expect.items():
                     val_bytes = dumps(0, jmem.data_type[-1])
-                    jmem.f_write_bytes(fp, key, val_bytes, flags=JFlag.REVERT)
+                    _val = loads(val_bytes, jmem.data_type[-1])
+                    self.assertEqual(_val, 0)
+                    jmem.f_write(fp, key, _val, flags=JFlag.REVERT)
+                    self.assertEqual(_val, jmem.f_read(fp, key))
 
-            self.assertEqual(set(jmem.values()), {0})
+            self.assertEqual(sum(jmem.values()), 0)
 
             expect = {f'key{v}':list(range(32-v)) for v in range(32)}
             with jmem.open(read_only=False) as fp:
                 for key,val in expect.items():
                     val_bytes = dumps(val, jmem.data_type[-1])
-                    jmem.f_write_bytes(fp, key, val_bytes, flags=JFlag.SPLIT)
+                    _val = loads(val_bytes, jmem.data_type[-1])
+                    self.assertEqual(_val, val)
+                    jmem.f_write(fp, key, _val, flags=JFlag.REVERT)
+                    self.assertEqual(_val, jmem.f_read(fp, key))
 
             self.assertEqual(jmem, expect)
 
@@ -5474,8 +5483,8 @@ class TestJDb(unittest.TestCase):
             jmem += {'k1':1, 'k2':list(range(64)), 'k3':list(range(64))}
             del jmem['k2', 'k3']
             with jmem.open() as fp:
-                jmem.f_write_bytes(fp, 'k1', jmem.io.dumps_with_zip(list(range(32))))
-                jmem.f_write_bytes(fp, 'k2', jmem.io.dumps_with_zip(list(range(16))))
+                jmem.f_write(fp, 'k1', list(range(32)))
+                jmem.f_write(fp, 'k2', list(range(16)))
 
             self.assertEqual(len(jmem), 2)
             self.assertEqual(jmem['k1'], list(range(32)))
@@ -6317,12 +6326,22 @@ class TestJDb(unittest.TestCase):
                     ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READONLY)
                     self.assertFalse(ret)
 
-                self.assertTrue(jdb['key1'] == jdb['key2'] == 10)
-                with self.assertRaises(KeyError):
-                    del jdb['key1']
+                ret = jdb.keys.set_flags(Query().endswith(('y1', 'y2')), read_only=False)
+                self.assertEqual(ret, {'key1':0, 'key2':0})
 
-                with self.assertRaises(KeyError):
-                    jdb['key2'] = list(range(16))
+                ret = jdb.keys.set_flags(re.compile(r'key[12]$'), read_only=False)
+                self.assertEqual(ret, {})
+
+                ret = jdb.keys.set_flags(['key1', 'key2'], read_only=True)
+                self.assertEqual(set(ret), {'key1', 'key2'})
+
+                self.assertTrue(jdb['key1'] == jdb['key2'] == 10)
+                del jdb['key1']
+                self.assertTrue('key1' in jdb)
+
+                old_val = jdb['key2']
+                jdb['key2'] = list(range(16))
+                self.assertEqual(jdb['key2'], old_val)
 
                 with jdb.open() as fp:
                     ret = jdb.f_write_key_flags(fp, 'key1', 0)
@@ -6331,7 +6350,6 @@ class TestJDb(unittest.TestCase):
                     self.assertFalse(ret)
                     ret = jdb.f_write_key_flags(fp, 'key2', 0)
                     self.assertTrue(ret)
-
             else:
                 jdb['key1', 'key2'] = 10
 

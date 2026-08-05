@@ -610,6 +610,9 @@ class JDbKey:
         """
         return self.jdb.has_all(keys)
 
+    def set_flags(self, key:Union[str,Any], read_only:Optional[bool]=None) -> Dict[str,int]:
+        raise AttributeError('read only')
+
     def item_iter(self, key:Optional[Any]=None) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over keys and their corresponding metadata tuples based on filter criteria.
