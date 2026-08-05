@@ -4710,7 +4710,7 @@ class JDb(JDbReader):
 
             if row is None:
                 _row = io.n_records
-                for (_key, file_id, offset, row_size, val_size, _ver, days, kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
+                for (_key, file_id, offset, row_size, val_size, _ver, days, _kflags) in io.KEY_iter(key_fp, _row, io._n_lines):
                     if _key == key:
                         row = _row
                         break
@@ -4722,7 +4722,7 @@ class JDb(JDbReader):
                 if row < io.n_records:
                     return None
 
-                _key, file_id, offset, row_size, val_size, _ver, days, kflags = io_read_key(key_fp, row)
+                _key, file_id, offset, row_size, val_size, _ver, days, _kflags = io_read_key(key_fp, row)
                 if _key != key:
                     return None
 
