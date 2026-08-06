@@ -23,7 +23,8 @@ from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
-        yaml_dumps, yaml_loads, UserCodecNotRegisteredError
+        yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
+        FULL_DAY_MASK
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -107,8 +108,18 @@ NUM_2000_DAYS   = 730119        # date(2000, 1, 1) - date(1,1,1)
 DAY_SEC         = 24*60*60
 NEW_DAY_SHIFT   = 26            # 0x400_0000
 OLD_DAY_MASK    = 0x3FF_FFFF    # 9999 years
-NEW_DAY_MASK    = OLD_DAY_MASK << NEW_DAY_SHIFT   # 9999 years (52 bits)
-CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)
+NEW_DAY_MASK    = 0x3F_FFFF << NEW_DAY_SHIFT   # modified-created delta, bits 26..47
+CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)       # caller-only signal, stripped before storing
+
+# On API v0/v1 there is no dedicated flags field, so the KEY codecs pack JKeyFlag
+# above `days` (see KEY_FLAG_SHIFT). That leaves `days` exactly FULL_DAY_MASK
+# wide, and the two must not overlap: a single shared bit would make JKeyFlag
+# READ_ONLY indistinguishable from a large modified-date delta, silently, on
+# every v0/v1 file. KEY_FLAG_SHIFT cannot simply be raised either -- msgpack
+# tops out at uint64, so days(48) + flags(16) is already the whole budget.
+if (NEW_DAY_MASK | OLD_DAY_MASK) & ~FULL_DAY_MASK: # pragma: no cover
+    raise RuntimeError(f'days field {hex(NEW_DAY_MASK | OLD_DAY_MASK)} overflows '
+                       f'FULL_DAY_MASK {hex(FULL_DAY_MASK)}; it would collide with JKeyFlag')
 
 # -1 = DEFAULT_BUFFER_SIZE (8192)
 # 0 = no buffering
@@ -1763,7 +1774,7 @@ class JIo(JIoBase):
         self.VAL_loads = val_obj.loads
 
         try:
-            test_row = ('7', 6, 5, 4, 3, 2, 1, 8 if version >= API_V2 else 0)
+            test_row = ('1', 2, 3, 4, 5, 6, 7, 8)
             if tuple(self.KEY_loads(self.KEY_dumps(*test_row))) != test_row: # pragma: no cover
                 raise TypeError
         except Exception as e:
@@ -1964,8 +1975,7 @@ class JIo(JIoBase):
             ver (Optional[int], optional): The version (write-session id); ``None`` uses the current ``sync_id``. Defaults to None.
             days (int, optional): The stored date in days; ``-1`` keeps the current date. Defaults to -1.
             flags (Optional[int], optional): :class:`JKeyFlag` bits for this record.
-                Silently dropped when ``api_ver < API_V2``. ``None`` (the default) is
-                treated as ``0``; it is used at call sites that deliberately reset the
+                ``None`` (the default) is treated as ``0``; it is used at call sites that deliberately reset the
                 flags, such as moving a row into the DEAD region. Rewrites of a live
                 record must forward the row's existing flags explicitly.
 
@@ -1983,12 +1993,12 @@ class JIo(JIoBase):
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
         if key and file_id == 0x10 and row_size == 0:
-            # JDB describes what the row IS, not what the caller asked for, so
+            # GROUP describes what the row IS, not what the caller asked for, so
             # derive it here -- the mirror image of the KEY codecs, which
             # synthesize it on every loads_v*. Without this the flag and the
             # inline 0x10 marker can disagree on disk (e.g. a row moved into the
             # DEAD area, where the other flags are deliberately reset).
-            flags |= int(JKeyFlag.JDB) # plain int: marshal/msgpack cannot encode an IntFlag
+            flags |= int(JKeyFlag.GROUP) # plain int: marshal/msgpack cannot encode an IntFlag
         data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days, flags)
         data_size = len(data)
         index_size = self.index_size
@@ -2048,7 +2058,6 @@ class JIo(JIoBase):
         Returns:
             Tuple[str,int,int,int,int,int,int,int]:
             ``(key, file_id, offset, row_size, val_size, ver, days, flags)``.
-            ``flags`` is always ``0`` on an API v0/v1 database.
         """
         _DEAD_rows = self._DEAD_rows
         _DEAD_rows.pop(row_id, None)
@@ -2426,7 +2435,7 @@ class JIo(JIoBase):
         swap_id         = self.swap_id
         remv_id         = self.remv_id
         sync_id         = self.sync_id
-        is_jdb_row      = lambda file_id,row_size,flags: bool(flags & JKeyFlag.JDB) or (file_id == 0x10 and row_size == 0)
+        is_group_row    = lambda file_id,row_size,flags: bool(flags & JKeyFlag.GROUP) or (file_id == 0x10 and row_size == 0)
         fast_mode       = isinstance(key_table, KeyTable)
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
@@ -2520,7 +2529,7 @@ class JIo(JIoBase):
                 if records < n_records:
                     for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
                         key_table[key] = records
-                        if is_jdb_row(file_id, row_size, flags): # pragma: no cover
+                        if is_group_row(file_id, row_size, flags): # pragma: no cover
                             self.groups.setdefault(key, None)
                         records += 1
 
@@ -2608,7 +2617,7 @@ class JIo(JIoBase):
             new_groups = set()
             for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
                 key_table[key] = records
-                if is_jdb_row(file_id, row_size, flags):
+                if is_group_row(file_id, row_size, flags):
                     new_groups.add(key)
                 records += 1
 

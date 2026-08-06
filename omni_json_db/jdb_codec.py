@@ -611,7 +611,10 @@ def _msg_decode(code:int, data:bytes):
 
     raise TypeError(f'code={code} data={data}')
 
-from .utils import JValueError, JKeyFlag
+from .utils import JValueError, JKeyFlag, KEY_FLAG_MASK
+
+FULL_DAY_MASK = 0xFFFF_FFFF_FFFF
+KEY_FLAG_SHIFT = 48
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -887,6 +890,7 @@ class JIoKEY_J(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row as a JSON array (v0 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -899,7 +903,9 @@ class JIoKEY_J(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
@@ -907,6 +913,7 @@ class JIoKEY_J(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row as a JSON array (v1 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -916,7 +923,9 @@ class JIoKEY_J(JIoKEY):
         """Parse a v1 JSON KEY row."""
         try:
             key, file_id, offset, row_size, val_size, ver, days = _json_loads(data)[:7]
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
@@ -943,6 +952,7 @@ class JIoKEY_S(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row with msgpack behind a 3-byte length prefix (v0 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -958,7 +968,9 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
-                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+                flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+                days &= FULL_DAY_MASK
+                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -968,6 +980,7 @@ class JIoKEY_S(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row with msgpack behind a 3-byte length prefix (v1 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days)) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -983,7 +996,9 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, val_size, ver, days = _msg_loads(data[3:end_idx])[:7]
-                return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+                flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+                days &= FULL_DAY_MASK
+                return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1020,6 +1035,7 @@ class JIoKEY_M(JIoKEY):
         """Serialize a KEY row with marshal (v0 layout); ``flags`` is dropped."""
         try:
             # nosemgrep
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1033,7 +1049,9 @@ class JIoKEY_M(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1044,6 +1062,7 @@ class JIoKEY_M(JIoKEY):
         """Serialize a KEY row with marshal (v1 layout); ``flags`` is dropped."""
         try:
             # nosemgrep
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1054,7 +1073,9 @@ class JIoKEY_M(JIoKEY):
         try:
             # nosemgrep
             key, file_id, offset, row_size, val_size, ver, days = marshal_loads(data)[:7] # nosec B302
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1087,6 +1108,7 @@ class JIoKEY_L(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row as comma-separated text (v0 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days}'
             return data.encode('utf8')
 
@@ -1123,7 +1145,9 @@ class JIoKEY_L(JIoKEY):
 
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1131,6 +1155,7 @@ class JIoKEY_L(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
         """Serialize a KEY row as comma-separated text (v1 layout); ``flags`` is dropped."""
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days}'
             return data.encode('utf8')
 
@@ -1148,7 +1173,9 @@ class JIoKEY_L(JIoKEY):
             n_fields = len(fields)
             key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
             file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
             raise JValueError from e
@@ -1312,6 +1339,7 @@ class JIoKEY_U(JIoKEY):
         if self._dumps is None: # pragma: no cover
             self._missing()
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1324,7 +1352,9 @@ class JIoKEY_U(JIoKEY):
 
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads(data)[:7]
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1336,6 +1366,7 @@ class JIoKEY_U(JIoKEY):
         if self._dumps_v0 is None: # pragma: no cover
             self._missing()
         try:
+            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
             return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1347,7 +1378,9 @@ class JIoKEY_U(JIoKEY):
             self._missing()
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads_v0(data)[:7]
-            return key, file_id, offset, row_size, val_size, ver, days, JKeyFlag.JDB if row_size == 0 and file_id == 0x10 else 0
+            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
+            days &= FULL_DAY_MASK
+            return key, file_id, offset, row_size, val_size, ver, days, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e

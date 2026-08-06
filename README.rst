@@ -119,6 +119,8 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Groups Mode`_]
 
+* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups. [refer to `Record Flags`_]
+
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
 
@@ -318,6 +320,102 @@ Groups Mode
    # find fruits which contain 'a' from all groups
    matches = jdb.find(r':::a')
    print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
+
+
+Record Flags
+------------
+Every record carries a set of ``JKeyFlag`` bits in the key index, giving it
+file-system-like attributes. Set them with a ``chmod``-style string: a bare
+letter or ``+`` sets a flag, ``-`` clears it, and anything you don't name keeps
+its current value.
+
+======  ===============  ============================================================================
+Letter  Flag             Effect
+======  ===============  ============================================================================
+``r``   ``READ_ONLY``    Writes and deletes are refused.
+``a``   ``APPEND_ONLY``  The value may only grow; shrinking, rewriting and deleting are refused.
+``h``   ``HIDDEN``       Skipped by ``find()`` / ``show()``; every other API still sees it.
+``c``   ``NO_CACHE``     Never enters the LRU read cache — keeps big blobs from evicting hot records.
+``v``   ``NO_REVERT``    No previous version is kept, so a hot counter never grows the index.
+``0``   ``USER0``        Free for your application (``0``–``3``); carries no engine behaviour.
+``g``   ``GROUP``        *Derived* — the record holds a group. Never settable.
+``l``   ``LINK``         *Derived* — a symbolic link; set it with ``set_link()``.
+======  ===============  ============================================================================
+
+.. code-block:: python
+
+   from omni_json_db import JDb, JKeyFlag
+
+   jdb = JDb()
+   jdb['config']        = {'theme': 'dark'}
+   jdb['audit/2026-08'] = ['created']
+
+   # read-only: writes are refused, silently
+   jdb.set_key_flags('config', 'r')
+   jdb['config'] = {'theme': 'light'}
+   print(jdb['config'])                    # Output: {'theme': 'dark'}
+
+   # append-only + no history: an audit log that can only grow
+   jdb.set_key_flags('audit/2026-08', 'av')
+   jdb['audit/2026-08'] = ['created', 'updated']   # extension -> allowed
+   jdb['audit/2026-08'] = ['wiped']                # not an extension -> refused
+   del jdb['audit/2026-08']                        # refused too
+   print(jdb['audit/2026-08'])             # Output: ['created', 'updated']
+
+   # inspect, then unlock again ('-r' clears only READ_ONLY)
+   print(str(JKeyFlag(jdb.get_key_flags('audit/2026-08')['audit/2026-08'])))
+                                           # Output: __a_v______
+   jdb.set_key_flags('config', '-r')
+   jdb['config'] = {'theme': 'light'}
+   print(jdb['config'])                    # Output: {'theme': 'light'}
+
+   # hidden: kept out of query results, but not a secret — items() still sees it
+   jdb['_scratch'] = 'internal'
+   jdb.set_key_flags('_scratch', 'h')
+   print(list(jdb.find()))                 # Output: ['config', 'audit/2026-08']
+   print(jdb['_scratch'])                  # Output: internal
+   print(list(jdb.find(with_hidden=True))) # Output: ['config', 'audit/2026-08', '_scratch']
+
+   # tag records for your own use, and combine flags freely
+   jdb.set_key_flags('config', '+0')       # USER0
+   jdb.keys.set_flags('config', '+c-0')    # add NO_CACHE, drop USER0
+
+Symbolic Links
+^^^^^^^^^^^^^^
+``set_link()`` points one key at another record, at a group, or at a key inside a
+group. Reads and writes are forwarded to the target; deleting the link leaves the
+target alone.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb()
+   reports = jdb.add_group('reports')
+   reports['2026-08'] = {'rows': 12}
+
+   # link to a record inside a group
+   jdb.set_link('latest', 'reports:::2026-08')
+   print(jdb['latest'])                    # Output: {'rows': 12}
+
+   jdb['latest'] = {'rows': 13}            # writes through to the target
+   print(reports['2026-08'])               # Output: {'rows': 13}
+
+   # link to a whole group, like a folder
+   jdb.set_link('current', 'reports')
+   print(jdb['current']['2026-08'])        # Output: {'rows': 13}
+
+   print(jdb.get_link('latest'))           # Output: reports:::2026-08
+   del jdb['latest']                       # removes the link only
+   print(reports['2026-08'])               # Output: {'rows': 13}
+
+.. note::
+
+   Flags are enforced by the library, not by the operating system — an older
+   release reading the same file will not know about newer flags. ``HIDDEN`` in
+   particular is **not** access control: it only filters ``find()`` and
+   ``show()``, so ``dict(jdb.items())`` still contains the record. A flag on a
+   group row applies to that row alone, not to the records inside the group.
 
 
 Graph Database
@@ -1843,3 +1941,4 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
+   

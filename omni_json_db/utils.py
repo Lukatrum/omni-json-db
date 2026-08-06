@@ -4,9 +4,10 @@ from enum import IntFlag
 from collections import defaultdict
 from contextlib import contextmanager
 from abc import ABCMeta
+from re import findall as re_findall
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, Tuple
 #-----------------------------------------------------------------------------
 try:
     import ipdb
@@ -29,15 +30,24 @@ class JTypeError(JError, TypeError):
 
 class JAttributeError(JError, AttributeError):
     pass
+
+MISSING = object()
+
+#: Returned by :meth:`JDb.f_delete` when the record carries a
+#: :data:`WRITE_LOCK_MASK` bit. A distinct object, because ``None`` is a
+#: legal stored value and callers must not report a locked row as deleted.
+LOCKED = object()
+
 #-----------------------------------------------------------------------------
 KEY_FLAG_MASK = 0xFFFF # on-disk width reserved for JKeyFlag
 
 class JKeyFlag(IntFlag):
-    """Per-record flags stored inside a KEY index row (API v2 and later).
+    """Per-record flags stored inside a KEY index row.
 
-    The flags travel with the row itself, so they survive defragmentation,
-    ``resize_keys()`` and swap/undelete round-trips. Reading an API v0/v1 file
-    always yields ``JKeyFlag(0)``.
+    Supported on every API version: v2 has a dedicated field, while v0/v1 pack
+    the bits above the ``days`` field (see ``KEY_FLAG_SHIFT``). The flags travel
+    with the row itself, so they survive defragmentation, ``resize_keys()`` and
+    swap/undelete round-trips.
 
     The members are documented individually below. Do not describe them again in
     a Google-style ``Attributes:`` section here: autodoc already emits one
@@ -46,22 +56,50 @@ class JKeyFlag(IntFlag):
     """
 
     #: ``'r'`` -- the record cannot be modified or deleted.
-    READ_ONLY    = 0x01
-
-    #: ``'j'`` -- the record holds a group (child) database. Always derived
-    #: from the stored value, never taken from a caller's ``key_flags``.
-    JDB         = 0x02
+    READ_ONLY = 0x01
 
     #: ``'a'`` -- the value may only grow. A write is accepted only when the
     #: new value is a strict extension of the stored one (see
     #: :func:`is_value_extension`); delete and unwrite are refused. Complements
     #: :attr:`READ_ONLY`, which forbids growth as well.
-    APPEND_ONLY = 0x04
+    APPEND_ONLY = 0x02
+
+    #: ``'g'`` -- the record holds a group (child) database. Always derived
+    #: from the stored value, never taken from a caller's ``key_flags``.
+    GROUP = 0x04
+
+    #: ``'l'`` -- the record is a symbolic link: its stored value is the name
+    #: of another record in the same database, and reads and writes are
+    #: forwarded there. Like :attr:`GROUP` this describes what the VALUE is, so
+    #: it is never taken from a caller's ``key_flags``; use ``set_link()``,
+    #: which enforces the two invariants that keep resolution a single hop:
+    #: a link may not point at a group (:attr:`GROUP`) and may not point at
+    #: another link. Deleting a link removes the link alone; deleting its
+    #: target leaves the link dangling, and a dangling link reads as ``None``
+    #: -- use ``get_link()`` to tell "points nowhere" apart from "stores None".
+    LINK = 0x08
+
+    #: ``'h'`` -- the record is excluded from query results. Only the three
+    #: query APIs honour it -- ``find()``, ``show()`` and ``jdb.keys(...)`` --
+    #: and each takes ``with_hidden=True`` to opt back in, the way ``ls -a``
+    #: shows dotfiles.
+    #:
+    #: **This is not access control.** Everything else treats a hidden record
+    #: as an ordinary one: ``items()``, ``values()``, ``item_iter()``,
+    #: ``jdb[:]``, ``iter()``, ``len()``, ``==``, ``check_error()``,
+    #: ``recycle()`` and cloning all include it, and a pattern-driven bulk
+    #: write or delete will reach it. Do not use this flag to keep a secret out
+    #: of a dump -- ``dict(jdb.items())`` still contains it.
+    #:
+    #: The scope is deliberately this narrow: it keeps every mapping-like API
+    #: (``list(jdb)``, ``items()``, ``values()``, ``len()``) in agreement, and
+    #: costs one extra key-row read only inside ``find_iter``.
+    HIDDEN = 0x10
 
     #: ``'c'`` -- never place this record's value in the LRU read cache, and
     #: evict it if it is already there. For large blobs that would otherwise
     #: flush ``cache_limit`` worth of small hot records.
-    NO_CACHE    = 0x08
+    NO_CACHE = 0x20
 
     #: ``'v'`` -- do not keep a previous version of this record. ``f_write``
     #: rewrites the row in place even when :attr:`JFlag.REVERT` is active, so a
@@ -69,18 +107,22 @@ class JKeyFlag(IntFlag):
     #: Only applies when the row can be reused (header->header, or
     #: value->value that still fits); a write that changes the storage class
     #: must move the row and still parks the old value for reclamation.
-    NO_REVERT   = 0x10
+    NO_REVERT = 0x40
 
-    #: ``'l'`` -- the record is a symbolic link: its stored value is the name
-    #: of another record in the same database, and reads and writes are
-    #: forwarded there. Like :attr:`JDB` this describes what the VALUE is, so
-    #: it is never taken from a caller's ``key_flags``; use ``set_link()``,
-    #: which enforces the two invariants that keep resolution a single hop:
-    #: a link may not point at a group (:attr:`JDB`) and may not point at
-    #: another link. Deleting a link removes the link alone; deleting its
-    #: target leaves the link dangling, and reading a dangling link raises
-    #: ``JKeyError``.
-    LINK        = 0x20
+    #: ``'0'`` -- free for the application. Carries no engine behaviour: it is
+    #: stored, round-trips through delete/undelete and defragmentation, and can
+    #: be filtered on, but nothing in JDb reads it. Use these instead of
+    #: forking the enum, so a future JKeyFlag never collides with your tag.
+    USER0 = 0x1000
+
+    #: ``'1'`` -- free for the application. See :attr:`USER0`.
+    USER1 = 0x2000
+
+    #: ``'2'`` -- free for the application. See :attr:`USER0`.
+    USER2 = 0x4000
+
+    #: ``'3'`` -- free for the application. See :attr:`USER0`.
+    USER3 = 0x8000
 
     @classmethod
     def _missing_(cls, value):
@@ -122,42 +164,134 @@ class JKeyFlag(IntFlag):
 #: positions stay stable for anything that parses them.
 KEY_FLAG_LETTERS = {
     JKeyFlag.READ_ONLY:   'r',
-    JKeyFlag.JDB:         'j',
+    JKeyFlag.GROUP:       'g',
     JKeyFlag.APPEND_ONLY: 'a',
     JKeyFlag.NO_CACHE:    'c',
     JKeyFlag.NO_REVERT:   'v',
     JKeyFlag.LINK:        'l',
+    JKeyFlag.HIDDEN:      'h',
+    JKeyFlag.USER0:       '0',
+    JKeyFlag.USER1:       '1',
+    JKeyFlag.USER2:       '2',
+    JKeyFlag.USER3:       '3',
 }
 
 KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
 
 # Guard against two flags claiming the same letter, which would make
-# JKeyFlag('x') silently resolve to only one of them and make __str__ ambiguous.
-# Deliberately not an ``assert``: those are stripped under ``python -O``.
+# JKeyFlag('x') and conv_to_key_flags('x') silently resolve to only one of them
+# and make __str__ ambiguous. Deliberately not an ``assert``: those are stripped
+# under ``python -O``.
 if len(KEY_FLAG_BY_LETTER) != len(KEY_FLAG_LETTERS): # pragma: no cover
     raise RuntimeError(f'duplicate JKeyFlag letter in KEY_FLAG_LETTERS: {list(KEY_FLAG_LETTERS.values())}')
 
 #: Flags that describe what the stored VALUE is rather than what a caller asked
-#: for. JDB means the value is a group; LINK means it is another record's name.
-#: Neither is ever taken from a ``key_flags`` argument: JDB is re-derived from
+#: for. GROUP means the value is a group; LINK means it is another record's name.
+#: Neither is ever taken from a ``key_flags`` argument: GROUP is re-derived from
 #: the row, LINK may only be established by ``set_link()``, which enforces the
 #: no-group / no-nesting invariants.
-DERIVED_FLAG_MASK = int(JKeyFlag.JDB | JKeyFlag.LINK)
+DERIVED_FLAG_MASK = int(JKeyFlag.GROUP | JKeyFlag.LINK)
 
 # Bits that survive on disk, e.g. into a DEAD row so delete/undelete round-trips
-# keep them. JDB is excluded because write_key() re-derives it from the inline
+# keep them. GROUP is excluded because write_key() re-derives it from the inline
 # 0x10 marker; LINK is included because nothing can re-derive it.
 #
-# NOTE: use these masks instead of ``~JKeyFlag.JDB``. On an IntFlag ``~``
-# complements within the *defined* flags, so ``~JKeyFlag.JDB`` is not 0xFFFD --
-# ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
-USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.JDB)
+# NOTE: use these masks instead of ``~JKeyFlag.GROUP``. On an IntFlag ``~``
+# complements within the *defined* flags, so ``~JKeyFlag.GROUP`` is not 0xFFFD --
+# ``x &= ~JKeyFlag.GROUP`` silently wipes every flag added after GROUP.
+USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.GROUP)
 
 #: Bits a caller is allowed to set through ``key_flags`` or ``set_key_flags()``.
 WRITABLE_FLAG_MASK = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 
 #: Flags that refuse a destructive rewrite or removal of an existing record.
 WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
+
+def conv_to_key_flags(flags:str) -> Tuple[int,int]:
+    """Parse a ``chmod``-style flag string into ``(set_mask, clear_mask)``.
+
+    Each letter is one :class:`JKeyFlag` (see :data:`KEY_FLAG_LETTERS`),
+    optionally prefixed by ``'+'`` to set it or ``'-'`` to clear it; a bare
+    letter means set. Parsing is case-insensitive, and letters that name no
+    flag are ignored, mirroring :meth:`JKeyFlag._missing_`.
+
+    The two masks are returned separately so callers can apply them *relative*
+    to a record's current flags -- ``(old | set_mask) & ~clear_mask`` -- which
+    is what makes ``'-c'`` mean "clear NO_CACHE, leave everything else alone".
+    Callers are responsible for masking the result with
+    :data:`WRITABLE_FLAG_MASK`; this function does not, so it can also be used
+    to build a mask that includes the derived :attr:`JKeyFlag.GROUP` /
+    :attr:`JKeyFlag.LINK` bits for inspection.
+
+    Args:
+        flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'+0+3'``.
+            A non-``str`` (or empty) argument yields ``(0, 0)``.
+
+    Returns:
+        Tuple[int, int]: ``(set_mask, clear_mask)``. A letter given both ways
+        (``'+r-r'``) ends up in both masks, and the clear wins when applied.
+
+    Example:
+        >>> conv_to_key_flags('ra')
+        (3, 0)
+        >>> conv_to_key_flags('+h-c')
+        (16, 32)
+        >>> conv_to_key_flags('-3')
+        (0, 32768)
+    """
+    set_mask = clr_mask = 0
+    if flags and isinstance(flags, str):
+        for flag in re_findall(r'[+-]?[a-z0-9]', flags.lower()):
+            val = KEY_FLAG_BY_LETTER.get(flag[-1:], None)
+            if val is not None:
+                if flag[0] == '-':
+                    clr_mask |= int(val)
+                else:
+                    set_mask |= int(val)
+
+    return set_mask, clr_mask
+
+def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:int=None) -> int:
+    """Resolve a caller's ``flags`` argument against a record's current flags.
+
+    The two accepted forms deliberately mirror ``chmod``:
+
+    * ``str`` -- **relative**. ``'+r'`` sets, ``'-r'`` clears, a bare ``'r'``
+      sets, and every flag not named keeps its current value.
+    * ``int`` / :class:`JKeyFlag` -- **absolute**. The value replaces the
+      record's flags wholesale.
+
+    ``None`` leaves the record's flags untouched.
+
+    Args:
+        old_flags (int): The record's current flags; ``0`` for a new record.
+        flags (Union[str, int, JKeyFlag, None]): The caller's request.
+        mask (int, optional): Bits the caller is allowed to affect.
+            Defaults to :data:`WRITABLE_FLAG_MASK`, which excludes the derived
+            :attr:`JKeyFlag.GROUP` / :attr:`JKeyFlag.LINK` bits.
+
+    Returns:
+        int: The resulting flags, already masked.
+
+    Example:
+        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), '+r')      # relative
+        33
+        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), '-c')
+        0
+        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), JKeyFlag.READ_ONLY)  # absolute
+        1
+    """
+    if mask is None:
+        mask = WRITABLE_FLAG_MASK
+
+    if flags is None:
+        return int(old_flags) & mask
+
+    if isinstance(flags, str):
+        set_mask, clr_mask = conv_to_key_flags(flags)
+        return ((int(old_flags) | set_mask) & ~clr_mask) & mask
+
+    return int(flags) & mask
 
 def is_value_extension(old: Any, new: Any) -> bool:
     """Return ``True`` when *new* only adds to *old*.
