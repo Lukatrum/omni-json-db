@@ -15,7 +15,8 @@ from .jdb_io import JIo, KeyTable, MAX_INDEX_SIZE, \
         API_V2, g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
-        JKeyFlag, JFlag, USER_FLAG_MASK, WRITE_LOCK_MASK, is_value_extension
+        JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
+        WRITE_LOCK_MASK, is_value_extension
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
 
@@ -2412,13 +2413,13 @@ class JDb(JDbReader):
                     clr_mask |= int(_bit)
 
         if set_mask or clr_mask:
-            set_mask &= USER_FLAG_MASK
-            clr_mask &= USER_FLAG_MASK
+            set_mask &= WRITABLE_FLAG_MASK
+            clr_mask &= WRITABLE_FLAG_MASK
             pending = {}    # own records:  key -> new_flags
             deferred = {}   # group records: grp_name -> {sub_key: new_flags}
             for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate) in self.keys.item_iter(key):
-                new_kflags = ((int(old_kflags) | set_mask) & ~clr_mask) & USER_FLAG_MASK
-                new_kflags |= int(old_kflags) & int(JKeyFlag.JDB)
+                new_kflags = ((int(old_kflags) | set_mask) & ~clr_mask) & WRITABLE_FLAG_MASK
+                new_kflags |= int(old_kflags) & DERIVED_FLAG_MASK
                 if new_kflags != int(old_kflags):
                     idx = _key.find(SEP_SYM)
                     if idx >= 0:
@@ -2453,6 +2454,136 @@ class JDb(JDbReader):
             return matched_keys
 
         return {}
+
+    def set_link(self, key:str, target:str) -> bool:
+        """Point ``key`` at ``target`` as a symbolic link.
+
+        The link stores ``target``'s path and carries :attr:`JKeyFlag.LINK`.
+        A target may be
+
+        * a plain record -- ``jdb.set_link('latest', 'report/2026-08')``
+        * a group, i.e. a link to a folder -- ``jdb.set_link('cur', 'archive')``
+        * a record inside a group, nested to any depth --
+          ``jdb.set_link('cur', 'archive:::2026-08')``
+
+        Targets are resolved relative to the database that owns the link, so
+        ``jdb.set_link('archive:::latest', 'x')`` creates the link *inside*
+        ``archive`` and resolves ``x`` there too.
+
+        Reads and writes through ``key`` are forwarded to ``target``. A link to
+        a folder reads as the group handle, so ``jdb[link][name]`` works;
+        assigning a value straight to such a link is refused, because that
+        would destroy a child database. Deleting ``key`` removes the link
+        alone; deleting ``target`` leaves the link dangling, so reading it
+        raises ``KeyError`` and :meth:`get` returns its default.
+
+        The one invariant enforced here is that **links never nest**: no
+        component of ``target`` may itself be a link. That keeps resolution
+        bounded by the path length, with no loop detection or depth limit --
+        and it is why a folder link is not traversable as a path component
+        (``jdb['cur:::2026-08']`` does not resolve; use ``jdb['cur']['2026-08']``).
+
+        Replacing an existing record with a link is allowed and discards the
+        old value, unless that record is a group or is locked by
+        :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY`.
+
+        Args:
+            key (str): The link's own key. May be a ``'grp:::name'`` path.
+            target (str): The path the link points at, relative to the database
+                that ends up owning the link. Must already exist.
+
+        Returns:
+            bool: ``True`` if the link was written, ``False`` if it was refused
+            or already pointed at ``target``.
+
+        Raises:
+            KeyError: If ``target`` does not exist, or ``key`` == ``target``.
+            TypeError: If any component of ``target`` is itself a link or a
+                non-final component is not a group, if ``key`` names a group, or
+                if the database predates API v2 and cannot store the flag.
+
+        Example:
+            >>> jdb['report/2026-08'] = {'rows': 12}
+            >>> jdb.set_link('latest', 'report/2026-08')
+            True
+            >>> jdb['latest']
+            {'rows': 12}
+            >>> jdb['latest'] = {'rows': 13}          # writes through
+            >>> jdb['report/2026-08']
+            {'rows': 13}
+            >>> archive = jdb.add_group('archive')
+            >>> archive['2026-08'] = [1, 2]
+            >>> jdb.set_link('cur', 'archive:::2026-08')
+            True
+            >>> jdb['cur']
+            [1, 2]
+            >>> jdb.set_link('folder', 'archive')     # link to a folder
+            True
+            >>> jdb['folder']['2026-08']
+            [1, 2]
+            >>> del jdb['latest']                     # removes the link only
+            >>> jdb['report/2026-08']
+            {'rows': 13}
+        """
+        key = str(key) if not isinstance(key, str) else key
+        target = str(target) if not isinstance(target, str) else target
+        if key == target:
+            raise JKeyError(f'link[{key}] cannot point at itself')
+
+        idx = key.find(SEP_SYM)
+        if idx >= 0:
+            # the link belongs to the group, and so does its target
+            group_jdb = self.get(key[:idx], None)
+            if not isinstance(group_jdb, JDb):
+                raise JKeyError(f'link[{key}] has no group[{key[:idx]}]')
+
+            return group_jdb.set_link(key[idx+SEP_LEN:], target)
+
+        with self.open(read_only=False) as fp:
+            if self.io.api_ver < API_V2:
+                raise JTypeError('key flags require API v2 or later')
+
+            # walk the whole target path: raises on a missing component, on a
+            # component that is itself a link, and on a non-final component that
+            # is not a group
+            kind, obj, rest = self.f_link_step(fp, key, target)
+            while kind == 'descend':
+                with obj.open(read_only=True) as grp_fp:
+                    kind, obj, rest = obj.f_link_step(grp_fp, key, rest)
+
+            io, fp, key_fp = self.f_get_fp(fp)
+            key_table = io.key_table
+            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            old_kflags = 0
+            if io.n_records > row >= 0:
+                _key, o_file_id, o_offset, o_row_size, o_val_size, _ver, _d, old_kflags = io.read_key(key_fp, row)
+                if old_kflags & JKeyFlag.JDB:
+                    raise JTypeError(f'key[{key}] is a group and cannot become a link')
+
+                if old_kflags & WRITE_LOCK_MASK:
+                    return False
+
+                if old_kflags & JKeyFlag.LINK and \
+                        target == self._f_decode_value(fp, key, o_file_id, o_offset, o_row_size, o_val_size):
+                    return False
+
+            # Store the target PATH as an ordinary value first: f_write refuses to
+            # take LINK from key_flags (it is a derived bit), and on an existing
+            # link it would follow the old target instead of retargeting.
+            if old_kflags & JKeyFlag.LINK:
+                self.f_delete(fp, key, read_value=False)
+
+            self._cache.pop(key, None)
+            if not self.f_write(fp, key, target, key_flags=old_kflags & WRITABLE_FLAG_MASK, overwrite=True):
+                return False # pragma: no cover
+
+            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            _key, file_id, offset, row_size, val_size, ver, days, new_kflags = io.read_key(key_fp, row)
+            new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | int(JKeyFlag.LINK)
+            io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, ver, days, flags=new_kflags)
+            io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+            self._cache.pop(key, None)
+            return True
 
     def setdefault(self, key:str, val:Any):
         """Set ``key`` to ``val`` only if ``key`` does not already exist.
@@ -4075,6 +4206,50 @@ class JDb(JDbReader):
 
         return start_line, -1, 0, 0, 0
 
+    def f_link_write(self, fp_dict:Dict[int,IO], key:str, target:str, val:Any,\
+                            days:Optional[Any]=None, flags:Optional[int]=None,\
+                            max_wsize:int=0, overwrite:bool=True) -> bool:
+        """Internal: write through a link to whatever it points at.
+
+        Walks the target path with :meth:`JDbReader.f_link_step`, descending
+        into groups as needed, and performs the write in the database that
+        actually owns the leaf record.
+
+        Args:
+            fp_dict (Dict[int, IO]): Open file handles of *this* database.
+            key (str): The link's own key, for error messages.
+            target (str): The target path, relative to this database.
+            val (Any): The value to store.
+            days (Optional[Any], optional): Passed to :meth:`f_write`. Defaults to None.
+            flags (Optional[int], optional): Passed to :meth:`f_write`. Defaults to None.
+            max_wsize (int, optional): Passed to :meth:`f_write`. Defaults to 0.
+            overwrite (bool, optional): Passed to :meth:`f_write`. Defaults to True.
+
+        Returns:
+            bool: ``True`` if the target was written. ``False`` when the write is
+            refused: a link to a folder cannot be overwritten by a value (use
+            ``jdb[link][name] = ...`` instead), and no write through a link may
+            turn its target into a group.
+        """
+        if isinstance(val, JDbReader):
+            # a link must never end up pointing at a group it did not point at
+            return False
+
+        kind, obj, rest = self.f_link_step(fp_dict, key, target)
+        if kind == 'group':
+            # the target is a folder; replacing it wholesale through the link
+            # would silently destroy a child database
+            return False
+
+        if kind == 'descend':
+            if not isinstance(obj, JDb): # pragma: no cover
+                return False
+
+            with obj.open(read_only=False) as grp_fp:
+                return obj.f_link_write(grp_fp, key, rest, val, days=days, flags=flags, max_wsize=max_wsize, overwrite=overwrite)
+
+        return self.f_write(fp_dict, obj, val, days=days, flags=flags, max_wsize=max_wsize, overwrite=overwrite)
+
     def f_write_key_flags(self, fp_dict:Dict[int,IO], key:str, new_flags:Union[int,JKeyFlag]) -> bool:
         """Replace the :class:`JKeyFlag` bits on one record, leaving its value alone.
 
@@ -4106,11 +4281,12 @@ class JDb(JDbReader):
             row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
             if io.n_records > row >= 0:
                 _key, file_id, offset, row_size, val_size, ver, days, old_kflags = io.read_key(key_fp, row)
-                # JDB describes what the VALUE is, so it is never taken from the
-                # caller. write_key() re-derives it for an inline group (0x10 +
-                # row_size 0) but NOT for a foreign group, whose value is a KEY
-                # path -- dropping the bit there would make the group unreadable.
-                new_flags = (int(new_flags) & USER_FLAG_MASK) | (int(old_kflags) & int(JKeyFlag.JDB))
+                # JDB and LINK describe what the VALUE is, so they are never taken
+                # from the caller. write_key() re-derives JDB for an inline group
+                # (0x10 + row_size 0) but NOT for a foreign group, whose value is a
+                # KEY path, and nothing can re-derive LINK -- dropping either bit
+                # would turn the record into an unreadable ordinary value.
+                new_flags = (int(new_flags) & WRITABLE_FLAG_MASK) | (int(old_kflags) & DERIVED_FLAG_MASK)
                 if _key == key and old_kflags != new_flags:
                     io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, ver, days, flags=new_flags)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -4200,6 +4376,13 @@ class JDb(JDbReader):
                 if old_kflags & JKeyFlag.READ_ONLY:
                     return False
 
+                if old_kflags & JKeyFlag.LINK:
+                    # Write through to the target, the way a symlink behaves.
+                    # key_flags is deliberately NOT forwarded -- it describes the
+                    # link row, not the record being written.
+                    target = self._f_decode_value(fp_dict, key, file_id, offset, row_size, val_size)
+                    return self.f_link_write(fp_dict, key, target, val, days=days, flags=flags, max_wsize=max_wsize, overwrite=overwrite)
+
                 if old_kflags & JKeyFlag.APPEND_ONLY:
                     # The one flag that has to inspect the stored value; the extra
                     # read is paid solely by records that opted in. Checked BEFORE
@@ -4211,7 +4394,7 @@ class JDb(JDbReader):
                 # Attach BEFORE encoding: for a network-backed parent
                 # _set_group() creates the group on the server, which changes
                 # the files_obj that _encode_row() then inspects.
-                new_kflags = (int(key_flags) if key_flags is not None else old_kflags) & USER_FLAG_MASK
+                new_kflags = (int(key_flags) if key_flags is not None else old_kflags) & WRITABLE_FLAG_MASK
                 if isinstance(val, JDbReader):
                     new_kflags |= JKeyFlag.JDB
                     val = self._set_group(key, val)
@@ -4460,7 +4643,7 @@ class JDb(JDbReader):
         # (Not Exist)
         # attach BEFORE encoding (see f_write): creating the group changes the
         # files_obj that _encode_row() then inspects
-        new_kflags = 0 if key_flags is None else (int(key_flags) & USER_FLAG_MASK)
+        new_kflags = 0 if key_flags is None else (int(key_flags) & WRITABLE_FLAG_MASK)
         if isinstance(val, JDbReader):
             new_kflags |= JKeyFlag.JDB
             val = self._set_group(key, val)
@@ -4575,7 +4758,7 @@ class JDb(JDbReader):
 
         _type_id, data, _type_size = self._encode_row(key, val)
         # f_append only ever creates a row, so key_flags is the whole value.
-        new_kflags = 0 if key_flags is None else (int(key_flags) & USER_FLAG_MASK)
+        new_kflags = 0 if key_flags is None else (int(key_flags) & WRITABLE_FLAG_MASK)
         # JDB is a property of the VALUE, never of the caller's key_flags.
         if isinstance(val, JDbReader): # pragma: no cover
             new_kflags |= JKeyFlag.JDB
@@ -4659,11 +4842,11 @@ class JDb(JDbReader):
         # Note the membership test happens BEFORE any pop: the group branch below
         # removes the entry, and unlink_group() must still run for it.
         is_group_key = key in io.groups or bool(kflags & JKeyFlag.JDB)
-        if read_value or is_group_key:
-            val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
-        else:
-            val = None
-
+        # follow_link=False: deleting a link removes the LINK, never its target,
+        # so report the target NAME. Following would also make deleting a
+        # dangling link raise instead of cleaning it up.
+        val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False, follow_link=False) \
+                            if read_value or is_group_key else None
         if is_group_key:
             # deleting a group: also drop any in-process group link so a later
             # add_group() with the same name resolves to fresh
@@ -4802,6 +4985,7 @@ class JDb(JDbReader):
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
             kflags = (kflags & USER_FLAG_MASK) | JKeyFlag.JDB
         else:
+            io.groups.pop(key, None)
             kflags &= USER_FLAG_MASK
 
         # undelete key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
@@ -4878,7 +5062,7 @@ class JDb(JDbReader):
             return None
 
         io_write_key = io.write_key
-        if file_id == 0x10 and row_size == 0:
+        if file_id == 0x10 and row_size == 0: # pragma: no cover
             io.groups[key] = self.create_jdb(KEY_file=self.files_obj.add_group(key))
             new_kflags = (old_kflags & USER_FLAG_MASK) | JKeyFlag.JDB
         else:

@@ -352,11 +352,13 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(JKeyFlag('a'), JKeyFlag.APPEND_ONLY)
             self.assertEqual(JKeyFlag('c'), JKeyFlag.NO_CACHE)
             self.assertEqual(JKeyFlag('v'), JKeyFlag.NO_REVERT)
+            self.assertEqual(JKeyFlag('l'), JKeyFlag.LINK)
             self.assertEqual(JKeyFlag('ac'), JKeyFlag.APPEND_ONLY | JKeyFlag.NO_CACHE)
             self.assertEqual(JKeyFlag('RV'), JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT)
             self.assertEqual(JKeyFlag('?'), JKeyFlag(0))  # unknown letters ignored
-            self.assertEqual(str(JKeyFlag('rv')), 'r___v')
-            self.assertEqual(str(JKeyFlag(0)), '_' * len(list(JKeyFlag)))
+            self.assertEqual(set(str(JKeyFlag('rv'))), {'r', 'v', '_'})
+            self.assertEqual(set(str(JKeyFlag('jl'))), {'j', 'l', '_'})
+            self.assertEqual(set(str(JKeyFlag(0))), {'_'})
             # NO_CACHE/NO_REVERT share an initial: __str__ must not collide
             self.assertEqual(len({str(f) for f in JKeyFlag}), len(list(JKeyFlag)))
             self.assertEqual(len({JKeyFlag(str(f).replace('_', '')) for f in JKeyFlag}), len(list(JKeyFlag)))
@@ -368,14 +370,14 @@ class TestJDb(unittest.TestCase):
 
             if jdb.api_ver < 2:
                 # no room in the index for flags: every request degrades silently
-                self.assertEqual(jdb.keys.set_flags(None, read_only=True, append_only=True,\
-                                                    no_cache=True, no_revert=True), {})
-
+                self.assertEqual(jdb.keys.set_flags(None, read_only=True, append_only=True, no_cache=True, no_revert=True), {})
                 self.assertEqual(JKeyFlag(jdb.keys['key3'][7]), JKeyFlag(0))
                 jdb['key3'] = 'still writable'
                 self.assertEqual(jdb['key3'], 'still writable')
                 del jdb['key3']
                 self.assertFalse('key3' in jdb)
+                with self.assertRaises(TypeError):
+                    jdb.set_link('link1', 'key4')
 
                 error = jdb.check_error()
                 self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
@@ -409,7 +411,7 @@ class TestJDb(unittest.TestCase):
             jdb.unmodify(ro_key)
             self.assertEqual(jdb, expect)
 
-            # ---------------- JDB ----------------
+            # ---------------- GROUP ----------------
             sub_expect = {'g1': 1, 'g2': [2, 3]}
             grp = jdb.add_group('grp')
             self.assertTrue(isinstance(grp, JDb))
@@ -471,6 +473,16 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['txt'], 'abc')
             jdb['txt'] = 'xabc'                       # not a suffix append -> refused
             self.assertEqual(jdb['txt'], 'abc')
+
+            if jdb.data_type.endswith(('+S', '+M', '+P')):
+                jdb['set'] = val = {'a', 'b', 'c'}
+                self.assertEqual(jdb.keys.set_flags('set', append_only=True), {'set': int(JKeyFlag.APPEND_ONLY)})
+                jdb['set'] = {'a'}
+                self.assertEqual(jdb['set'], val)
+                jdb['set'] = {'a', 'b', 'e'}
+                self.assertEqual(jdb['set'], val)
+                jdb['set'] = _val = {'a', 'b', 'c', 'd'}
+                self.assertEqual(jdb['set'], _val)
 
             jdb['map'] = {'a': 1}
             self.assertEqual(jdb.keys.set_flags('map', append_only=True), {'map': int(JKeyFlag.APPEND_ONLY)})
@@ -544,6 +556,131 @@ class TestJDb(unittest.TestCase):
             jdb['cnt'] = 64
             self.assertTrue('cnt' in jdb.unmodify('cnt'))
             self.assertEqual(jdb['cnt'], 63)
+
+            # ---------------- LINK ----------------
+            jdb['report'] = {'rows': 12}
+            self.assertTrue(jdb.set_link('latest', 'report'))
+            self.assertEqual(jdb.get_key_flags('latest'), {'latest': int(JKeyFlag.LINK)})
+            self.assertEqual(jdb.get_link('latest'), 'report')
+            self.assertEqual(jdb.get_link('report', '-'), '-')   # not a link
+            self.assertEqual(jdb.get_link('nosuch', '-'), '-')   # not a key
+
+            self.assertEqual(jdb['latest'], {'rows': 12})        # reads follow
+            jdb['latest'] = {'rows': 13}                         # writes follow
+            self.assertEqual(jdb['report'], {'rows': 13})
+            self.assertEqual(jdb['latest'], {'rows': 13})
+            self.assertFalse(jdb.set_link('latest', 'report'))   # already points there
+
+            # links are transparent to iteration, comparison and queries
+            self.assertEqual(dict(jdb.find_iter(keys='latest', with_value=True)), {'latest': {'rows': 13}})
+
+            # ---- a link may point INTO a group ----
+            arc = jdb.add_group('archive')
+            arc += {'2026-07': [7], '2026-08': [8]} # replace it
+            arc['deep'] = JDb(data_type=arc.data_type, zip_type=arc.zip_type)
+            deep = arc['deep']
+            deep['x'] = 'X'
+
+            self.assertTrue(jdb.set_link('cur', 'archive:::2026-08'))
+            self.assertEqual(jdb['cur'], [8])
+            jdb['cur'] = [8, 8]                                  # writes reach the child
+            self.assertEqual(arc['2026-08'], [8, 8])
+
+            self.assertTrue(jdb.set_link('deepx', 'archive:::deep:::x'))
+            self.assertEqual(jdb['deepx'], 'X')                  # nested to any depth
+            jdb['deepx'] = 'Y'
+            self.assertEqual(deep['x'], 'Y')
+
+            # ---- a link may point AT a group: a folder link ----
+            self.assertTrue(jdb.set_link('folder', 'archive'))
+            self.assertTrue(isinstance(jdb['folder'], JDb))
+            self.assertEqual(jdb['folder']['2026-07'], [7])
+            jdb['folder']['2026-07'] = [70]                      # write via the handle
+            self.assertEqual(arc['2026-07'], [70])
+            jdb['folder'] = 'clobber'                            # refused: would destroy the group
+            self.assertTrue(isinstance(jdb['folder'], JDb))
+            self.assertEqual(arc['2026-07'], [70])
+
+            # ---- a link may LIVE inside a group; its target resolves there ----
+            self.assertTrue(jdb.set_link('archive:::newest', '2026-08'))
+            self.assertEqual(arc.get_link('newest'), '2026-08')
+            self.assertEqual(jdb.get_link('archive:::newest'), '2026-08')
+            self.assertEqual(arc['newest'], [8, 8])
+            arc['newest'] = [8, 8, 8]
+            self.assertEqual(arc['2026-08'], [8, 8, 8])
+
+            # ---- links never nest ----
+            with self.assertRaises(TypeError):
+                jdb.set_link('bad', 'latest')                    # target is a link
+            with self.assertRaises(TypeError):
+                jdb.set_link('bad', 'archive:::newest')          # target is a link in a group
+            with self.assertRaises(KeyError):
+                jdb.set_link('bad', 'no_such_key')
+            with self.assertRaises(KeyError):
+                jdb.set_link('bad', 'archive:::no_such_key')
+            with self.assertRaises(TypeError):
+                jdb.set_link('bad', 'report:::x')                # component is not a group
+            with self.assertRaises(KeyError):
+                jdb.set_link('bad', 'bad')                       # itself
+            with self.assertRaises(TypeError):
+                jdb.set_link('archive', 'report')                # a group cannot become a link
+            self.assertFalse('bad' in jdb)
+
+            # a folder link is not traversable as a path component, by design
+            with self.assertRaises((KeyError, TypeError)):
+                jdb.set_link('bad', 'folder:::2026-07')
+
+            # LINK is derived, so it is never accepted from a caller
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'notalink', 'report', key_flags=JKeyFlag.LINK))
+
+            self.assertEqual(jdb.get_key_flags('notalink'), {'notalink': 0})
+            self.assertEqual(jdb['notalink'], 'report')
+
+            # ... and a flag rewrite never drops it
+            self.assertEqual(jdb.keys.set_flags('latest', no_revert=True),\
+                             {'latest': int(JKeyFlag.LINK | JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb['latest'], {'rows': 13})
+            self.assertEqual(jdb.keys.set_flags('latest', no_revert=False), {'latest': int(JKeyFlag.LINK)})
+
+            # a locked record refuses to become a link
+            self.assertEqual(jdb.keys.set_flags('notalink', read_only=True), {'notalink': int(JKeyFlag.READ_ONLY)})
+            self.assertFalse(jdb.set_link('notalink', 'report'))
+            self.assertEqual(jdb.keys.set_flags('notalink', read_only=False), {'notalink': 0})
+
+            # deleting a link removes the link alone and reports its target path
+            self.assertEqual(jdb.remove('cur'), {'cur': 'archive:::2026-08'})
+            self.assertFalse('cur' in jdb)
+            self.assertEqual(arc['2026-08'], [8, 8, 8])
+            self.assertEqual(jdb.remove('folder'), {'folder': 'archive'})
+            self.assertEqual(arc['2026-07'], [70])               # the group survives
+
+            # deleting the target leaves the link dangling but still removable
+            self.assertEqual(jdb.remove('latest'), {'latest': 'report'})
+            self.assertTrue(jdb.set_link('latest', 'report'))
+            del jdb['report']
+            self.assertEqual(jdb.get('latest', 'DANGLING'), 'DANGLING')
+            self.assertEqual(jdb.get_link('latest'), 'report')   # still reports its target
+            with self.assertRaises(KeyError):
+                _ = jdb['latest']
+
+            self.assertEqual(dict(jdb.find_iter(vals={'$eq': {'rows': 13}})), {})  # skipped, not raised
+            self.assertEqual(jdb.remove('latest'), {'latest': 'report'})
+            self.assertFalse('latest' in jdb)
+
+            # relinking an existing link retargets it, across kinds too
+            jdb['t1'] = [1]
+            self.assertTrue(jdb.set_link('cur', 't1'))
+            self.assertEqual(jdb['cur'], [1])
+            self.assertTrue(jdb.set_link('cur', 'archive:::2026-07'))
+            self.assertEqual(jdb.get_link('cur'), 'archive:::2026-07')
+            self.assertEqual(jdb['cur'], [70])
+            self.assertEqual(jdb['t1'], [1])                     # old target untouched
+            jdb.remove('cur', 't1', 'deepx', 'notalink')
+            del jdb['archive:::newest']
+
+            # a reader cannot create one
+            self.assertRaises(AttributeError, JDbReader(jdb).set_link, 'x', 'key1')
 
             # ---------------- flags survive a delete/undelete round-trip ----------------
             jdb['ghost'] = 1

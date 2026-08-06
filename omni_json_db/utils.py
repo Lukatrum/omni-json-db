@@ -71,6 +71,17 @@ class JKeyFlag(IntFlag):
     #: must move the row and still parks the old value for reclamation.
     NO_REVERT   = 0x10
 
+    #: ``'l'`` -- the record is a symbolic link: its stored value is the name
+    #: of another record in the same database, and reads and writes are
+    #: forwarded there. Like :attr:`JDB` this describes what the VALUE is, so
+    #: it is never taken from a caller's ``key_flags``; use ``set_link()``,
+    #: which enforces the two invariants that keep resolution a single hop:
+    #: a link may not point at a group (:attr:`JDB`) and may not point at
+    #: another link. Deleting a link removes the link alone; deleting its
+    #: target leaves the link dangling, and reading a dangling link raises
+    #: ``JKeyError``.
+    LINK        = 0x20
+
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
@@ -115,6 +126,7 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.APPEND_ONLY: 'a',
     JKeyFlag.NO_CACHE:    'c',
     JKeyFlag.NO_REVERT:   'v',
+    JKeyFlag.LINK:        'l',
 }
 
 KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
@@ -125,13 +137,24 @@ KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
 if len(KEY_FLAG_BY_LETTER) != len(KEY_FLAG_LETTERS): # pragma: no cover
     raise RuntimeError(f'duplicate JKeyFlag letter in KEY_FLAG_LETTERS: {list(KEY_FLAG_LETTERS.values())}')
 
-# Bits a caller is allowed to set. JKeyFlag.JDB is excluded because it describes
-# what the stored VALUE is, not what the caller asked for, so it is always derived.
+#: Flags that describe what the stored VALUE is rather than what a caller asked
+#: for. JDB means the value is a group; LINK means it is another record's name.
+#: Neither is ever taken from a ``key_flags`` argument: JDB is re-derived from
+#: the row, LINK may only be established by ``set_link()``, which enforces the
+#: no-group / no-nesting invariants.
+DERIVED_FLAG_MASK = int(JKeyFlag.JDB | JKeyFlag.LINK)
+
+# Bits that survive on disk, e.g. into a DEAD row so delete/undelete round-trips
+# keep them. JDB is excluded because write_key() re-derives it from the inline
+# 0x10 marker; LINK is included because nothing can re-derive it.
 #
-# NOTE: use this instead of ``~JKeyFlag.JDB``. On an IntFlag ``~`` complements
-# within the *defined* flags, so ``~JKeyFlag.JDB`` is not 0xFFFD --
+# NOTE: use these masks instead of ``~JKeyFlag.JDB``. On an IntFlag ``~``
+# complements within the *defined* flags, so ``~JKeyFlag.JDB`` is not 0xFFFD --
 # ``x &= ~JKeyFlag.JDB`` silently wipes every flag added after JDB.
 USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.JDB)
+
+#: Bits a caller is allowed to set through ``key_flags`` or ``set_key_flags()``.
+WRITABLE_FLAG_MASK = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 
 #: Flags that refuse a destructive rewrite or removal of an existing record.
 WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)

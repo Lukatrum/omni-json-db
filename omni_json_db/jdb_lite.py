@@ -1980,6 +1980,10 @@ class JDbReader(JDbBase):
                 fsize = io.file_size
                 yield fp_dict
 
+            except AttributeError as e: # pragma: no cover
+                if not no_raise:
+                    raise AttributeError from e
+
             except JKeyError as e: # pragma: no cover
                 if not no_raise:
                     raise KeyError from e
@@ -1991,10 +1995,6 @@ class JDbReader(JDbBase):
             except JTypeError as e: # pragma: no cover
                 if not no_raise:
                     raise TypeError from e
-
-            except JAttributeError as e: # pragma: no cover
-                if not no_raise:
-                    raise AttributeError from e
 
             except JError as e: # pragma: no cover
                 if not no_raise:
@@ -3541,7 +3541,11 @@ class JDbReader(JDbBase):
 
                 if key not in cache:
                     move_to_end = 0
-                    value, value_b = self.f_read_with_bytes(fp, key)
+                    try:
+                        value, value_b = self.f_read_with_bytes(fp, key)
+                    except JKeyError:
+                        # dangling link: no value of its own to match against
+                        continue
                 else:
                     move_to_end = 1
                     value_b = None
@@ -4048,6 +4052,74 @@ class JDbReader(JDbBase):
             self.f_load_keys(fp, force=force)
             return self.io.key_table, self.io.file_table
 
+    def get_link(self, key:str, default_val:Any=None) -> Any:
+        """Return the target name of a :attr:`JKeyFlag.LINK` record, unresolved.
+
+        Use this to inspect a link instead of following it -- ``jdb[key]``
+        always reads through to the target. A dangling link still reports its
+        target here, which is how you tell "points nowhere" apart from
+        "is not a link".
+
+        Args:
+            key (str): The record key. May be a ``'grp:::name'`` path, which is
+                routed to that group the same way :meth:`JDb.set_link` routes it.
+            default_val (Any, optional): Returned when ``key`` is missing or is
+                not a link. Defaults to ``None``.
+
+        Returns:
+            Any: The target path -- a record name, a group name, or a
+            ``'grp:::name'`` path relative to the database owning the link --
+            or ``default_val``.
+
+        Example:
+            >>> jdb.set_link('latest', 'report/2026-08')
+            True
+            >>> jdb.get_link('latest')
+            'report/2026-08'
+            >>> jdb.get_link('report/2026-08', '-')       # not a link
+            '-'
+            >>> jdb.set_link('archive:::newest', '2026-08')
+            True
+            >>> jdb.get_link('archive:::newest')
+            '2026-08'
+        """
+        key = str(key) if not isinstance(key, str) else key
+        with self.open(read_only=True) as fp:
+            idx = key.find(SEP_SYM)
+            if idx >= 0:
+                # the link lives inside the group, so ask the group
+                grp_name = key[:idx]
+                group_jdb = self.f_get_group(fp, grp_name)
+                return group_jdb.get_link(key[idx+SEP_LEN:], default_val) \
+                    if isinstance(group_jdb, JDbReader) else default_val
+
+            io, fp, key_fp = self.f_get_fp(fp)
+            key_table = io.key_table
+            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            if not io.n_records > row >= 0:
+                return default_val
+
+            _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
+            if _key != key or not kflags & JKeyFlag.LINK:
+                return default_val
+
+            return self._f_decode_value(fp, key, file_id, offset, row_size, val_size)
+
+    def set_link(self, key:str, target:str) -> bool:
+        """Not available on a reader: creating a link mutates the KEY index.
+
+        Overridden by :meth:`JDb.set_link` on a writable database.
+
+        Args:
+            key (str): Unused.
+            target (str): Unused.
+
+        Raises:
+            JAttributeError: Always. It subclasses ``AttributeError``, so
+                ``except AttributeError`` still catches it.
+        """
+        raise JAttributeError('read only')
+
     def get_key_flags(self, key:Union[str,Any]=None) -> Dict[str,int]:
         """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
 
@@ -4377,44 +4449,146 @@ class JDbReader(JDbBase):
 
         return None
 
-    def _update_cache(self, key:str, val:Any, copy:bool=True, key_flags:int=0):
-        """Store a value in the in-memory read cache with LRU eviction: when
-        the cache is full the least-recently-used entry is evicted, and the
-        stored key is moved to the most-recently-used position. Does nothing
-        when ``cache_limit == 0``.
+    def f_link_step(self, fp_dict:Dict[int,IO], key:str, target:str) -> tuple:
+        """Internal: resolve ONE component of a link target path.
+
+        A target is resolved relative to the database that owns the link, and
+        may name a plain record, a group, or a record inside a group
+        (``'grp:::name'``, nested to any depth).
 
         Args:
-            key (str): The record key.
-            val (Any): The deserialized value to cache.
-            copy (bool, optional): Store a deep copy instead of the object
-                itself. Defaults to ``True``.
-            key_flags (int, optional): The record's :class:`JKeyFlag` bits. When
-                :attr:`JKeyFlag.NO_CACHE` is set the value is not stored and any
-                stale entry for ``key`` is evicted, so turning the flag on for a
-                record that is already cached takes effect immediately.
-                Defaults to ``0``.
+            fp_dict (Dict[int, IO]): Open file handles of *this* database.
+            key (str): The link's own key, for error messages.
+            target (str): The remaining target path.
+
+        Returns:
+            tuple: One of
+
+            * ``('value', name, row_info)`` -- the leaf lives here; ``row_info``
+              is the raw ``read_key`` tuple.
+            * ``('group', group_jdb, None)`` -- the target names a group, i.e.
+              this is a link to a folder.
+            * ``('descend', group_jdb, rest)`` -- continue resolving ``rest``
+              inside ``group_jdb``.
+
+        Raises:
+            JKeyError: If the component does not exist (a dangling link).
+            JTypeError: If the component is itself a link (links never nest), or
+                a non-final component is not a group.
         """
-        if key_flags & JKeyFlag.NO_CACHE:
-            # checked before cache_limit so a record that opted out is evicted
-            # even if the limit was lowered to 0 after it was cached
-            self._cache.pop(key, None)
-            return
+        if not isinstance(target, str):
+            raise JTypeError(f'link[{key}] does not store a target name')
 
-        cache_limit = self._cache_limit
-        if cache_limit != 0:
-            _cache = self._cache
-            if cache_limit < 0:
-                # infinity cache
-                pass
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        idx = target.find(SEP_SYM)
+        name = target if idx < 0 else target[:idx]
+        key_table = io.key_table
+        row = key_table[name] if not isinstance(key_table, KeyTable) else key_table.get(name, -1, fp=key_fp)
+        if not io.n_records > row >= 0:
+            raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
+
+        _key, _file_id, _offset, _size, _vsize, _ver, _days, kflags = row_info = io.read_key(key_fp, row)
+        if kflags & JKeyFlag.LINK:
+            # links never nest, so resolution is bounded by the path length alone
+            # and needs no loop detection or depth limit
+            raise JTypeError(f'link[{key}] points at another link[{name}]')
+
+        if kflags & JKeyFlag.JDB:
+            group_jdb = self.f_get_group(fp_dict, name)
+            if not isinstance(group_jdb, JDbReader): # pragma: no cover
+                raise JTypeError(f'link[{key}] target[{name}] is an invalid group')
+
+            return ('group', group_jdb, None) if idx < 0 else ('descend', group_jdb, target[idx+SEP_LEN:])
+
+        if idx >= 0:
+            raise JTypeError(f'link[{key}] target[{name}] is not a group')
+
+        return 'value', name, row_info
+
+    def f_link_read(self, fp_dict:Dict[int,IO], key:str, target:str, copy:bool=False) -> Any:
+        """Internal: read the value a link points at.
+
+        Args:
+            fp_dict (Dict[int, IO]): Open file handles of *this* database.
+            key (str): The link's own key, for error messages.
+            target (str): The target path, relative to this database.
+            copy (bool, optional): Return a deep copy. Defaults to ``False``.
+
+        Returns:
+            Any: The target's value, or the group :class:`JDbReader` when the
+            link points at a folder.
+        """
+        kind, group, rest = self.f_link_step(fp_dict, key, target)
+        if kind == 'group':
+            return group
+
+        if kind == 'descend':
+            with group.open(read_only=True) as grp_fp:
+                return group.f_link_read(grp_fp, key, rest, copy=copy)
+
+        _key, file_id, offset, row_size, val_size, _ver, _days, kflags = rest
+        return self.f_decode_value(fp_dict, group, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=copy, follow_link=False)
+
+    def f_link_read_with_bytes(self, fp_dict:Dict[int,IO], key:str, target:str) -> Tuple[Any, bytes]:
+        """Internal: :meth:`f_read_with_bytes` through a link.
+
+        Args:
+            fp_dict (Dict[int, IO]): Open file handles of *this* database.
+            key (str): The link's own key, for error messages.
+            target (str): The target path, relative to this database.
+
+        Returns:
+            Tuple[Any, bytes]: ``(value, serialized_bytes)``; the bytes are
+            ``None`` when the link points at a folder.
+        """
+        kind, group, rest = self.f_link_step(fp_dict, key, target)
+        if kind == 'group':
+            return group, None
+
+        if kind == 'descend':
+            with group.open(read_only=True) as grp_fp:
+                return group.f_link_read_with_bytes(grp_fp, key, rest)
+
+        return self.f_read_with_bytes(fp_dict, group)
+
+    def _f_decode_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int) -> Any:
+        """Internal: read the target path stored in a :attr:`JKeyFlag.LINK` row.
+
+        Does not resolve the target or check that it still exists -- a dangling
+        link still reports the path it points at.
+
+        Args:
+            fp_dict (Dict[int, IO]): Open file handles.
+            key (str): The link's own key, used for decoding.
+            file_id (int): The row's file id (or type id for a header row).
+            offset (int): The row's VAL offset (or packed value for a header row).
+            row_size (int): The row's VAL size; ``0`` for a header row.
+            val_size (int): The decoded value size.
+
+        Returns:
+            str: The target path, e.g. ``'report'``, ``'archive'`` (a group) or
+            ``'archive:::2026-08'``.
+
+        Raises:
+            JTypeError: If the stored value is not a string, which means the
+                row's LINK bit disagrees with its value.
+        """
+        if row_size == 0:
+            return self._decode_row(file_id, offset, key, val_size)
+
+        val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
+        return self.io.read_value(val_fp, offset, row_size, val_size)
+
+    def f_decode_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int, key_flags:int, update_cache:bool=True, copy:bool=False, follow_link:bool=True) -> Any:
+        if (key_flags & JKeyFlag.LINK) and follow_link:
+            if row_size == 0:
+                target = self._decode_row(file_id, offset, key, val_size)
             else:
-                _size = len(_cache)
-                if _size > 0 and cache_limit <= _size and key not in _cache:
-                    _cache.popitem(last=False)
+                val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
+                target = self.io.read_value(val_fp, offset, row_size, val_size)
 
-            _cache[key] = deepcopy(val) if copy else val
-            _cache.move_to_end(key, last=True)
+            return self.f_link_read(fp_dict, key, target, copy=copy)
 
-    def f_decode_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int, key_flags:int, update_cache:bool=True, copy:bool=False) -> Any:
         if key_flags & JKeyFlag.NO_CACHE:
             self._cache.pop(key, None)
             with_cache = update_cache = False
@@ -4606,6 +4780,12 @@ class JDbReader(JDbBase):
         if kflags & JKeyFlag.JDB:
             group = self.f_get_group(fp_dict, _key)
             return group, None
+
+        if kflags & JKeyFlag.LINK:
+            # Resolve to the target so value AND byte rules see the real record.
+            # A dangling link raises JKeyError, which find_iter skips.
+            target = self._f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size)
+            return self.f_link_read_with_bytes(fp_dict, _key, target)
 
         if row_size == 0:
             val = self._decode_row(file_id, offset, key, val_size)
@@ -4978,6 +5158,43 @@ class JDbReader(JDbBase):
             f_decode_value = self.f_decode_value
             for (key, file_id, offset, row_size, val_size, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, n_records, reverse=reverse):
                 yield key, f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False) if with_value else None
+
+    def _update_cache(self, key:str, val:Any, copy:bool=True, key_flags:int=0):
+        """Store a value in the in-memory read cache with LRU eviction: when
+        the cache is full the least-recently-used entry is evicted, and the
+        stored key is moved to the most-recently-used position. Does nothing
+        when ``cache_limit == 0``.
+
+        Args:
+            key (str): The record key.
+            val (Any): The deserialized value to cache.
+            copy (bool, optional): Store a deep copy instead of the object
+                itself. Defaults to ``True``.
+            key_flags (int, optional): The record's :class:`JKeyFlag` bits. When
+                :attr:`JKeyFlag.NO_CACHE` is set the value is not stored and any
+                stale entry for ``key`` is evicted, so turning the flag on for a
+                record that is already cached takes effect immediately.
+                Defaults to ``0``.
+        """
+        if key_flags & JKeyFlag.NO_CACHE:
+            # checked before cache_limit so a record that opted out is evicted
+            # even if the limit was lowered to 0 after it was cached
+            self._cache.pop(key, None)
+            return
+
+        cache_limit = self._cache_limit
+        if cache_limit != 0:
+            _cache = self._cache
+            if cache_limit < 0:
+                # infinity cache
+                pass
+            else:
+                _size = len(_cache)
+                if _size > 0 and cache_limit <= _size and key not in _cache:
+                    _cache.popitem(last=False)
+
+            _cache[key] = deepcopy(val) if copy else val
+            _cache.move_to_end(key, last=True)
 
     def _init_KEY(self) -> Tuple[JIo,IO]:
         """Create (or truncate) the KEY file, reset the IO state and cache,
