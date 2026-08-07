@@ -17,7 +17,7 @@ from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
         WRITE_LOCK_MASK, is_value_extension, LOCKED, MISSING, \
-        apply_key_flags, conv_to_key_flags
+        apply_key_flags, conv_to_key_flags, pop_unlock_flag
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
 
@@ -1141,7 +1141,7 @@ class JDb(JDbReader):
 
         return jdb
 
-    def pop(self, key:str, default_val:Optional[Any]=None) -> Any:
+    def pop(self, key:str, default_val:Optional[Any]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Retrieve a record and delete it from the database atomically.
         
         Returns the value, or ``default_val`` if the key is missing.
@@ -1149,16 +1149,24 @@ class JDb(JDbReader):
         Args:
             key (str): The record key.
             default_val (Optional[Any], optional): Value returned if the key is missing. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.UNLOCK` (``'f'``) is meaningful here: it waives the
+                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
+                this one call, like ``sudo``. The record's stored flags are not
+                changed. Defaults to None.
 
         Returns:
-            Any: The record's value, or ``default_val`` if the key is missing.
+            Any: The record's value, or ``default_val`` if the key is missing. A
+            locked record is left in place and its value returned unchanged --
+            pass ``key_flags='f'`` to pop it anyway.
 
         Example:
             >>> previous_value = jdb.pop('key_to_remove', default_val=0)
+            >>> jdb.pop('read_only_key', key_flags='f')     # sudo
         """
         with self.open(read_only=True) as fp:
             try:
-                val = self.f_delete(fp, key)
+                val = self.f_delete(fp, key, key_flags=key_flags)
                 return val if val is not LOCKED else self.f_read(fp, key, default_val=MISSING)
 
             # Not a gzipped file
@@ -2418,7 +2426,7 @@ class JDb(JDbReader):
             >>> jdb.set_key_flags('audit/2026-08', append_only=False)
             {'audit/2026-08': 16}
         """
-        set_mask, clr_mask = conv_to_key_flags(flags) if isinstance(flags, str) else (0, 0)
+        set_mask, clr_mask, _any_mask = conv_to_key_flags(flags) if isinstance(flags, str) else (0, 0, 0)
         if flags is not None and not isinstance(flags, str):
             # an int/JKeyFlag is absolute: set what it names, clear everything else
             set_mask = int(flags) & WRITABLE_FLAG_MASK
@@ -2605,18 +2613,24 @@ class JDb(JDbReader):
             self._cache.pop(key, None)
             return True
 
-    def setdefault(self, key:str, val:Any):
+    def setdefault(self, key:str, val:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None):
         """Set ``key`` to ``val`` only if ``key`` does not already exist.
 
         Args:
             key (str): The record key.
             val (Any): The default value to insert if the key is missing.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional):
+                :class:`JKeyFlag` bits for the new record. A ``chmod``-style
+                string such as ``'ra'`` or ``'+h'`` sets the named flags; an
+                ``int``/:class:`JKeyFlag` sets exactly those bits. Applied only
+                when the record is actually created -- if ``key`` already exists
+                this is ignored, along with ``val``. Defaults to None.
         """
         with self.open(read_only=True) as fp:
             if key not in self.io.key_table:
-                self.f_write(fp, key, val)
+                self.f_write(fp, key, val, key_flags=key_flags)
 
-    def set(self, key:str, val:Any, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> Optional[Any]:
+    def set(self, key:str, val:Any, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Optional[Any]:
         """Write a single record and return the value written (or the old value, if using an update function).
 
         Args:
@@ -2652,6 +2666,16 @@ class JDb(JDbReader):
                     - None = use default max_wsize (4)
                     - -ve = disable searching
 
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional):
+                :class:`JKeyFlag` bits to store alongside the value. A
+                ``chmod``-style string is *relative* to the record's current
+                flags -- ``'ra'`` sets READ_ONLY and APPEND_ONLY, ``'+h-c'`` sets
+                HIDDEN and clears NO_CACHE, and any flag not named is left alone
+                -- while an ``int``/:class:`JKeyFlag` replaces them outright.
+                Passing this also makes the update-function form write even when
+                the value is unchanged, so flags alone can be updated.
+                Defaults to None.
+
         Returns:
             Optional[Any]: The new value if written, the old value if unchanged (update-function case), or ``None`` if nothing was written.
 
@@ -2674,13 +2698,14 @@ class JDb(JDbReader):
                 row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
                 old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=True)
                 new_val = func(key, deepcopy(old_val))
-                if new_val != old_val:
-                    self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, overwrite=True)
-                    return new_val
+                not_eq = new_val != old_val
+                if not_eq or key_flags is not None:
+                    if self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=key_flags):
+                        return new_val
 
                 return old_val
 
-            if self.f_write(fp, key, val, flags=flags, max_wsize=max_wsize):
+            if self.f_write(fp, key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                 return val
 
         return None
@@ -3312,7 +3337,7 @@ class JDb(JDbReader):
 
             return self.io.n_records > 0
 
-    def add(self, records:Dict[str,Any], default_val:Optional[Any]=None, replace:bool=True, insert:bool=True, is_list:bool=False, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> Dict[str,Any]:
+    def add(self, records:Dict[str,Any], default_val:Optional[Any]=None, replace:bool=True, insert:bool=True, is_list:bool=False, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
         """Core batch-write method underlying :meth:`set_n`, :meth:`insert`, :meth:`update`, :meth:`replace`, :meth:`append`, and related helpers.
 
         Args:
@@ -3323,6 +3348,13 @@ class JDb(JDbReader):
             is_list (bool, optional): If True, ``records`` is a list and keys are auto-generated. Defaults to False.
             flags (Optional[JFlag], optional): strategic behavioral modifiers. Defaults to None.
             max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Flags to apply
+                before the per-flag keywords below, which override it. A
+                ``chmod``-style string is *relative* -- ``'ra'`` sets READ_ONLY and
+                APPEND_ONLY, ``'+h-c'`` sets HIDDEN and clears NO_CACHE, and any
+                flag not named keeps its current value. An ``int``/:class:`JKeyFlag`
+                is *absolute*: the record ends up with exactly those bits.
+                Defaults to None
 
         Returns:
             Dict[str, Any]: The records that were actually written.
@@ -3359,7 +3391,7 @@ class JDb(JDbReader):
                         # insert + replace = update
                         for _key,row_id in jio.sorted_key_table_items():
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
 
@@ -3368,7 +3400,7 @@ class JDb(JDbReader):
                         for _key,row_id in jio.sorted_key_table_items():
                             if _key in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT():break
 
@@ -3377,7 +3409,7 @@ class JDb(JDbReader):
                         for _key,row_id in jio.sorted_key_table_items():
                             if _key not in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
 
@@ -3446,14 +3478,15 @@ class JDb(JDbReader):
                         if func:
                             old_val = f_read(fp, str_key, row=row, copy=False)
                             new_val = func(str_key, deepcopy(old_val))
-                            if new_val != old_val:
-                                f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=True)
-                                chg_table[str_key] = new_val
+                            not_eq = new_val != old_val
+                            if not_eq or key_flags is not None:
+                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=key_flags):
+                                    chg_table[str_key] = new_val
 
                             continue
 
                         if not (_cache and str_key in _cache and _cache[str_key] == val):
-                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize):
+                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                                 chg_table[str_key] = val
 
                     continue
@@ -3461,23 +3494,33 @@ class JDb(JDbReader):
                 if insert:
                     if func:
                         new_val = func(str_key, None)
-                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize)
+                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, key_flags=key_flags)
                         chg_table[str_key] = new_val
                         continue
 
-                    f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize)
+                    f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags)
                     chg_table[str_key] = val
 
         return chg_table
 
-    def remove(self, *records:str) -> Dict[str,Any]:
+    def remove(self, *records:str, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
         """Delete records and return their values.
 
         Args:
             *records (str): Keys of the records to delete.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.UNLOCK` (``'f'``) is meaningful here: it waives the
+                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
+                this one call, like ``sudo``. The record's stored flags are not
+                changed. Defaults to None.
 
         Returns:
-            Dict[str, Any]: Mapping of deleted key to its value.
+            Dict[str, Any]: Mapping of deleted key to its value. Locked records
+            are skipped and simply omitted from the result.
+
+        Example:
+            >>> jdb.remove('a', 'b')
+            >>> jdb.remove('read_only_key', key_flags='f')     # sudo
         """
         keys = set()
         for key in records:
@@ -3497,7 +3540,7 @@ class JDb(JDbReader):
                         for row_id in range(io.n_records-1, -1, -1):
                             if has_SIGINT(): break
                             key, _file_id, _offset, _row_size, _val_size, _ver, _days, _kflags = io_read_key(key_fp, row_id)
-                            val = f_delete(fp, key, row=row_id)
+                            val = f_delete(fp, key, row=row_id, key_flags=key_flags)
                             if val is not LOCKED:
                                 ret[key] = val
                     return ret
@@ -3535,7 +3578,7 @@ class JDb(JDbReader):
                     break
 
                 try:
-                    jdb = val = f_delete(fp, key, row=row_id)
+                    jdb = val = f_delete(fp, key, row=row_id, key_flags=key_flags)
                     if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
                         # cleanup the sub database
                         jdb.remove_fast(jdb)
@@ -3552,11 +3595,16 @@ class JDb(JDbReader):
 
             return ret
 
-    def remove_fast(self, *records:str) -> None:
+    def remove_fast(self, *records:str, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> None:
         """Delete records without reading their values first (faster than :meth:`remove`).
 
         Args:
             *records (str): Keys of the records to delete.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.UNLOCK` (``'f'``) is meaningful here: it waives the
+                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
+                this one call, like ``sudo``. The record's stored flags are not
+                changed. Defaults to None.
 
         """
         keys = set()
@@ -3576,7 +3624,7 @@ class JDb(JDbReader):
                         for row_id in range(io.n_records-1, -1, -1):
                             if has_SIGINT(): break
                             key, _file_id, _offset, _row_size, _val_size, _ver, _days, _kflags = io_read_key(key_fp, row_id)
-                            jdb = f_delete(fp, key, row=row_id, read_value=False)
+                            jdb = f_delete(fp, key, row=row_id, read_value=False, key_flags=key_flags)
                             if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
                                 jdb.remove_fast(jdb)
                     return
@@ -4377,6 +4425,9 @@ class JDb(JDbReader):
         if len(key) > MAX_KEY_SIZE:
             raise JKeyError(f'key[{key}] too long (max={MAX_KEY_SIZE})')
 
+        # UNLOCK is call-scoped: consume it here so the remainder is only ever
+        # about which flags to STORE, and so it can never reach write_key()
+        unlock, key_flags = pop_unlock_flag(key_flags)
         flags = int(self.flags) if flags is None else int(flags)
         can_revert = bool(JFlag.REVERT & flags)
         _cache = self._cache
@@ -4398,7 +4449,7 @@ class JDb(JDbReader):
 
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
                 _key, file_id, offset, row_size, val_size, _ver, old_days, old_kflags = row_info = io.read_key(key_fp, row)
-                if old_kflags & JKeyFlag.READ_ONLY:
+                if old_kflags & JKeyFlag.READ_ONLY and not unlock:
                     return False
 
                 if old_kflags & JKeyFlag.LINK:
@@ -4408,7 +4459,7 @@ class JDb(JDbReader):
                     target = self._f_decode_value(fp_dict, key, file_id, offset, row_size, val_size)
                     return self.f_link_write(fp_dict, key, target, val, days=days, flags=flags, max_wsize=max_wsize, overwrite=overwrite)
 
-                if old_kflags & JKeyFlag.APPEND_ONLY:
+                if old_kflags & JKeyFlag.APPEND_ONLY and not unlock:
                     # The one flag that has to inspect the stored value; the extra
                     # read is paid solely by records that opted in. Checked BEFORE
                     # _set_group() so swapping a value for a group is refused too.
@@ -4815,7 +4866,7 @@ class JDb(JDbReader):
         io.key_table[key] = n_records
         return True
 
-    def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None):
+    def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None):
         """ Internal write-level deletion: mark a record as deleted and optionally compact the index.
 
         When ``read_value=True``, the deleted value is read and returned; ``row`` can specify the row id to skip lookup.
@@ -4826,6 +4877,11 @@ class JDb(JDbReader):
             read_value (bool, optional): If True, read and return the value before deleting it. Defaults to True.
             row (Optional[int], optional): Row id, if already known (skips lookup). Defaults to None.
             flags (Optional[JFlag], optional): strategic behavioral modifiers flags. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.UNLOCK` (``'f'``) is meaningful here: it waives the
+                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
+                this one call, like ``sudo``. The record's stored flags are not
+                changed. Defaults to None.
 
         Returns:
             Any: The deleted value, or the group :class:`JDb` if the key was a
@@ -4856,8 +4912,9 @@ class JDb(JDbReader):
         can_revert = bool(JFlag.REVERT & flags)
 
         _key, file_id, offset, row_size, val_size, _ver, days, kflags = io.read_key(key_fp, row)
-        if kflags & WRITE_LOCK_MASK:
-            # READ_ONLY and APPEND_ONLY both forbid removal
+        if kflags & WRITE_LOCK_MASK and not pop_unlock_flag(key_flags)[0]:
+            # READ_ONLY and APPEND_ONLY both forbid removal, unless the caller
+            # passed JKeyFlag.UNLOCK for this one call
             return LOCKED
 
         if not key:

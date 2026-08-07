@@ -124,6 +124,22 @@ class JKeyFlag(IntFlag):
     #: ``'3'`` -- free for the application. See :attr:`USER0`.
     USER3 = 0x8000
 
+    #: ``'u'`` -- **transient**. The only JKeyFlag that is never stored: it sits
+    #: above :data:`KEY_FLAG_MASK`, so every path that writes a KEY row masks it
+    #: away and no record can ever carry it.
+    #:
+    #: Passed as ``key_flags`` to a single :meth:`JDb.f_write` / :meth:`JDb.f_delete`
+    #: call -- and to anything that forwards there, such as :meth:`JDb.set`,
+    #: :meth:`JDb.remove` and :meth:`JDb.pop` -- it waives the
+    #: :data:`WRITE_LOCK_MASK` check for that one call, the way ``sudo`` waives a
+    #: permission check for one command. The record's stored flags are left
+    #: untouched, so a :attr:`READ_ONLY` record is still read-only afterwards.
+    #:
+    #: It waives *locks only*. Derived bits, :attr:`HIDDEN` and every other rule
+    #: are unaffected, and :meth:`JDb.set_key_flags` never needed it -- changing
+    #: flags is already a privileged operation.
+    UNLOCK = 0x10000
+
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
@@ -174,6 +190,7 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.USER1:       '1',
     JKeyFlag.USER2:       '2',
     JKeyFlag.USER3:       '3',
+    JKeyFlag.UNLOCK:      'u',
 }
 
 KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
@@ -207,49 +224,109 @@ WRITABLE_FLAG_MASK = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 #: Flags that refuse a destructive rewrite or removal of an existing record.
 WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
 
-def conv_to_key_flags(flags:str) -> Tuple[int,int]:
-    """Parse a ``chmod``-style flag string into ``(set_mask, clear_mask)``.
+#: Call-scoped flags: meaningful only for the duration of one operation, and
+#: deliberately placed above KEY_FLAG_MASK so that the ordinary 16-bit masking
+#: every write path already performs makes them impossible to persist.
+TRANSIENT_FLAG_MASK = int(JKeyFlag.UNLOCK)
+
+def conv_to_key_flags(flags:str) -> Tuple[int,int,int]:
+    """Parse a ``chmod``-style flag string into three masks.
 
     Each letter is one :class:`JKeyFlag` (see :data:`KEY_FLAG_LETTERS`),
-    optionally prefixed by ``'+'`` to set it or ``'-'`` to clear it; a bare
-    letter means set. Parsing is case-insensitive, and letters that name no
-    flag are ignored, mirroring :meth:`JKeyFlag._missing_`.
+    optionally prefixed to say what should happen to it:
 
-    The two masks are returned separately so callers can apply them *relative*
-    to a record's current flags -- ``(old | set_mask) & ~clear_mask`` -- which
-    is what makes ``'-c'`` mean "clear NO_CACHE, leave everything else alone".
+    ==========  ====================================================
+    Prefix      Meaning
+    ==========  ====================================================
+    ``+`` none  Set the flag (when writing) / require it (when querying).
+    ``-``       Clear the flag / forbid it.
+    ``*`` ``?`` Neither -- name the flag only to say "don't care".
+    ==========  ====================================================
+
+    Parsing is case-insensitive, and letters that name no flag are ignored,
+    mirroring :meth:`JKeyFlag._missing_`.
+
+    The masks are returned separately so callers can apply them *relative* to a
+    record's current flags -- ``(old | set_mask) & ~clear_mask`` -- which is what
+    makes ``'-c'`` mean "clear NO_CACHE, leave everything else alone". The third
+    mask exists for queries: a flag can be required, forbidden or unconstrained,
+    and only ``any_mask`` distinguishes "unconstrained because you said so" from
+    "unconstrained because you forgot", which is what lets a caller override a
+    default such as :meth:`find`'s implicit ``'-h'``.
+
     Callers are responsible for masking the result with
     :data:`WRITABLE_FLAG_MASK`; this function does not, so it can also be used
     to build a mask that includes the derived :attr:`JKeyFlag.GROUP` /
     :attr:`JKeyFlag.LINK` bits for inspection.
 
     Args:
-        flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'+0+3'``.
-            A non-``str`` (or empty) argument yields ``(0, 0)``.
+        flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'*h+0'``.
+            A non-``str`` (or empty) argument yields ``(0, 0, 0)``.
 
     Returns:
-        Tuple[int, int]: ``(set_mask, clear_mask)``. A letter given both ways
-        (``'+r-r'``) ends up in both masks, and the clear wins when applied.
+        Tuple[int, int, int]: ``(set_mask, clear_mask, any_mask)``. A letter
+        given more than one way ends up in each mask it was given, and when
+        applied the clear wins over the set.
 
     Example:
         >>> conv_to_key_flags('ra')
-        (3, 0)
+        (3, 0, 0)
         >>> conv_to_key_flags('+h-c')
-        (16, 32)
-        >>> conv_to_key_flags('-3')
-        (0, 32768)
+        (16, 32, 0)
+        >>> conv_to_key_flags('*h+0')
+        (4096, 0, 16)
     """
-    set_mask = clr_mask = 0
+    set_mask = clr_mask = any_mask = 0
     if flags and isinstance(flags, str):
-        for flag in re_findall(r'[+-]?[a-z0-9]', flags.lower()):
+        for flag in re_findall(r'[+\-*?]?[a-z0-9]', flags.lower()):
             val = KEY_FLAG_BY_LETTER.get(flag[-1:], None)
             if val is not None:
                 if flag[0] == '-':
                     clr_mask |= int(val)
+                elif flag[0] in '*?':
+                    any_mask |= int(val)
                 else:
                     set_mask |= int(val)
 
-    return set_mask, clr_mask
+    return set_mask, clr_mask, any_mask
+
+def pop_unlock_flag(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[bool, Any]:
+    """Split :attr:`JKeyFlag.UNLOCK` out of a caller's ``key_flags`` argument.
+
+    ``UNLOCK`` is call-scoped, so it must be consumed before the rest of the
+    argument is treated as flags to store. Asking only to force -- ``'u'`` or
+    ``JKeyFlag.UNLOCK`` -- has to leave the record's stored flags alone, which is
+    why the remainder comes back as ``None`` in that case rather than an empty
+    mask: an empty mask given as an ``int`` means "clear everything".
+
+    Args:
+        flags (Union[str, int, JKeyFlag, None]): The caller's ``key_flags``.
+
+    Returns:
+        Tuple[bool, Any]: ``(force, remaining_flags)``, where ``remaining_flags``
+        is safe to hand to :func:`apply_key_flags`.
+
+    Example:
+        >>> pop_unlock_flag('u')
+        (True, None)
+        >>> pop_unlock_flag('+u+r')
+        (True, '+r')
+        >>> pop_unlock_flag(None)
+        (False, None)
+    """
+    if flags is None:
+        return False, None
+
+    if isinstance(flags, str):
+        tokens = re_findall(r'[+\-*?]?[a-z0-9]', flags.lower())
+        unlock = any(t[-1:] == 'u' and t[0] != '-' for t in tokens)
+        rest = ''.join(t for t in tokens if t[-1:] != 'u' and t[-1:] in KEY_FLAG_BY_LETTER)
+        return unlock, (rest or None)
+
+    flags = int(flags)
+    rest = flags & ~int(JKeyFlag.UNLOCK)
+    unlock = bool(flags & JKeyFlag.UNLOCK)
+    return unlock, (None if unlock and not rest else rest)
 
 def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:int=None) -> int:
     """Resolve a caller's ``flags`` argument against a record's current flags.
@@ -288,7 +365,9 @@ def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:in
         return int(old_flags) & mask
 
     if isinstance(flags, str):
-        set_mask, clr_mask = conv_to_key_flags(flags)
+        # any_mask is a query-only state: when writing, "don't care" is the same
+        # as not naming the flag at all
+        set_mask, clr_mask, _any_mask = conv_to_key_flags(flags)
         return ((int(old_flags) | set_mask) & ~clr_mask) & mask
 
     return int(flags) & mask

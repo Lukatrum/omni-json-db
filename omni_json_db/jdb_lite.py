@@ -17,7 +17,8 @@ from .jdb_query import QUERY_OPS, Condition, \
             sorted_by_rules, parse_group_by, grouped_by_rules, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeError, \
-                JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING
+                JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, \
+                KEY_FLAG_MASK, conv_to_key_flags
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -165,7 +166,7 @@ class JDbKey:
         Raises:
             JAttributeError: Always raised to enforce read-only integrity.
         """
-        raise JAttributeError('read only')
+        raise JAttributeError('read only') # pragma: no cover
 
     def __delitem__(self, key:Any):
         """Prevent item deletion from a read-only key interface.
@@ -186,7 +187,7 @@ class JDbKey:
         """
         return len(self.jdb)
 
-    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_hidden:bool=False, **kwargs) -> Generator[str, None, None]:
+    def __call__(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_hidden:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Generator[str, None, None]:
         """Execute a search query returning matching keys as a generator.
         
         Args:
@@ -198,7 +199,18 @@ class JDbKey:
             with_hidden (bool, optional): Include records carrying
                 :attr:`JKeyFlag.HIDDEN`. This is a query API, so like
                 :meth:`JDbReader.find` and :meth:`JDbReader.show` it hides them
-                by default. Defaults to ``False``.
+                by default. A shorthand for ``key_flags='*h'``, which wins if
+                both are given. Defaults to ``False``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
+                record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
+                flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
+                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
+                don't name keeps this method's default. So ``'+0-r'`` means "tagged
+                USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
+                every bit it names. ``h`` is the only flag with a non-neutral
+                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
+                returns only the records that would otherwise be hidden.
+                Defaults to None.
             **kwargs: Additional filtering arguments.
 
         Yields:
@@ -213,8 +225,8 @@ class JDbKey:
             {'key3'}
         """
         jdb = self.jdb
-        if keys or vals or date or kwargs:
-            for key, _val in jdb.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=False, with_date=False, with_hidden=with_hidden, **kwargs):
+        if keys or vals or date or key_flags or kwargs:
+            for key, _val in jdb.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=False, with_date=False, with_hidden=with_hidden, key_flags=key_flags, **kwargs):
                 yield key
 
         else:
@@ -819,7 +831,7 @@ class JDbKey:
                     io_conv_date = io.z_conv_date
                     row_id = 0
                     for (_key, file_id, offset, size, vsize, ver, days, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if ver == sync_id and not (kflags & JKeyFlag.HIDDEN and not with_hidden):
+                        if ver == sync_id and (with_hidden or not kflags & JKeyFlag.HIDDEN):
                             old_date, new_date = io_conv_date(days)
                             yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
                         row_id += 1
@@ -836,14 +848,11 @@ class JDbKey:
                 if k_arg_cnt == 2:
                     row_id = 0
                     for (_key, file_id, offset, size, vsize, ver, days, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if kflags & JKeyFlag.HIDDEN and not with_hidden:
-                            row_id += 1
-                            continue
-
-                        old_date, new_date = io_conv_date(days)
-                        val = (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
-                        if is_matched(_key, val):
-                            yield _key, val
+                        if with_hidden or not kflags & JKeyFlag.HIDDEN:
+                            old_date, new_date = io_conv_date(days)
+                            val = (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                            if is_matched(_key, val):
+                                yield _key, val
                         row_id += 1
 
                 elif k_arg_cnt == 1:
@@ -851,11 +860,9 @@ class JDbKey:
                         if io.n_records > row_id >= 0 and is_matched(_key):
                             key_fp = fp[-1]
                             _key, file_id, offset, size, vsize, ver, days, kflags = io_read_key(key_fp, row_id)
-                            if kflags & JKeyFlag.HIDDEN and not with_hidden:
-                                continue
-
-                            old_date, new_date = io_conv_date(days)
-                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                            if with_hidden or not kflags & JKeyFlag.HIDDEN:
+                                old_date, new_date = io_conv_date(days)
+                                yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
 
                 return
 
@@ -3271,7 +3278,7 @@ class JDbReader(JDbBase):
                 if not (sync_id >= io.sync_id or sync_id < 0):
                     row_id = 0
                     for (_key, _file_id, _offset, _size, _vsize, _ver, _days, _kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if _ver == sync_id and not (_kflags & JKeyFlag.HIDDEN and not with_hidden):
+                        if _ver == sync_id and (with_hidden or not _kflags & JKeyFlag.HIDDEN):
                             yield _key, self.f_read(fp, _key, row=row_id, copy=False)
                         row_id += 1
 
@@ -3285,8 +3292,8 @@ class JDbReader(JDbBase):
                 f_decode_value = self.f_decode_value
                 n_records = io.n_records
                 for _key, (row_id, file_id, offset, size, vsize, _ver, _days, kflags, _mdate, _cdate) in self.f_key_iter(fp, key, with_hidden=with_hidden):
-                    if not n_records > row_id >= 0: continue
-                    yield _key, f_decode_value(fp, _key, file_id, offset, size, vsize, kflags, update_cache=False, copy=False)
+                    if n_records > row_id >= 0:
+                        yield _key, f_decode_value(fp, _key, file_id, offset, size, vsize, kflags, update_cache=False, copy=False)
 
                 return
 
@@ -3346,7 +3353,7 @@ class JDbReader(JDbBase):
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, reverse:bool=False, with_hidden:bool=True, **kwargs) -> Generator[Tuple[str,Any], None, None]:
+    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, reverse:bool=False, with_hidden:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3401,7 +3408,18 @@ class JDbReader(JDbBase):
             with_hidden (bool, optional): Include records carrying
                 :attr:`JKeyFlag.HIDDEN`. The raw iterator returns them; it is
                 :meth:`find` and :meth:`show`, which wrap this method, that hide
-                them by default. Defaults to ``True``.
+                them by default. A shorthand for ``key_flags='*h'``, which wins
+                if both are given. Defaults to ``True``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
+                record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
+                flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
+                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
+                don't name keeps this method's default. So ``'+0-r'`` means "tagged
+                USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
+                every bit it names. ``h`` is the only flag with a non-neutral
+                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
+                returns only the records that would otherwise be hidden.
+                Defaults to None.
 
         Yields:
             (str, Any): Matching key and its associated value (or None if `with_value` is False).
@@ -3436,6 +3454,19 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name.$has': 'ice'})      # $has as query operator
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
         """
+        # Resolve the flag predicate once, before any branch needs it. Each flag is
+        # in one of three states: required (need_flags), forbidden (deny_flags) or
+        # unconstrained. with_hidden is simply the default state for HIDDEN, so
+        # naming 'h' in key_flags -- as '+h', '-h' or '*h' -- overrides it.
+        need_flags, deny_flags, any_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else \
+                ((int(key_flags) & KEY_FLAG_MASK), 0, 0) if key_flags is not None else (0, 0, 0)
+        # UNLOCK is call-scoped and never stored, so requiring it would match nothing
+        need_flags &= KEY_FLAG_MASK
+        deny_flags &= KEY_FLAG_MASK
+        if not with_hidden and not (need_flags | deny_flags | any_flags) & JKeyFlag.HIDDEN:
+            deny_flags |= int(JKeyFlag.HIDDEN)
+
+        has_flag_rule = bool(need_flags or deny_flags)
         st_time = perf_counter()
         if vals is None:
             vals = {}
@@ -3494,11 +3525,14 @@ class JDbReader(JDbBase):
                     f_get_group = self.f_get_group
                     for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
                         if not kflags & JKeyFlag.GROUP: continue
-                        if kflags & JKeyFlag.HIDDEN and not with_hidden: continue
-                        if not (key_rule and not key_rule.search(grp_name)):
+                        # only the HIDDEN part gates the descent: a flag rule filters
+                        # RECORDS, so key_flags='+0' must not also demand that the
+                        # group row itself be tagged. A hidden group, though, keeps
+                        # its whole subtree out of a query.
+                        if not (kflags & deny_flags & JKeyFlag.HIDDEN) and not (key_rule and not key_rule.search(grp_name)):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
-                                for _key,_val in group_jdb.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse):
+                                for _key,_val in group_jdb.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse, with_hidden=with_hidden, key_flags=key_flags):
                                     yield f'{grp_name}{SEP_SYM}{_key}', _val
                 return
 
@@ -3580,11 +3614,10 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp[-1]
-                if date or not with_hidden:
-                    # one read_key serves both filters; HIDDEN records are not
-                    # enumerable, so a query can never reach them by accident
+                if date or has_flag_rule:
+                    # one read_key serves both filters
                     _k, _fi, _of, _rs, _vs, mod_id, _days, _kflags = io_read_key(key_fp, row_id)
-                    if _kflags & JKeyFlag.HIDDEN and not with_hidden:
+                    if (_kflags & need_flags) != need_flags or (_kflags & deny_flags):
                         k_filter += 1
                         continue
 
@@ -3637,7 +3670,7 @@ class JDbReader(JDbBase):
                         _vals, _keys, _date = vals, None, date
 
                     group_limit = (limit-count) if limit > 0 else 0
-                    for _key,_val in group_jdb.find_iter(keys=_keys, vals=_vals, date=_date, limit=group_limit, with_value=old_with_value, with_date=with_date, reverse=reverse, with_hidden=with_hidden):
+                    for _key,_val in group_jdb.find_iter(keys=_keys, vals=_vals, date=_date, limit=group_limit, with_value=old_with_value, with_date=with_date, reverse=reverse, with_hidden=with_hidden, key_flags=key_flags):
                         if skipped < skip:
                             skipped += 1
                             continue
@@ -3716,7 +3749,7 @@ class JDbReader(JDbBase):
 
         return matched_list
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, **kwargs) -> Dict[str,Any]:
+    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -3819,7 +3852,19 @@ class JDbReader(JDbBase):
                 (:meth:`find`, :meth:`show`, :meth:`JDbKey.__call__`): every
                 iterator (:meth:`items`, :meth:`values`, :meth:`item_iter`,
                 ``iter()``, ``len()``, ``==``) returns hidden records normally,
-                and naming one directly always works. Defaults to ``False``.
+                and naming one directly always works. A shorthand for
+                ``key_flags='*h'``, which wins if both are given.
+                Defaults to ``False``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
+                record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
+                flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
+                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
+                don't name keeps this method's default. So ``'+0-r'`` means "tagged
+                USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
+                every bit it names. ``h`` is the only flag with a non-neutral
+                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
+                returns only the records that would otherwise be hidden.
+                Defaults to None.
 
         Returns:
             Dict[str, Any]: The subset of matched data, or — when *group_by*
@@ -3844,7 +3889,7 @@ class JDbReader(JDbBase):
             key_parts_list = default_op = field_specs = None
 
         data_rows = []
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=True, stats=stats, with_hidden=with_hidden, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=True, stats=stats, with_hidden=with_hidden, key_flags=key_flags, **kwargs):
             data_rows.append((key, val))
 
         data_rows = grouped_by_rules(data_rows, key_parts_list, default_op, field_specs)
@@ -3852,7 +3897,7 @@ class JDbReader(JDbBase):
 
         return {k:v[0] for k,v in data_rows}
 
-    def show(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=50, skip:int=0, with_date:bool=False, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, **kwargs) -> Dict[str,Any]:
+    def show(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=50, skip:int=0, with_date:bool=False, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Dict[str,Any]:
         """
         Print the matched records as a formatted console table and return them.
 
@@ -3885,8 +3930,19 @@ class JDbReader(JDbBase):
                 :attr:`JKeyFlag.HIDDEN`. Hiding applies only to the query APIs:
                 every iterator (:meth:`items`, :meth:`values`,
                 :meth:`item_iter`, ``iter()``, ``len()``, ``==``) returns hidden
-                records normally, and naming one directly always works.
+                records normally, and naming one directly always works. A
+                shorthand for ``key_flags='*h'``, which wins if both are given.
                 Defaults to ``False``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
+                record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
+                flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
+                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
+                don't name keeps this method's default. So ``'+0-r'`` means "tagged
+                USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
+                every bit it names. ``h`` is the only flag with a non-neutral
+                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
+                returns only the records that would otherwise be hidden.
+                Defaults to None.
 
         Returns:
             Dict[str, Any]: The subset of matched data, or — when *group_by*
@@ -3918,7 +3974,7 @@ class JDbReader(JDbBase):
         key_parts_list, default_op, field_specs = parse_group_by(group_by) if group_by is not None else (None, None, None)
         stats = {}
         data_rows = []
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=True, stats=stats, with_hidden=with_hidden, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=True, with_date=True, stats=stats, with_hidden=with_hidden, key_flags=key_flags, **kwargs):
             data_rows.append((key,val))
 
         data_rows = grouped_by_rules(data_rows, key_parts_list, default_op, field_specs)
@@ -5218,11 +5274,8 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp_dict[-1]
-                __key, file_id, offset, row_size, val_size, ver, days, _kflags = io_read_key(key_fp, row_id)
-                if _kflags & JKeyFlag.HIDDEN and not with_hidden:
-                    continue
-
-                if not max_ver > ver >= min_ver:
+                __key, file_id, offset, row_size, val_size, ver, days, kflags = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver or (not with_hidden and kflags & JKeyFlag.HIDDEN):
                     continue
 
                 old_date, new_date = io_conv_date(days)
@@ -5230,16 +5283,13 @@ class JDbReader(JDbBase):
                         not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date): # pragma: no cover
                     continue
 
-                yield __key, (row_id, file_id, offset, row_size, val_size, ver, days, _kflags, str(new_date), str(old_date))
+                yield __key, (row_id, file_id, offset, row_size, val_size, ver, days, kflags, str(new_date), str(old_date))
 
         else:
             for row_id in range(start, stop, step):
                 key_fp = fp_dict[-1]
-                _key, file_id, offset, row_size, val_size, ver, days, _kflags = io_read_key(key_fp, row_id)
-                if _kflags & JKeyFlag.HIDDEN and not with_hidden:
-                    continue
-
-                if not max_ver > ver >= min_ver:
+                _key, file_id, offset, row_size, val_size, ver, days, kflags = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver or (not with_hidden and kflags & JKeyFlag.HIDDEN):
                     continue
 
                 old_date, new_date = io_conv_date(days)
@@ -5250,7 +5300,7 @@ class JDbReader(JDbBase):
                 if row_id >= n_records:
                     _key = f'|{_key}|~~{ver}~\t\t'
 
-                yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, _kflags, str(new_date), str(old_date))
+                yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, kflags, str(new_date), str(old_date))
 
     def f_items(self, fp_dict:Dict[int,IO], with_value:bool=True, reverse:bool=False, with_hidden:bool=True) -> Generator[Tuple[str,Any], None, None]:
         """Iterate over all active ``(key, value)`` pairs in row order, reading
@@ -5279,10 +5329,8 @@ class JDbReader(JDbBase):
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             f_decode_value = self.f_decode_value
             for (key, file_id, offset, row_size, val_size, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, n_records, reverse=reverse):
-                if kflags & JKeyFlag.HIDDEN and not with_hidden:
-                    continue
-
-                yield key, f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False) if with_value else None
+                if with_hidden or not kflags & JKeyFlag.HIDDEN:
+                    yield key, f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False) if with_value else None
 
     def _update_cache(self, key:str, val:Any, copy:bool=True, key_flags:int=0):
         """Store a value in the in-memory read cache with LRU eviction: when

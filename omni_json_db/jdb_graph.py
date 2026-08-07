@@ -10,7 +10,7 @@ from .jdb_lite import JDbReader
 from .jdb_file import JFilesBase
 from .jdb import JDb
 from .jdb_query import Condition, Query
-from .utils import JKeyError, JValueError
+from .utils import JKeyError, JValueError, JKeyFlag
 
 MAX_RECURSION = 500
 
@@ -2386,14 +2386,14 @@ class GraphDb(JDb):
                     n_nodes += 1
 
             for row_id, key in sorted(old_keys, reverse=True):
-                f_delete(fp, key, row=row_id, read_value=False)
+                f_delete(fp, key, row=row_id, read_value=False, key_flags=JKeyFlag.UNLOCK)
 
             for node_id, entries in new_adj.items():
-                f_write(fp, f'X:{node_id}:', entries, overwrite=True, max_wsize=0)
+                f_write(fp, f'X:{node_id}:', entries, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
 
-            f_write(fp, self.N_NODES, n_nodes)
-            f_write(fp, self.N_EDGES, n_edges)
-            f_write(fp, self.N_DIRECTED, n_di_edges)
+            f_write(fp, self.N_NODES, n_nodes, key_flags=JKeyFlag.UNLOCK)
+            f_write(fp, self.N_EDGES, n_edges, key_flags=JKeyFlag.UNLOCK)
+            f_write(fp, self.N_DIRECTED, n_di_edges, key_flags=JKeyFlag.UNLOCK)
 
         return {'removed': len(old_keys), 'rebuilt': len(new_adj)}
 
@@ -2570,9 +2570,9 @@ class GraphDb(JDb):
         f_read = self.f_read
         node_key = f'N:{node_id}:'
         if node_key not in self.io.key_table:
-            if f_write(fp_dict, node_key, properties):
+            if f_write(fp_dict, node_key, properties, key_flags=JKeyFlag.UNLOCK):
                 n_nid = self.N_NODES
-                f_write(fp_dict, n_nid, max(f_read(fp_dict, n_nid, 0),0)+1)
+                f_write(fp_dict, n_nid, max(f_read(fp_dict, n_nid, 0),0)+1, key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
                 return True
             return False
 
@@ -2580,11 +2580,11 @@ class GraphDb(JDb):
         if isinstance(old_props, dict):
             new_props = {**old_props, **properties}
             if new_props != old_props:
-                return f_write(fp_dict, node_key, new_props)
+                return f_write(fp_dict, node_key, new_props, key_flags=JKeyFlag.UNLOCK)
             else:
                 return False
 
-        return f_write(fp_dict, node_key, properties)
+        return f_write(fp_dict, node_key, properties, key_flags=JKeyFlag.UNLOCK)
 
     def f_remove_node(self, fp_dict:Dict[int,IO], node_id:str) -> Dict[str,Any]:
         """Remove a node together with all edges connected to it.
@@ -2652,7 +2652,7 @@ class GraphDb(JDb):
                         matched_keys.append((adj_row, adj_key))
 
                     elif new_adj != old_adj:
-                        f_write(fp_dict, adj_key, new_adj, overwrite=True, max_wsize=0)
+                        f_write(fp_dict, adj_key, new_adj, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
 
         if matched_keys:
             io, fp_dict, _key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
@@ -2665,7 +2665,7 @@ class GraphDb(JDb):
             f_delete = self.f_delete
             matched_keys.sort(reverse=True)
             for row_id,key in matched_keys:
-                val = f_delete(fp_dict, key, row=row_id)
+                val = f_delete(fp_dict, key, row=row_id, key_flags=JKeyFlag.UNLOCK)
                 ret[key] = val
                 if key.startswith('N:'):
                     n_nodes -= 1
@@ -2674,9 +2674,9 @@ class GraphDb(JDb):
                     if key.find(':>:') >= 3:
                         n_di_edges -= 1
 
-            f_write(fp_dict, n_nid, max(0, n_nodes))
-            f_write(fp_dict, n_eid, max(0, n_edges))
-            f_write(fp_dict, n_did, max(0, n_di_edges))
+            f_write(fp_dict, n_nid, max(0, n_nodes), key_flags=JKeyFlag.UNLOCK)
+            f_write(fp_dict, n_eid, max(0, n_edges), key_flags=JKeyFlag.UNLOCK)
+            f_write(fp_dict, n_did, max(0, n_di_edges), key_flags=JKeyFlag.UNLOCK)
 
         return ret
 
@@ -2755,12 +2755,12 @@ class GraphDb(JDb):
             n_nodes = f_read(fp_dict, n_nid, 0)
             u_key = f'N:{u}:'
             if u_key not in key_table:
-                f_write(fp_dict, u_key, {}, overwrite=True, max_wsize=0)
+                f_write(fp_dict, u_key, {}, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
                 n_nodes += 1
 
             v_key = f'N:{v}:'
             if v_key not in key_table:
-                f_write(fp_dict, v_key, {}, overwrite=True, max_wsize=0)
+                f_write(fp_dict, v_key, {}, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
                 n_nodes += 1
 
             xu_key = f'X:{u}:'
@@ -2768,22 +2768,22 @@ class GraphDb(JDb):
             adj = f_read(fp_dict, xu_key, copy=False) if xu_key in key_table else []
             if xu_val not in adj:
                 adj.append(xu_val)
-                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0, key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
             adj = f_read(fp_dict, xv_key, copy=False) if xv_key in key_table else []
             if xv_val not in adj:
                 adj.append(xv_val)
-                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0, key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
 
-            f_write(fp_dict, n_nid, max(0, n_nodes))
-            if f_write(fp_dict, edge_key, properties):
+            f_write(fp_dict, n_nid, max(0, n_nodes), key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
+            if f_write(fp_dict, edge_key, properties, key_flags=JKeyFlag.UNLOCK):
                 n_eid = self.N_EDGES
-                f_write(fp_dict, n_eid, max(f_read(fp_dict, n_eid, 0), 0) + 1)
+                f_write(fp_dict, n_eid, max(f_read(fp_dict, n_eid, 0), 0) + 1, key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
                 if directed:
                     n_did = self.N_DIRECTED
-                    f_write(fp_dict, n_did, max(f_read(fp_dict, n_did, 0), 0) + 1)
+                    f_write(fp_dict, n_did, max(f_read(fp_dict, n_did, 0), 0) + 1, key_flags=JKeyFlag.HIDDEN|JKeyFlag.UNLOCK)
 
                 return True
 
@@ -2791,7 +2791,7 @@ class GraphDb(JDb):
 
         old_props = self.f_read(fp_dict, edge_key, copy=False)
         if not isinstance(old_props, dict): # pragma: no cover
-            return self.f_write(fp_dict, edge_key, properties)
+            return self.f_write(fp_dict, edge_key, properties, key_flags=JKeyFlag.UNLOCK)
 
         new_props = {**old_props, **properties}
         return self.f_write(fp_dict, edge_key, new_props) if new_props != old_props else False
@@ -2821,27 +2821,27 @@ class GraphDb(JDb):
             f_write = self.f_write
             f_read = self.f_read
             _io, fp_dict, _key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
-            props = self.f_delete(fp_dict, edge_key)
+            props = self.f_delete(fp_dict, edge_key, key_flags=JKeyFlag.UNLOCK)
             ret[edge_key] = props
             n_eid = self.N_EDGES
-            f_write(fp_dict, n_eid, max(0, f_read(fp_dict, n_eid, 0) - 1))
+            f_write(fp_dict, n_eid, max(0, f_read(fp_dict, n_eid, 0) - 1), key_flags=JKeyFlag.UNLOCK)
             if directed:
                 n_did = self.N_DIRECTED
-                f_write(fp_dict, n_did, max(0, f_read(fp_dict, n_did, 0) - 1))
+                f_write(fp_dict, n_did, max(0, f_read(fp_dict, n_did, 0) - 1), key_flags=JKeyFlag.UNLOCK)
 
             xu_key = f'X:{u}:'
             xu_val = f'>{v}' if directed else f'-{v}'
             adj = f_read(fp_dict, xu_key, copy=False) if xu_key in key_table else []
             if xu_val in adj:
                 adj.remove(xu_val)
-                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xu_key, adj, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
 
             xv_key = f'X:{v}:'
             xv_val = f'<{u}' if directed else f'-{u}'
             adj = f_read(fp_dict, xv_key, copy=False) if xv_key in key_table else []
             if xv_val in adj:
                 adj.remove(xv_val)
-                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0)
+                f_write(fp_dict, xv_key, adj, overwrite=True, max_wsize=0, key_flags=JKeyFlag.UNLOCK)
 
         return ret
 
