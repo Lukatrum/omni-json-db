@@ -420,13 +420,14 @@ class JDb(JDbReader):
                 raise TypeError
         else:
             func = None
-            if self.write_hook and not self.write_hook('', val):
-                raise TypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
         if isinstance(key, str):
+            idx = key.find(SEP_SYM)
+            if func is None and idx < 0 and self.write_hook and not self.write_hook(key, val):
+                raise TypeError(f'invalid format: key="{key}" val_type={type(val)})')
+
             with self.open(read_only=True) as fp:
                 io, fp, key_fp = self.f_get_fp(fp)
-                idx = key.find(SEP_SYM)
                 if idx >= 0:
                     if key not in io.key_table:
                         grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
@@ -2042,7 +2043,8 @@ class JDb(JDbReader):
             cache_limit:int=0, \
             api_ver:Optional[int]=None, \
             val_codec:Optional[Any]=None, \
-            key_codec:Optional[Any]=None, **kwargs) -> JDb:
+            key_codec:Optional[Any]=None, \
+            with_hidden:bool=True, **kwargs) -> JDb:
 
         """Copy the entire database to a new target with optional format/config changes.
 
@@ -2103,6 +2105,12 @@ class JDb(JDbReader):
             key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U'
                 data type. Analogous to ``val_codec`` but for the row index. Defaults to the
                 process-wide codec set by ``register_user_key_codec()``.
+            with_hidden (bool, optional): Copy records carrying
+                :attr:`JKeyFlag.HIDDEN`. Defaults to True, because a clone must
+                be faithful -- :meth:`backup`, :meth:`restore` and
+                :meth:`upgrade` all rely on it. Pass False to produce a
+                sanitized copy with all hidden bookkeeping stripped; the
+                setting propagates into owned groups.
             **kwargs: Extra settings passed through to the destination :class:`JIo`.
 
         Returns:
@@ -2222,6 +2230,9 @@ class JDb(JDbReader):
                     if signal and ((dst_io.n_records + 1) % 1000) == 0: # pragma: no cover
                         print(signal, end='', flush=True)
 
+                    if not with_hidden and kflags & JKeyFlag.HIDDEN:
+                        continue
+
                     if kflags & JKeyFlag.GROUP:
                         src_group = src_get_group(src_fp, key)
                         if isinstance(src_group, JDbReader) and src_files_obj.is_group(src_group.files_obj, key):
@@ -2239,7 +2250,8 @@ class JDb(JDbReader):
                                 cache_limit=cache_limit,
                                 api_ver=api_ver,
                                 key_codec=key_codec,
-                                val_codec=val_codec, **kwargs)
+                                val_codec=val_codec,
+                                with_hidden=with_hidden, **kwargs)
                         else: # pragma: no cover
                             dst_write(dst_fp, key, src_group, overwrite=True, flags=0)
 
@@ -2426,7 +2438,7 @@ class JDb(JDbReader):
             >>> jdb.set_key_flags('audit/2026-08', append_only=False)
             {'audit/2026-08': 16}
         """
-        set_mask, clr_mask, _any_mask = conv_to_key_flags(flags) if isinstance(flags, str) else (0, 0, 0)
+        set_mask, clr_mask = conv_to_key_flags(flags) if isinstance(flags, str) else (0, 0)
         if flags is not None and not isinstance(flags, str):
             # an int/JKeyFlag is absolute: set what it names, clear everything else
             set_mask = int(flags) & WRITABLE_FLAG_MASK
@@ -2783,9 +2795,16 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=default_val, replace=True, insert=True, is_list=False, **kwargs)
 
-    def update_if(self, condition: Union[Condition,dict], patch: Union[Dict[str,Any],Callable[[str,Any],Dict[str,Any]]]) -> int:
+    def update_if(self, condition: Union[Condition,dict], patch: Union[Dict[str,Any],Callable[[str,Any],Dict[str,Any]]], with_hidden:bool=False) -> int:
         """Merge `patch` into every record (dict value) matching `condition`.
-        
+
+        This is a query-driven bulk mutation, so it honours
+        :attr:`JKeyFlag.HIDDEN`: a hidden record is neither patched nor
+        deleted unless ``with_hidden=True``. Hiding a record is therefore how
+        you keep engine bookkeeping (or any derived state) out of reach of a
+        ``Query()`` sweep. A *key-selector* write -- ``jdb[re.compile(...)] = v``
+        -- is a mapping operation and still reaches hidden records.
+
         Args:
             condition (Condition | dict): Condition for key/date/value filtering.
             patch (dict | Callable[[str,Any],Dict[str,Any]]): if condition is matched, update the corresponding value.
@@ -2793,6 +2812,9 @@ class JDb(JDbReader):
                 >>> patch = {'age': None} # delete 'age'
                 >>> patch = {'age': 30'}  # update/insert 'age'
                 >>> patch = None          # delete record
+
+            with_hidden (bool, optional): Also patch records carrying
+                :attr:`JKeyFlag.HIDDEN`. Defaults to False.
 
         Returns:
             int: the number of records updated.
@@ -2813,7 +2835,7 @@ class JDb(JDbReader):
         chg_keys = []
         with self.open(read_only=True) as fp:
             has_SIGINT = self.file_lock.has_SIGINT
-            for key,val in self.find_iter(vals=condition, with_value=True, with_date=False, reverse=True):
+            for key,val in self.find_iter(vals=condition, with_value=True, with_date=False, reverse=True, with_hidden=with_hidden):
                 if not isinstance(val, dict): continue
                 _patch = patch_func(key, val) if callable(patch_func) else patch
                 if _patch != val:
@@ -2918,14 +2940,21 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=None, replace=True, insert=False, is_list=True, **kwargs)
 
-    def to_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, **kwargs) -> bool:
+    def to_csv(self, csv_file:Union[str,IO], key:Optional[str]=None, with_hidden:bool=False, **kwargs) -> bool:
         """export the database (or a nested record) as CSV.
 
         When ``key`` is given, exports that record; otherwise exports the whole database.
 
+        Records carrying :attr:`JKeyFlag.HIDDEN` are left out of both the
+        column discovery pass and the rows, so hiding a record keeps engine
+        bookkeeping out of the export without changing what ``jdb.items()``
+        returns. Pass ``with_hidden=True`` for a faithful full dump.
+
         Args:
             csv_file (Union[str, IO]): Destination file path, or an open file-like object.
             key (Optional[str], optional): If given, export only this nested record instead of the whole database. Defaults to None.
+            with_hidden (bool, optional): Also export records carrying
+                :attr:`JKeyFlag.HIDDEN`. Defaults to False.
             **kwargs: Extra arguments passed through to ``csv.DictWriter``.
 
         Returns:
@@ -2939,10 +2968,16 @@ class JDb(JDbReader):
 
             csv_fp.seek(0)
             io, fp, key_fp = self.f_get_fp(fp)
-            f_read = self.f_read
+            f_decode_value = self.f_decode_value
             patterns = set()
-            for row_id in range(io.n_records):
-                val = f_read(fp, None, row=row_id, copy=False)
+            row_id = 0
+            for (_key, file_id, offset, size, vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
+                if not with_hidden and kflags & JKeyFlag.HIDDEN:
+                    continue
+
+                # update_cache=False: a full-table scan must not evict the hot set
+                val = f_decode_value(fp, _key, file_id, offset, size, vsize, kflags, update_cache=False, copy=False)
+                row_id += 1
                 if (row_id % 1000) == 0: # pragma: no cover
                     print('-', end='', flush=True)
 
@@ -2988,7 +3023,11 @@ class JDb(JDbReader):
                 n_records = io.n_records
                 writer = DictWriter(csv_fp, fieldnames=fields, **kwargs)
                 writer.writeheader()
+                row_id = 0
                 for (_key, file_id, offset, size, vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, n_records):
+                    if not with_hidden and kflags & JKeyFlag.HIDDEN:
+                        continue
+
                     val = f_decode_value(fp, _key, file_id, offset, size, vsize, kflags, update_cache=False, copy=False)
                     csv_row = {field:None for field in fields}
                     csv_row[fields[0]] = _key
@@ -3008,6 +3047,7 @@ class JDb(JDbReader):
                         csv_row['__1__'] = str(val)
 
                     writer.writerow(csv_row)
+                    row_id += 1
                     if (row_id % 1000) == 0: # pragma: no cover
                         print('.', end='', flush=True)
 

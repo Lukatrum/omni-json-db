@@ -79,21 +79,40 @@ class JKeyFlag(IntFlag):
     #: -- use ``get_link()`` to tell "points nowhere" apart from "stores None".
     LINK = 0x08
 
-    #: ``'h'`` -- the record is excluded from query results. Only the three
-    #: query APIs honour it -- ``find()``, ``show()`` and ``jdb.keys(...)`` --
-    #: and each takes ``with_hidden=True`` to opt back in, the way ``ls -a``
-    #: shows dotfiles.
+    #: ``'h'`` -- the record is not part of the database's *default working
+    #: set*, the way a dotfile is not part of a plain ``ls``.
     #:
-    #: **This is not access control.** Everything else treats a hidden record
-    #: as an ordinary one: ``items()``, ``values()``, ``item_iter()``,
-    #: ``jdb[:]``, ``iter()``, ``len()``, ``==``, ``check_error()``,
-    #: ``recycle()`` and cloning all include it, and a pattern-driven bulk
-    #: write or delete will reach it. Do not use this flag to keep a secret out
-    #: of a dump -- ``dict(jdb.items())`` still contains it.
+    #: Which APIs honour it follows one rule: **an API that takes a query
+    #: skips hidden records; an API that implements the mapping protocol does
+    #: not.** Concretely:
     #:
-    #: The scope is deliberately this narrow: it keeps every mapping-like API
-    #: (``list(jdb)``, ``items()``, ``values()``, ``len()``) in agreement, and
-    #: costs one extra key-row read only inside ``find_iter``.
+    #: * **Query surfaces -- hidden by default, opt back in with**
+    #:   ``with_hidden=True``: :meth:`JDbReader.find`, :meth:`JDbReader.show`,
+    #:   :meth:`JDbReader.map` and ``jdb.keys(...)``.
+    #: * **Query-driven side effects -- hidden by default**:
+    #:   :meth:`JDb.update_if` will not rewrite or delete a hidden record, and
+    #:   :meth:`JDb.to_csv` will not export one. These are the teeth of the
+    #:   flag: hiding a record takes it out of reach of ``Query()``-shaped
+    #:   sweeps and of the default dump.
+    #: * **Mapping surfaces -- always exhaustive**: ``jdb[key]``, ``in``,
+    #:   ``len()``, ``items()``, ``values()``, ``item_iter()``, ``jdb[:]``,
+    #:   ``iter()``, ``==``, :meth:`JDb.check_error`, :meth:`JDb.recycle` and
+    #:   :meth:`JDb.clone_to` all include hidden records, and a *key-selector*
+    #:   bulk write (``jdb[re.compile(...)] = v``) still reaches them.
+    #: * **Raw iterators -- exhaustive unless asked**: :meth:`JDbReader.find_iter`
+    #:   and ``jdb.keys.item_iter()`` default to ``with_hidden=True``.
+    #:
+    #: The split is deliberate. Keeping every mapping-like API in agreement is
+    #: what makes ``len(jdb) == len(dict(jdb.items()))`` hold, while the query
+    #: side is where "show me the data" lives -- so that is where hiding pays
+    #: off. It costs one extra key-row read only inside ``find_iter``.
+    #:
+    #: **This is still not access control.** A caller who wants the record can
+    #: always read it by name, and ``dict(jdb.items())`` still contains it.
+    #: Use it for engine bookkeeping and derived state -- :mod:`.jdb_graph`
+    #: marks its adjacency lists and node/edge counters ``HIDDEN`` so a user's
+    #: ``find()`` and CSV export see the graph, not its plumbing -- not for
+    #: secrets.
     HIDDEN = 0x10
 
     #: ``'c'`` -- never place this record's value in the LRU read cache, and
@@ -229,7 +248,7 @@ WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
 #: every write path already performs makes them impossible to persist.
 TRANSIENT_FLAG_MASK = int(JKeyFlag.UNLOCK)
 
-def conv_to_key_flags(flags:str) -> Tuple[int,int,int]:
+def conv_to_key_flags(flags:str) -> Tuple[int,int]:
     """Parse a ``chmod``-style flag string into three masks.
 
     Each letter is one :class:`JKeyFlag` (see :data:`KEY_FLAG_LETTERS`),
@@ -240,7 +259,6 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int,int]:
     ==========  ====================================================
     ``+`` none  Set the flag (when writing) / require it (when querying).
     ``-``       Clear the flag / forbid it.
-    ``*`` ``?`` Neither -- name the flag only to say "don't care".
     ==========  ====================================================
 
     Parsing is case-insensitive, and letters that name no flag are ignored,
@@ -248,11 +266,7 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int,int]:
 
     The masks are returned separately so callers can apply them *relative* to a
     record's current flags -- ``(old | set_mask) & ~clear_mask`` -- which is what
-    makes ``'-c'`` mean "clear NO_CACHE, leave everything else alone". The third
-    mask exists for queries: a flag can be required, forbidden or unconstrained,
-    and only ``any_mask`` distinguishes "unconstrained because you said so" from
-    "unconstrained because you forgot", which is what lets a caller override a
-    default such as :meth:`find`'s implicit ``'-h'``.
+    makes ``'-c'`` mean "clear NO_CACHE, leave everything else alone".
 
     Callers are responsible for masking the result with
     :data:`WRITABLE_FLAG_MASK`; this function does not, so it can also be used
@@ -260,35 +274,33 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int,int]:
     :attr:`JKeyFlag.LINK` bits for inspection.
 
     Args:
-        flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'*h+0'``.
-            A non-``str`` (or empty) argument yields ``(0, 0, 0)``.
+        flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'+0'``.
+            A non-``str`` (or empty) argument yields ``(0, 0)``.
 
     Returns:
-        Tuple[int, int, int]: ``(set_mask, clear_mask, any_mask)``. A letter
+        Tuple[int, int]: ``(set_mask, clear_mask)``. A letter
         given more than one way ends up in each mask it was given, and when
         applied the clear wins over the set.
 
     Example:
         >>> conv_to_key_flags('ra')
-        (3, 0, 0)
+        (3, 0)
         >>> conv_to_key_flags('+h-c')
-        (16, 32, 0)
+        (16, 32)
         >>> conv_to_key_flags('*h+0')
-        (4096, 0, 16)
+        (4096, 0)
     """
-    set_mask = clr_mask = any_mask = 0
+    set_mask = clr_mask = 0
     if flags and isinstance(flags, str):
-        for flag in re_findall(r'[+\-*?]?[a-z0-9]', flags.lower()):
+        for flag in re_findall(r'[+\-]?[a-z0-9]', flags.lower()):
             val = KEY_FLAG_BY_LETTER.get(flag[-1:], None)
             if val is not None:
                 if flag[0] == '-':
                     clr_mask |= int(val)
-                elif flag[0] in '*?':
-                    any_mask |= int(val)
                 else:
                     set_mask |= int(val)
 
-    return set_mask, clr_mask, any_mask
+    return set_mask, clr_mask
 
 def pop_unlock_flag(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[bool, Any]:
     """Split :attr:`JKeyFlag.UNLOCK` out of a caller's ``key_flags`` argument.
@@ -318,7 +330,7 @@ def pop_unlock_flag(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[bool, Any]:
         return False, None
 
     if isinstance(flags, str):
-        tokens = re_findall(r'[+\-*?]?[a-z0-9]', flags.lower())
+        tokens = re_findall(r'[+\-]?[a-z0-9]', flags.lower())
         unlock = any(t[-1:] == 'u' and t[0] != '-' for t in tokens)
         rest = ''.join(t for t in tokens if t[-1:] != 'u' and t[-1:] in KEY_FLAG_BY_LETTER)
         return unlock, (rest or None)
@@ -367,7 +379,7 @@ def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:in
     if isinstance(flags, str):
         # any_mask is a query-only state: when writing, "don't care" is the same
         # as not naming the flag at all
-        set_mask, clr_mask, _any_mask = conv_to_key_flags(flags)
+        set_mask, clr_mask = conv_to_key_flags(flags)
         return ((int(old_flags) | set_mask) & ~clr_mask) & mask
 
     return int(flags) & mask

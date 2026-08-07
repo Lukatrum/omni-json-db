@@ -737,9 +737,108 @@ class TestJDb(unittest.TestCase):
             self.assertTrue('quiet' in dict(jdb.find_iter()))
             self.assertFalse('quiet' in dict(jdb.find_iter(with_hidden=False)))
 
-            # a pattern-driven bulk write does reach it (documented, not a bug)
+            # a key-selector bulk write is a MAPPING op, so it does reach it
+            # (documented, not a bug); only Query-shaped APIs hide
             jdb[re.compile(r'quiet')] = [0]
             self.assertEqual(jdb['quiet'], [0])
+
+            # map() is a query surface too, so it hides by default
+            self.assertEqual(jdb.map(lambda k, v: k, keys=r'^(shown|quiet)$'), ['shown'])
+            self.assertEqual(sorted(jdb.map(lambda k, v: k, keys=r'^(shown|quiet)$', with_hidden=True)), ['quiet', 'shown'])
+            self.assertRaises(TypeError, jdb.map, None)
+
+            self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': 0})
+            self.assertTrue('quiet' in jdb.find())
+            self.assertEqual(jdb.set_key_flags('quiet', 'h'), {'quiet': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('quiet', '+h'), {})   # already hidden -> no change
+            self.assertEqual(jdb.set_key_flags('quiet', '+r+0'), {'quiet': int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
+            self.assertEqual(jdb.set_key_flags('quiet', hidden=False), {'quiet': int(JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
+            self.assertEqual(jdb.set_key_flags('quiet', hidden=True), {'quiet': int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
+            self.assertEqual(jdb.set_key_flags('quiet', '-r-0'), {'quiet': int(JKeyFlag.HIDDEN)})
+
+            # ... and take every selector set_key_flags does
+            self.assertEqual(jdb.set_key_flags(re.compile(r'^shown$'), '+h'), {'shown': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags(lambda k: k == 'shown', '-h'), {'shown': 0})
+            self.assertEqual(jdb.set_key_flags(['shown'], hidden=True), {'shown': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(sorted(jdb.find(keys=r'^(shown|quiet)$')), [])
+            self.assertEqual(jdb.set_key_flags('shown', hidden=False), {'shown': 0})
+
+            # a bare keys() call is still a QUERY, so it hides -- and it must not
+            # short-circuit past limit/skip either
+            self.assertFalse('quiet' in set(jdb.keys()))
+            self.assertTrue('quiet' in set(jdb.keys(with_hidden=True)))
+            self.assertTrue('quiet' in set(jdb.keys))            # the property is the mapping surface
+            self.assertEqual(len(set(jdb.keys(limit=2))), 2)
+            self.assertEqual(len(set(jdb.keys(limit=2, with_hidden=True))), 2)
+            self.assertEqual(len(set(jdb.keys(skip=len(jdb) - 2, with_hidden=True))), 2)
+
+            # ---- update_if: a Query sweep must not reach a hidden record ----
+            jdb['ud1'] = {'hcnt': 1}
+            jdb['ud2'] = {'hcnt': 2}
+            self.assertEqual(jdb.set_key_flags('ud2', hidden=True), {'ud2': int(JKeyFlag.HIDDEN)})
+
+            self.assertEqual(jdb.update_if(Query().hcnt > 0, {'seen': True}), 1)
+            self.assertEqual(jdb['ud1'], {'hcnt': 1, 'seen': True})
+            self.assertEqual(jdb['ud2'], {'hcnt': 2})            # untouched
+            self.assertEqual(jdb.update_if(Query().hcnt > 0, {'seen': True}, with_hidden=True), 1)
+            self.assertEqual(jdb['ud2'], {'hcnt': 2, 'seen': True})
+
+            # the delete branch honours it as well
+            self.assertEqual(jdb.update_if(Query().hcnt > 0, None), 1)
+            self.assertFalse('ud1' in jdb)
+            self.assertTrue('ud2' in jdb)
+            self.assertEqual(jdb.update_if(Query().hcnt > 0, None, with_hidden=True), 1)
+            self.assertFalse('ud2' in jdb)
+
+            # ---- to_csv / clone_to, on a db of this config's own format ----
+            from csv import DictReader
+            jhid = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
+            jhid.insert({'c1': {'n': 1}, 'c2': {'n': 2}, '_meta': {'n': 9, 'secret': 'x'}})
+            self.assertEqual(jhid.set_key_flags('_meta', '+h'), {'_meta': int(JKeyFlag.HIDDEN)})
+
+            # a dump leaves the hidden row out -- and never discovers its columns
+            with io.StringIO() as fp:
+                self.assertTrue(jhid.to_csv(fp))
+                fp.seek(0)
+                rows = list(DictReader(fp))
+
+            self.assertEqual({r['_id'] for r in rows}, {'c1', 'c2'})
+            self.assertFalse('secret' in rows[0])
+
+            with io.StringIO() as fp:
+                self.assertTrue(jhid.to_csv(fp, with_hidden=True))
+                fp.seek(0)
+                rows = list(DictReader(fp))
+
+            self.assertEqual({r['_id'] for r in rows}, {'c1', 'c2', '_meta'})
+            self.assertTrue('secret' in rows[0])
+
+            # a clone is faithful by default (backup/restore/upgrade rely on it)
+            cln = jhid.clone_to(JDb(data_type=jdb.data_type, zip_type=jdb.zip_type), signal='')
+            self.assertEqual(len(cln), 3)
+            self.assertEqual(cln.get_key_flags('_meta'), {'_meta': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(cln['_meta'], {'n': 9, 'secret': 'x'})
+
+            # ... but can be asked to strip the bookkeeping, groups included
+            hgrp = jhid.add_group('hgrp')
+            hgrp.insert({'g': {'n': 1}, '_g': {'n': 2}})
+            self.assertEqual(hgrp.set_key_flags('_g', 'h'), {'_g': int(JKeyFlag.HIDDEN)})
+
+            cln = jhid.clone_to(JDb(data_type=jdb.data_type, zip_type=jdb.zip_type), signal='', with_hidden=False)
+            self.assertEqual(set(cln.keys(with_hidden=True)), {'c1', 'c2', 'hgrp'})
+            self.assertEqual(set(cln['hgrp'].keys(with_hidden=True)), {'g'})
+
+            # ---- a hidden GROUP keeps its subtree out of a query ----
+            self.assertEqual(sorted(jhid.find(':::')), ['hgrp:::g'])
+            self.assertEqual(jhid.set_key_flags('hgrp', 'h'), {'hgrp': int(JKeyFlag.GROUP | JKeyFlag.HIDDEN)})
+            self.assertEqual(sorted(jhid.find(':::')), [])
+            self.assertEqual(sorted(jhid.find(':::', with_hidden=True)), ['hgrp:::_g', 'hgrp:::g'])
+            self.assertEqual(jhid['hgrp']['g'], {'n': 1})        # still reachable by name
+
+            # a group-scoped selector routes to the child index
+            self.assertEqual(jhid.set_key_flags('hgrp:::g', 'h'), {'hgrp:::g': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(hgrp.get_key_flags('g'), {'g': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jhid.set_key_flags('hgrp:::g', '-h'), {'hgrp:::g': 0})
 
             # un-hiding needs no special casing
             self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': 0})
@@ -831,17 +930,15 @@ class TestJDb(unittest.TestCase):
             # 'h' is the one flag with a non-neutral default, so key_flags can
             # express every state with_hidden can -- plus one it cannot
             self.assertEqual(sorted(jdb.find()), ['p', 'q', 'r'])
-            self.assertEqual(sorted(jdb.find(key_flags='*h')), sorted(jdb.find(with_hidden=True)))
-            self.assertEqual(sorted(jdb.find(key_flags='*h')), ['p', 'q', 'r', 'z'])
+            self.assertEqual(sorted(jdb.find(with_hidden=True)), ['p', 'q', 'r', 'z'])
             self.assertEqual(sorted(jdb.find(key_flags='+h')), ['z'])
             self.assertEqual(sorted(jdb.find(key_flags='-h')), ['p', 'q', 'r'])
-            self.assertEqual(sorted(jdb.find(key_flags='*h+0')), ['p', 'q', 'z'])
+            self.assertEqual(sorted(jdb.find(key_flags='+0', with_hidden=True)), ['p', 'q', 'z'])
 
             # composes with every other query rule, on every query surface
             self.assertEqual(jdb.find(keys=r'^[pq]$', key_flags='+0', vals={'$eq': [2]}), {'q': [2]})
             self.assertEqual(sorted(jdb.show(limit=0, key_flags='+0')), ['p', 'q'])
             self.assertEqual(sorted(jdb.keys(key_flags='+0')), ['p', 'q'])
-            self.assertEqual(sorted(jdb.keys(key_flags='*h')), ['p', 'q', 'r', 'z'])
 
             # find_iter is the raw iterator: it does not hide unless asked
             self.assertEqual(sorted(dict(jdb.find_iter())), ['p', 'q', 'r', 'z'])
@@ -856,12 +953,12 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(sorted(jdb.find(':::')), ['kgrp:::gv'])
             self.assertEqual(sorted(jdb.find(':::', key_flags='+0')), ['kgrp:::gv'])
             self.assertEqual(sorted(jdb.find(':::', key_flags='+h')), ['kgrp:::gh'])
-            self.assertEqual(sorted(jdb.find(':::', key_flags='*h')), ['kgrp:::gh', 'kgrp:::gv'])
+            self.assertEqual(sorted(jdb.find(':::', with_hidden=True)), ['kgrp:::gh', 'kgrp:::gv'])
 
             # a hidden group keeps its whole subtree out of a query
             jdb.set_key_flags('kgrp', '+h')
             self.assertEqual(sorted(jdb.find(':::')), [])
-            self.assertEqual(sorted(jdb.find(':::', key_flags='*h')), ['kgrp:::gh', 'kgrp:::gv'])
+            self.assertEqual(sorted(jdb.find(':::', with_hidden=True)), ['kgrp:::gh', 'kgrp:::gv'])
             jdb.set_key_flags('kgrp', '-h')
             jdb.remove('kgrp')
 

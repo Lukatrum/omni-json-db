@@ -36,4 +36,6 @@ exclude_lines =
     if 0 and .*
     if __name__ == .__main__.:
     return
+    break
+    continue
 

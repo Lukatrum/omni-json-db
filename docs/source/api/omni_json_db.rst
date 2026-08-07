@@ -91,5 +91,5 @@ omni\_json\_db.utils
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members: INT_Handler, Style, JError, JFlag, JKeyFlag, JKeyError, JTypeError, JValueError, JDbBase, JIoBase, SIGINT
+   :exclude-members: INT_Handler, Style, JError, JFlag, JKeyFlag, JKeyError, JTypeError, JValueError, JAttributeError, JDbBase, JIoBase, SIGINT
 

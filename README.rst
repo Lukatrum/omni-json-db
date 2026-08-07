@@ -329,9 +329,9 @@ file-system-like attributes. Set them with a ``chmod``-style string: a bare
 letter or ``+`` sets a flag, ``-`` clears it, and anything you don't name keeps
 its current value.
 
-======  ===============  ============================================================================
+======  ===============  =======================================================================================
 Letter  Flag             Effect
-======  ===============  ============================================================================
+======  ===============  =======================================================================================
 ``r``   ``READ_ONLY``    Writes and deletes are refused.
 ``a``   ``APPEND_ONLY``  The value may only grow; shrinking, rewriting and deleting are refused.
 ``h``   ``HIDDEN``       Skipped by ``find()`` / ``show()``; every other API still sees it.
@@ -340,7 +340,8 @@ Letter  Flag             Effect
 ``0``   ``USER0``        Free for your application (``0``–``3``); carries no engine behaviour.
 ``g``   ``GROUP``        *Derived* — the record holds a group. Never settable.
 ``l``   ``LINK``         *Derived* — a symbolic link; set it with ``set_link()``.
-======  ===============  ============================================================================
+``u``   ``UNLOCK``       **Transient** — waives read-only/append-only locks for a single operation. Not stored.
+======  ===============  =======================================================================================
 
 .. code-block:: python
 
@@ -1941,4 +1942,3 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
-   

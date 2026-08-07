@@ -225,11 +225,17 @@ class JDbKey:
             {'key3'}
         """
         jdb = self.jdb
-        if keys or vals or date or key_flags or kwargs:
+        # The key-table shortcut below is only equivalent to a full scan when
+        # NOTHING constrains the result. Testing just the filter arguments made
+        # ``keys(limit=2)``, ``keys(skip=4)`` and ``keys()`` (which must hide
+        # HIDDEN records, this being a query API) silently return every key.
+        if keys or vals or date or key_flags or kwargs or limit or skip or not with_hidden:
             for key, _val in jdb.find_iter(keys=keys, vals=vals, date=date, limit=limit, skip=skip, with_value=False, with_date=False, with_hidden=with_hidden, key_flags=key_flags, **kwargs):
                 yield key
 
         else:
+            # unconstrained AND hidden records are wanted: the key table is the
+            # whole answer, so skip the per-row reads.
             yield from self
 
     def __iter__(self) -> Generator[str, None, None]:
@@ -3305,12 +3311,10 @@ class JDbReader(JDbBase):
                         (lambda row: not (n_records > row >= 0 and io_read_key(fp[-1], row)[7] & JKeyFlag.HIDDEN))
                 if k_arg_cnt == 2:
                     for _key,row_id in key_table.items():
-                        if not is_visible(row_id):
-                            continue
-
-                        val = f_read(fp, _key, row=row_id, copy=False)
-                        if is_matched(_key, val):
-                            yield _key, val
+                        if is_visible(row_id):
+                            val = f_read(fp, _key, row=row_id, copy=False)
+                            if is_matched(_key, val):
+                                yield _key, val
 
                 elif k_arg_cnt == 1:
                     for _key,row_id in key_table.items():
@@ -3458,12 +3462,12 @@ class JDbReader(JDbBase):
         # in one of three states: required (need_flags), forbidden (deny_flags) or
         # unconstrained. with_hidden is simply the default state for HIDDEN, so
         # naming 'h' in key_flags -- as '+h', '-h' or '*h' -- overrides it.
-        need_flags, deny_flags, any_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else \
-                ((int(key_flags) & KEY_FLAG_MASK), 0, 0) if key_flags is not None else (0, 0, 0)
-        # UNLOCK is call-scoped and never stored, so requiring it would match nothing
+        need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else \
+                    ((int(key_flags) & KEY_FLAG_MASK), 0) if key_flags is not None else (0, 0)
+
         need_flags &= KEY_FLAG_MASK
         deny_flags &= KEY_FLAG_MASK
-        if not with_hidden and not (need_flags | deny_flags | any_flags) & JKeyFlag.HIDDEN:
+        if not with_hidden and not (need_flags | deny_flags) & JKeyFlag.HIDDEN:
             deny_flags |= int(JKeyFlag.HIDDEN)
 
         has_flag_rule = bool(need_flags or deny_flags)
@@ -3726,25 +3730,34 @@ class JDbReader(JDbBase):
             stats.update({'loops': n_loops, 'records':n_records, 'matched':m_count, \
                     'key.filter':k_filter, 'date.filter':d_filter, 'value.filter':v_filter, 'used_s':ed_time-st_time})
 
-    def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, **kwargs) -> List[Any]:
+    def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, with_hidden:bool=False, **kwargs) -> List[Any]:
         """
         Apply a mapping function to the results of a query and return a list.
+
+        This is a query surface, so like :meth:`find` and :meth:`show` it skips
+        records carrying :attr:`JKeyFlag.HIDDEN` unless ``with_hidden=True``.
 
         Args:
             map_func (Callable[[str, Any], Any]): The lambda or function to process (key, value) pairs.
             keys (Any, optional): Condition for key filtering.
             vals (Any, optional): Condition for value filtering using operators.
-            date (Any, optional): Date filters.            
+            date (Any, optional): Date filters.
+            with_hidden (bool, optional): Also visit records carrying
+                :attr:`JKeyFlag.HIDDEN`. Defaults to False.
             **kwargs: Extra find arguments.
 
         Returns:
             List[Any]: Transformed list of objects returned by map_func.
+
+        Example:
+            >>> jdb.map(lambda k, v: v['age'], vals=Query().age > 18)
+            [25, 31]
         """
         if not callable(map_func):
             raise TypeError('not callable')
 
         matched_list = []
-        for key,val in self.find_iter(keys=keys, vals=vals, date=date, with_value=True, with_date=False, **kwargs):
+        for key,val in self.find_iter(keys=keys, vals=vals, date=date, with_value=True, with_date=False, with_hidden=with_hidden, **kwargs):
             matched_list.append(map_func(key, val))
 
         return matched_list
