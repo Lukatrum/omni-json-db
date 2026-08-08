@@ -423,7 +423,7 @@ class JDb(JDbReader):
 
         if isinstance(key, str):
             idx = key.find(SEP_SYM)
-            if func is None and idx < 0 and self.write_hook and not self.write_hook(key, val):
+            if func is None and idx < 0 and self.write_hook and not isinstance(val, JDbReader) and not self.write_hook(key, val):
                 raise TypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
             with self.open(read_only=True) as fp:
@@ -4459,7 +4459,7 @@ class JDb(JDbReader):
         key = str(key) if not isinstance(key, str) else key
         val = bytes(val) if isinstance(val, bytearray) else val
 
-        if self.write_hook and not self.write_hook(key, val):
+        if self.write_hook and not isinstance(val, JDbReader) and not self.write_hook(key, val):
             raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
         if len(key) > MAX_KEY_SIZE:
@@ -4852,7 +4852,7 @@ class JDb(JDbReader):
             JKeyError: If key length too long
         """
         io = self.io
-        if self.write_hook and not self.write_hook(key, val):
+        if self.write_hook and not isinstance(val, JDbReader) and not self.write_hook(key, val):
             raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
         if len(key) > MAX_KEY_SIZE:

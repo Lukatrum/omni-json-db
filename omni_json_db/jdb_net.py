@@ -563,7 +563,9 @@ class JNetFiles(JFilesBase):
                 resp = recv_and_load(self.sock)
 
                 if resp.get('ok'):
-                    return resp.get('ret', '')
+                    server_ip, port = self.server_addr
+                    return f'{server_ip}:{port}'
+                    # return resp.get('ret', '')
 
                 raise ValueError(f'Fail to call {resp.get("cmd", "")} {resp.get("err", 0)}')
 

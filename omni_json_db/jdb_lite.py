@@ -3871,13 +3871,9 @@ class JDbReader(JDbBase):
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
                 record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
                 flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
-                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
-                don't name keeps this method's default. So ``'+0-r'`` means "tagged
+                it, So ``'+0-r'`` means "tagged
                 USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
-                every bit it names. ``h`` is the only flag with a non-neutral
-                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
-                returns only the records that would otherwise be hidden.
-                Defaults to None.
+                every bit it names.
 
         Returns:
             Dict[str, Any]: The subset of matched data, or — when *group_by*
@@ -5638,7 +5634,7 @@ class JDbReader(JDbBase):
             if is_jdb:
                 io = self.io
                 grp_files_obj = val.files_obj
-                if not isinstance(grp_files_obj, JDiskFiles) or self.files_obj.is_group(grp_files_obj, key):
+                if isinstance(grp_files_obj, JMemFiles) or self.files_obj.is_group(grp_files_obj, key):
                     return (0x10, 0, 0)
 
                 _bytes = io.dumps_with_zip(grp_files_obj.get_KEY(), zip_type=0)
