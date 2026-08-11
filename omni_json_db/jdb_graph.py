@@ -1201,9 +1201,6 @@ class GraphDb(JDb):
             for nid in node_set:
                 result['nodes'][nid] = f_get_node(fp, nid)
 
-            # collect induced edges: for every node in the set, walk its
-            # outgoing/undirected adjacency and keep edges whose other
-            # endpoint is also in the set (each edge counted once)
             f_read = self.f_read
             f_get_adj = self.f_get_adj
             _generate_edge_key = self._generate_edge_key
@@ -1248,9 +1245,6 @@ class GraphDb(JDb):
             for nid in node_set:
                 result['nodes'][nid] = f_get_node(fp, nid)
 
-            # collect induced edges: for every node in the set, walk its
-            # outgoing/undirected adjacency and keep edges whose other
-            # endpoint is also in the set (each edge counted once)
             f_read = self.f_read
             f_get_adj = self.f_get_adj
             _generate_edge_key = self._generate_edge_key
@@ -1649,8 +1643,7 @@ class GraphDb(JDb):
                                 total += cube ** (1.0 / 3.0)
                     result[nid] = total / (k * (k - 1))
         else:
-            # directed (Fagiolo formula); weight is not supported for
-            # directed graphs, matching networkx
+            # directed (Fagiolo formula); weight is not supported for directed graphs, matching networkx
             for nid in target_ids:
                 node_out = out_set.get(nid, set())
                 node_in = in_set.get(nid, set())
@@ -1865,8 +1858,6 @@ class GraphDb(JDb):
                 seen = set()
                 for entry in f_get_adj(fp, nid):
                     d, other = entry[0], entry[1:]
-                    # dedupe: a neighbor linked by both a directed and an
-                    # undirected edge must only count as one out-link
                     if d == '<' or other in seen: continue
                     seen.add(other)
                     if weight is None:
@@ -1929,10 +1920,7 @@ class GraphDb(JDb):
             f_get_adj = self.f_get_adj
             for nid, _row in self.f_iter_nodes(fp):
                 nodes.append(nid)
-                # dedupe: a neighbor linked by both a directed and an
-                # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(
-                        entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+                adj[nid] = list(dict.fromkeys(entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
         cb = {nid: 0.0 for nid in nodes}
         for s in nodes:
@@ -1998,14 +1986,8 @@ class GraphDb(JDb):
             f_get_adj = self.f_get_adj
             for nid, _row in self.f_iter_nodes(fp):
                 nodes.append(nid)
-                # dedupe: a neighbor linked by both a directed and an
-                # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(
-                        entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+                adj[nid] = list(dict.fromkeys(entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
-            # resolve each (v, w) reachability pair to its real edge-key
-            # tuple once, up front: prefer the directed edge if both a
-            # directed and an undirected edge exist between the same pair
             _generate_edge_key = self._generate_edge_key
             edge_match = self.EDGE_RE.match
             key_table = self.io.key_table
@@ -2105,6 +2087,7 @@ class GraphDb(JDb):
                 cached = adj.get(node_id)
                 if cached is not None:
                     return cached
+
                 lst = []
                 for entry in f_get_adj(fp, node_id):
                     d, neighbor = entry[0], entry[1:]
@@ -2160,8 +2143,7 @@ class GraphDb(JDb):
                 if target not in dist:
                     return []
 
-                # build the shortest-path DAG: an edge (u, v) belongs to it
-                # iff it achieves the exact minimum known distance to v
+                # build the shortest-path DAG
                 preds = {n: [] for n in dist}
                 for u,du in dist.items():
                     for neighbor, w in get_adj(u):
@@ -2202,10 +2184,7 @@ class GraphDb(JDb):
             f_get_adj = self.f_get_adj
             for nid, _row in self.f_iter_nodes(fp):
                 nodes.append(nid)
-                # dedupe: a neighbor linked by both a directed and an
-                # undirected edge must only be traversed once
-                adj[nid] = list(dict.fromkeys(
-                    entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
+                adj[nid] = list(dict.fromkeys(entry[1:] for entry in f_get_adj(fp, nid) if entry[0] != '<'))
 
         index_counter = [0]
         indices = {}
@@ -2217,6 +2196,7 @@ class GraphDb(JDb):
         for root in nodes:
             if root in indices:
                 continue
+
             # iterative DFS: work items are (node, neighbor_iterator_position)
             work = [(root, 0)]
             while work:
@@ -2406,8 +2386,7 @@ class GraphDb(JDb):
             fp_dict (Dict[int, IO]): File-pointer dict from ``open()``/``f_get_fp``.
  
         Yields:
-            (str,str,str), int: ``(src_id, edge_type, dst_id), row_id`` for
-                each edge.
+            (str,str,str), int: ``(src_id, edge_type, dst_id), row_id`` for each edge.
         """
         edge_match = self.EDGE_RE.match
         io, fp_dict, _key_fp = self.f_get_fp(fp_dict)
@@ -2626,16 +2605,13 @@ class GraphDb(JDb):
                 neighbor = adj_id[1:]
                 edge_type = adj_id[0]
                 # every adjacency entry maps to a distinct incident edge:
-                # a neighbor may be linked by both a directed and an
-                # undirected edge, so collect each edge separately.
                 edge_key = _generate_edge_key(neighbor, node_id, True) if edge_type == '<' else \
                             _generate_edge_key(node_id, neighbor, edge_type == '>')
                 edge_row = key_table.get(edge_key, -1)
                 if edge_row >= 0:
                     matched_keys.append((edge_row, edge_key))
 
-                # clean the neighbor once (drops every entry
-                # that points back at node_id, directed or undirected)
+                # clean the neighbor once
                 adj_key = f'X:{neighbor}:'
                 adj_row = key_table.get(adj_key, -1)
                 if adj_row >= 0 \

@@ -261,14 +261,6 @@ except ImportError:
             except (IOError, OSError) as e: # pragma: no cover
                 print(e)
 
-# try:
-#     import resource
-#     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-#     if soft < 2048 <= hard:
-#         resource.setrlimit(resource.RLIMIT_NOFILE, (2048, hard))
-# except (ImportError, ValueError, OSError): # pragma: no cover
-#     pass
-
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------

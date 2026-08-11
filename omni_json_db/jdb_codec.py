@@ -545,8 +545,6 @@ except (ModuleNotFoundError, ImportError):
                 obj, self._idx = _msg_unpack(buf, idx)
 
             except (IndexError, StructError) as e: # pragma: no cover
-                # Truncated object at the buffer tail: end iteration rather
-                # than raise (KeyTable feeds only complete records).
                 raise StopIteration from e
 
             return obj

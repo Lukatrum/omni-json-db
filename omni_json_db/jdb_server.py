@@ -101,8 +101,6 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
         self.jdb = jdb
         self.active_cnt = 0
         self.verbose = verbose
-        # shared registry of group backends so every connection resolves the
-        # same group instance (essential for JMemFiles-backed groups)
         self.group_files = {}
         self.group_lock = RLock()
 
@@ -145,8 +143,6 @@ class ThreadedTCPServer(ThreadingMixIn, TCPServer):
                 _path = f'{_path}/{part}' if _path else part
 
                 # 1) live server-side group registry (authoritative).
-                # cur_jdb is None once a segment fell through to branch 2/3 below,
-                # so a deeper segment has no live registry left to peek at.
                 _sub_jdb = cur_jdb.io.groups.get(part, None) if isinstance(cur_jdb, JDbReader) else None
 
                 if _sub_jdb is not None:
@@ -226,8 +222,7 @@ class ServerHandler(BaseRequestHandler):
                 grp_files_obj = group_table.get(group_path, None)
                 if grp_files_obj is None:
                     try:
-                        # copy() the shared backend so file pointers and lock
-                        # state stay private to this connection
+                        # copy() the shared backend so file pointers and lock state stay private to this connection
                         group_table[group_path] = grp_files_obj = server.get_group_files(group_path).copy()
 
                     except (KeyError, TypeError, ValueError, RuntimeError, IOError) as e: # pragma: no cover
@@ -349,10 +344,6 @@ class ServerHandler(BaseRequestHandler):
                         resp['ret'] = grp_files_obj.is_group(*_args, **_kwargs)
 
                     elif cmd == 'add_group':
-                        # Materialize the group on the server and publish it in
-                        # the shared registry, so every connection resolves the
-                        # same backend. `kind` lets the caller keep the group's
-                        # own storage kind instead of inheriting the server's.
                         _name = _kwargs['name']
                         _kind = _kwargs.get('kind', None)
                         _target = grp_files_obj.add_group(_name)
@@ -369,26 +360,16 @@ class ServerHandler(BaseRequestHandler):
                         resp['ret'] = _target.get_KEY()
 
                     elif cmd == 'link_group': # pragma: no cover
-                        # link a foreign backend as one of this database's groups:
-                        # either another server's group (chained JNetFiles proxy)
-                        # or a KEY path reachable from this host
+                        # link a foreign backend as one of this database's groups
                         _name = _kwargs['name']
                         _addr = _kwargs.get('addr', None)
                         if _addr is not None:
                             _target = JNetFiles((str(_addr[0]), int(_addr[1])), group_path=tuple(_kwargs.get('group_path', ())))
                         else:
                             _KEY = _kwargs['KEY']
-                            # Keep the group's own storage kind: an in-memory
-                            # database reports a '<MEM...>' KEY, which is a label
-                            # and not a path -- opening it as JDiskFiles would
-                            # create a junk file named '<MEM>'. The client sends
-                            # its records over separately, since the server cannot
-                            # reach the client's memory.
                             _target = JMemFiles(name=_name) if _KEY.startswith('<MEM') else JDiskFiles(_KEY)
 
                         _target = grp_files_obj.link_group(_name, _target)
-                        # refresh the server-wide registry so other connections
-                        # (and their cached resolutions) pick up the new link
                         _full_path = f'{group_path}/{_name}' if group_path else _name
                         with server.group_lock:
                             server.group_files[_full_path] = _target

@@ -4431,7 +4431,6 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(len(remote_jdb_disk.groups), 3)
         self.assertEqual(len(remote_jdb_mem.groups), 3)
 
-
         self.assertEqual(remote_jdb_disk['disk'][:], tmp_data)
         self.assertEqual(remote_jdb_disk['mem'[:]], remote_tmp_mem)
         self.assertEqual(remote_jdb_disk['group'][:], remote_group_disk)
@@ -8774,7 +8773,7 @@ class TestJDb(unittest.TestCase):
 
             chg = {}
             with jdb.open() as fp:
-                key_table = list(dict(jdb.key_table).items())
+                key_table = list(jdb.key_table.items())
                 random.shuffle(key_table)
                 jdb.io.key_table.clear()
                 for key,row in key_table:

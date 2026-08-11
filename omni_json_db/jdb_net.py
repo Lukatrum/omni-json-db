@@ -199,8 +199,6 @@ class JNetIO(RawIOBase):
         """Disconnect and release the remote file handle on the server."""
         with self.lock:
             if self.closed or self.not_found: return # pragma: no cover
-            # during interpreter shutdown the server's daemon handler threads
-            # may already be frozen; a remote round-trip would block forever
             if not sys_is_finalizing():
                 try:
                     self.__exec('close', pre_check=False)
@@ -691,8 +689,6 @@ class JNetFiles(JFilesBase):
             ValueError: If the remote command fails.
         """
         if isinstance(KEY_file, JNetFiles):
-            # resolve locally: a group is this database's group when it targets
-            # the same server and its group path extends ours by exactly `name`
             return KEY_file.server_addr == self.server_addr and \
                     KEY_file.group_path == self.group_path + (name,)
 
@@ -1050,8 +1046,6 @@ class JNetFiles(JFilesBase):
     def LCK_close(self): # pragma: no cover
         """Safely close lock channels to prevent remote resource starvation."""
         if sys_is_finalizing(): # pragma: no cover
-            # server daemon threads are frozen during interpreter shutdown;
-            # a remote round-trip would block forever (e.g. via FileLock.__del__)
             return
 
         with self.lock:

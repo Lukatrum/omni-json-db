@@ -1057,8 +1057,7 @@ def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[L
     ret_rows = []
     for gval, (g_rows, cdate, mdate, mod_id) in groups.items():
         if field_specs is None:
-            # auto mode: collect every top-level field of dict values,
-            # non-dict values under the pseudo field '_val'
+            # auto mode
             fields = OrderedDict()
             for _kk, vv, _cc, _mm in g_rows:
                 if isinstance(vv, dict):
@@ -2281,37 +2280,36 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
                     child_vals = (_val for ii,_val in enumerate(val) if (ii//10)+1 == _cnt)
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
-
-    else:
-        try:
-            if child_key.startswith(('!$', '$')):
-                _reverse_it = child_key.startswith('!')
-                _child_key = child_key[1:] if _reverse_it else child_key
-                if _child_key in TRANSFORM_OPS: # pragma: no cover
-                    transformed = _apply_transform(_child_key, val)
-                    if transformed is None:
-                        return False
-
-                    val = transformed
-
-                if not rest_parts:
-                    rules = {child_key:rules}
-                    child_val = val
-                else: # pragma: no cover
+    
+    try:
+        if child_key.startswith(('!$', '$')):
+            _reverse_it = child_key.startswith('!')
+            _child_key = child_key[1:] if _reverse_it else child_key
+            if _child_key in TRANSFORM_OPS: # pragma: no cover
+                transformed = _apply_transform(_child_key, val)
+                if transformed is None:
                     return False
 
-            elif isinstance(val, dict):
-                child_val = val[child_key_s]
-            elif isinstance(val, (list, tuple)):
-                child_val = val[int(child_key_s)]
+                val = transformed
+
+            if not rest_parts:
+                rules = {child_key:rules}
+                child_val = val
             else: # pragma: no cover
                 return False
 
-            return _match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level)
+        elif isinstance(val, dict):
+            child_val = val[child_key_s]
+        elif isinstance(val, (list, tuple)):
+            child_val = val[int(child_key_s)]
+        else: # pragma: no cover
+            return False
 
-        except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
-            pass
+        return _match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level)
 
-        return False
+    except (KeyError, IndexError, ValueError, TypeError): # pragma: no cover
+        pass
+
+    return False
 
 #

@@ -18,7 +18,7 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, bitarray, JValueError, JKeyFlag, KEY_FLAG_MASK
+from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, JKeyFlag, KEY_FLAG_MASK
 from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
@@ -111,12 +111,6 @@ OLD_DAY_MASK    = 0x3FF_FFFF    # 9999 years
 NEW_DAY_MASK    = 0x3F_FFFF << NEW_DAY_SHIFT   # modified-created delta, bits 26..47
 CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)       # caller-only signal, stripped before storing
 
-# On API v0/v1 there is no dedicated flags field, so the KEY codecs pack JKeyFlag
-# above `days` (see KEY_FLAG_SHIFT). That leaves `days` exactly FULL_DAY_MASK
-# wide, and the two must not overlap: a single shared bit would make JKeyFlag
-# READ_ONLY indistinguishable from a large modified-date delta, silently, on
-# every v0/v1 file. KEY_FLAG_SHIFT cannot simply be raised either -- msgpack
-# tops out at uint64, so days(48) + flags(16) is already the whole budget.
 if (NEW_DAY_MASK | OLD_DAY_MASK) & ~FULL_DAY_MASK: # pragma: no cover
     raise RuntimeError(f'days field {hex(NEW_DAY_MASK | OLD_DAY_MASK)} overflows '
                        f'FULL_DAY_MASK {hex(FULL_DAY_MASK)}; it would collide with JKeyFlag')
@@ -157,10 +151,6 @@ Z2_ZIP = 7 # zstandard mode(11)             | better than gz, br
 LZ_ZIP = 8 # lz4 mode(0)                    | fastest compress+decompress but worst size
 LAST_ZIP_TYPE = LZ_ZIP
 
-# The KEY row layout is what api_ver really selects; the header is version
-# independent. JIoHEAD writes a 10-int list and every loads_v* accepts a run of
-# 4..N ints, widening short headers with historical defaults and truncating long
-# ones, so any build of omni-json-db can decode any other build's header.
 API_V0      = 0 # key=6 (val_size packed into row_size)
 API_V1      = 1 # key=7 (+val_size)
 API_V2      = 2 # key=8 (+flags);  header max_vfiles is only meaningful from here on
@@ -233,26 +223,10 @@ PAD_lut = (
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-class JDbGroupDict(dict):
-    """Custom dictionary implementation returning None instead of throwing KeyError on missing elements."""
-    __slots__ = ()
-    def __missing__(self, key:str) -> None:
-        """Return ``None`` for absent group names instead of raising ``KeyError``.
+ROW_ID_SHIFT = KEY_FLAG_MASK.bit_length()
 
-        Args:
-            key (str): The missing group name.
-
-        Returns:
-            None: Always ``None``.
-        """
-        return None
-
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
 xhash = hash # hash() is not deterministic, can export PYTHONHASHSEED=0
-class KeyTable:
+class KeyTable(KeyTableBase):
     """Standard indexing schema for tracking key-to-row mappings in the database."""
     __slots__ = ('io', 'cache', 'files_obj', 'groups', 'size', 'mask', 'flags', 'flags_mask', 'found_flags', 'with_cache')
 
@@ -284,14 +258,6 @@ class KeyTable:
         self.with_cache = with_cache
         self.cache:Dict[str,int] = OrderedDict()
 
-    def get_mode(self) -> int:
-        """Get the current classification mode configuration.
-
-        Returns:
-            int: The constant indicating the current mode, defaults to -1.
-        """
-        return -1
-
     def __repr__(self) -> str:
         """Return a string summary of the table's memory usage and density metrics."""
         return f'<{type(self).__name__} '\
@@ -301,7 +267,7 @@ class KeyTable:
             f'done:{self.size}/{self.io.n_records}+{self.found_flags.count(1)*100./max(1,len(self.found_flags)):.2f}% '\
             f'at {hex(id(self))}>'
 
-    def set(self, key:str, row_id:int):
+    def set(self, key:str, row_id:int, flags:int=0):
         """Associate a key with its row id in the key table.
 
         Args:
@@ -311,8 +277,9 @@ class KeyTable:
         if self.size < 0: #pragma: no cover
             self.clear()
 
+        val = (row_id << ROW_ID_SHIFT) | (flags & KEY_FLAG_MASK)
         cache = self.cache
-        if self.with_cache and cache.get(key, None) == row_id: # pragma: no cover
+        if self.with_cache and cache.get(key, None) == val: # pragma: no cover
             cache.move_to_end(key, last=True)
             return
 
@@ -323,24 +290,28 @@ class KeyTable:
         if key_array is None:
             groups[group_id] = key_array = bytearray()
 
-        old_row_id, s_idx, e_idx = self._find_key(key_array, key) if key_array else (-1, -1, -1)
-        if old_row_id >= 0: # old key
-            if old_row_id != row_id:
-                key_array[s_idx:e_idx] = _msg_dumps((key, row_id)) or b''
+        old_val, s_idx, e_idx = self._find_key(key_array, key) if key_array else (-1, -1, -1)
+        if old_val >= 0: # old key
+            if old_val != val:
+                key_array[s_idx:e_idx] = _msg_dumps((key, val)) or b''
                 if cache: cache.pop(key, None)
 
         else: # new key
             self.size += 1
             self.flags[key_hash & self.flags_mask] = True
-            key_array.extend(_msg_dumps((key, row_id)) or b'')
+            key_array.extend(_msg_dumps((key, val)) or b'')
 
         self._set_found_flag(row_id, True)
+
+        jio = self.io
+        if flags & JKeyFlag.GROUP and row_id < jio.n_records:
+            jio.groups.setdefault(key, None)
 
         if self.with_cache:
             while len(cache) >= self.io._key_limit:
                 cache.popitem(last=False)
 
-            cache[key] = row_id
+            cache[key] = val
             cache.move_to_end(key, last=True)
 
     def pop(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
@@ -359,7 +330,8 @@ class KeyTable:
 
         self.cache.pop(key, None)
         jio = self.io
-        is_sync = self.size == jio.n_records
+        n_records = jio.n_records
+        is_sync = self.size == n_records
         key_hash = xhash(key)
         flag_idx = key_hash & self.flags_mask
         if is_sync and not self.flags[flag_idx]:
@@ -374,8 +346,9 @@ class KeyTable:
         if key_array is None:
             groups[group_id] = key_array = bytearray()
 
-        row_id, s_idx, e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
-        if row_id >= 0:
+        val, s_idx, e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
+        if val >= 0:
+            row_id = val >> ROW_ID_SHIFT
             if is_sync:
                 del key_array[s_idx:e_idx]
                 self.size -= 1
@@ -388,7 +361,7 @@ class KeyTable:
             try:
                 key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
                 key_fp.seek(HEADER_SIZE + row_id * index_size)
-                _key, _f, _o, _r, _v, _s, _d, _kf = KEY_loads(key_fp.read(index_size))
+                _key, _f, _o, _r, _v, _s, _d, _kflags = KEY_loads(key_fp.read(index_size))
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
@@ -409,13 +382,14 @@ class KeyTable:
                     key_fp.close()
 
         if not is_sync:
-            for _key, row_id in self._item_iter(fp):
+            for _key, _val in self._item_iter(fp):
                 if key == _key:
-                    old_row_id, s_idx, e_idx = find_key(key_array, key)
-                    if old_row_id == row_id: # pragma: no cover
+                    old_val, s_idx, e_idx = find_key(key_array, key)
+                    if old_val == _val: # pragma: no cover
                         del key_array[s_idx:e_idx]
                         self.size -= 1
 
+                    row_id = _val >> ROW_ID_SHIFT
                     set_found_flag(row_id, False)
                     return row_id
 
@@ -432,6 +406,10 @@ class KeyTable:
         Returns:
             int: The mapped row index, or ``default_row_id`` if not found.
         """
+        row_id,_flags = self.get_both(key, fp=fp)
+        return default_row_id if row_id < 0 else row_id
+
+    def get_both(self, key:str, fp:IO=None) -> Tuple[int,int]:
         if self.size < 0: #pragma: no cover
             self.clear()
 
@@ -440,13 +418,13 @@ class KeyTable:
         key_hash = xhash(key)
         flag_idx = key_hash & self.flags_mask
         if is_sync and not self.flags[flag_idx]:
-            return default_row_id
+            return -1,0
 
         cache = self.cache
         if self.with_cache:
-            row_id = cache.get(key, -1)
-            if row_id >= 0:
-                return row_id
+            val = cache.get(key, -1)
+            if val >= 0:
+                return val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK
 
         mask = self.mask
         groups = self.groups
@@ -455,31 +433,32 @@ class KeyTable:
         key_array = groups[group_id]
         if key_array is None:
             groups[group_id] = key_array = bytearray()
-        row_id, _s_idx, _e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
-        if row_id >= 0:
+
+        val, _s_idx, _e_idx = find_key(key_array, key) if key_array else (-1, -1, -1)
+        if val >= 0:
             if self.with_cache:
                 while len(cache) >= jio._key_limit:
                     cache.popitem(last=False)
 
-                cache[key] = row_id
+                cache[key] = val
                 cache.move_to_end(key, last=True)
 
-            return row_id
+            return val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK
 
         if not is_sync:
-            for _key, row_id in self._item_iter(fp):
+            for _key, val in self._item_iter(fp):
                 if _key == key:
                     # clean up extra buffer
                     if self.with_cache:
                         while len(cache) >= jio._key_limit:
                             cache.popitem(last=False)
 
-                        cache[key] = row_id
+                        cache[key] = val
                         cache.move_to_end(key, last=True)
 
-                    return row_id
+                    return val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK
 
-        return default_row_id
+        return -1,0
 
     def items(self, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Yield all key and row_id pairs from the table.
@@ -500,11 +479,15 @@ class KeyTable:
                 for key_array in self.groups:
                     if not key_array: continue
                     unpacker.feed(key_array)
-                    yield from unpacker
+                    for key,val in unpacker:
+                        row_id = val >> ROW_ID_SHIFT
+                        yield key, row_id
             return
 
         # not sync
-        yield from self._item_iter(fp)
+        for key,val in self._item_iter(fp):
+            row_id = val >> ROW_ID_SHIFT
+            yield key, row_id
 
     def values(self, fp:IO=None) -> Generator[int, None, None]:
         """Yield all active row indices in the table.
@@ -525,12 +508,14 @@ class KeyTable:
                 for key_array in self.groups:
                     if not key_array: continue
                     unpacker.feed(key_array)
-                    for _key,row in unpacker:
-                        yield row
+                    for _key,val in unpacker:
+                        row_id = val >> ROW_ID_SHIFT
+                        yield row_id
             return
 
         # not sync
-        for _key,row_id in self._item_iter(fp):
+        for _key,val in self._item_iter(fp):
+            row_id = val >> ROW_ID_SHIFT
             yield row_id
 
     def keys(self, fp:IO=None) -> Generator[str, None, None]:
@@ -557,10 +542,10 @@ class KeyTable:
             return
 
         # not sync
-        for key,_row_id in self._item_iter(fp):
+        for key,_val in self._item_iter(fp):
             yield key
 
-    def copy(self) -> KeyTable: # pragma: no cover
+    def copy(self) -> KeyTable:
         """Create a duplicate instance of the KeyTable.
 
         Returns:
@@ -606,13 +591,13 @@ class KeyTable:
 
     def __contains__(self, key:str) -> bool:
         """Check if a key exists in the table using the `in` keyword."""
-        return self.get(key, -1) != -1
+        return self.get(key, -1) >= 0
 
     def __iter__(self) -> Generator[str, None, None]:
         """Iterate over the keys in the table."""
         yield from self.keys()
 
-    def __eq__(self, obj:Union[KeyTable,Dict[str,int]]) -> bool:
+    def __eq__(self, obj:Union[KeyTableBase,Dict[str,int]]) -> bool:
         """Check if this table contains the exact same key-row mappings as another object."""
         if self is obj:
             return True
@@ -625,10 +610,8 @@ class KeyTable:
                 return True
 
         for key,val in self.items():
-            if key not in obj:
-                return False
-
-            if val != obj.get(key, -1):
+            _val = obj.get(key, -1)
+            if _val < 0 or val != _val:
                 return False
 
         return True
@@ -642,9 +625,10 @@ class KeyTable:
             fp (IO, optional): The open KEY file pointer. None=use internal
 
         Yields:
-            (str, int): Each record's key and its row id.
+            (str, int): Each record's key and its row id and flags.
         """
         jio = self.io
+        io_groups = jio.groups
         is_empty = self.size == 0
         flags = self.flags
         mask = self.mask
@@ -656,9 +640,10 @@ class KeyTable:
         try:
             key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
             row_id = 0
-            for (_key, _f, _o, _r, _v, _s, _d, _kf) in jio.KEY_iter(key_fp, row_id, jio.n_records):
+            for (_key, _f, _o, _r, _v, _s, _d, kflags) in jio.KEY_iter(key_fp, row_id, jio.n_records):
+                _val = (row_id  << ROW_ID_SHIFT) | (kflags & KEY_FLAG_MASK)
                 if is_empty or not get_found_flag(row_id):
-                    wr_bytes = _msg_dumps((_key, row_id)) or b''
+                    wr_bytes = _msg_dumps((_key, _val)) or b''
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
                     group_id = key_hash & mask
@@ -670,7 +655,9 @@ class KeyTable:
                     set_found_flag(row_id, True)
                     self.size += 1
 
-                yield _key, row_id
+                if kflags & JKeyFlag.GROUP:
+                    io_groups.setdefault(_key, None)
+                yield _key, _val
                 row_id += 1
 
         except FileNotFoundError: # pragma: no cover
@@ -741,27 +728,120 @@ class KeyTable:
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-class DictKeyTable(dict):
+try:
+    from BTrees.OLBTree import OLBTree as BTree
+except ModuleNotFoundError:
+    BTree = None
+
+class DictKeyTable(KeyTableBase):
     """Key table backed by a plain Python ``dict`` (the default)."""
-    __slots__ = ()
-    def __missing__(self, key:str) -> int:
-        """Handle missing keys safely by returning default error indicator value -1.
+    __slots__ = ('io', 'table')
 
-        Args:
-            key (str): Target lookup indicator.
+    def __init__(self, io:JIo, btree:bool=False):
+        self.table = BTree() if btree and BTree is not None else {}
+        self.io = io
+
+    def __repr__(self) -> str:
+        """Return a string summary of the table's memory usage and density metrics."""
+        return f'<{type(self).__name__} {type(self.table).__name__} #{self.io.n_records} at {hex(id(self))}>'
+
+    def set(self, key:str, row_id:int, flags:int=0):
+        jio = self.io
+        self.table[key] = (row_id << ROW_ID_SHIFT) | int(flags & KEY_FLAG_MASK)
+        if flags & JKeyFlag.GROUP and row_id < jio.n_records:
+            jio.groups.setdefault(key, None)
+
+    def pop(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
+        _fp = fp
+        val = self.table.pop(key, -1)
+        if val < 0:
+            return default_row_id
+
+        row_id = val >> ROW_ID_SHIFT
+        return row_id
+
+    def get(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
+        _fp = fp
+        val = self.table.get(key, -1)
+        return default_row_id if val < 0 else (val >> ROW_ID_SHIFT)
+
+    def get_both(self, key:str, fp:IO=None) -> Tuple[int,int]:
+        _fp = fp
+        val = self.table.get(key, -1)
+        return (-1,0) if val < 0 else (val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK)
+
+    def items(self, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
+        _fp = fp
+        for key,val in self.table.items():
+            yield key, val >> ROW_ID_SHIFT
+
+    def values(self, fp:IO=None) -> Generator[int, None, None]:
+        _fp = fp
+        for val in self.table.values():
+            yield val >> ROW_ID_SHIFT
+
+    def keys(self, fp:IO=None) -> Generator[str, None, None]:
+        _fp = fp
+        yield from self.table.keys()
+
+    def copy(self) -> DictKeyTable:
+        key_table = DictKeyTable(self.io, btree=not isinstance(self.table, dict))
+        for key,val in self.table.items():
+            key_table.table[key] = val
+        return key_table
+
+    def clear(self):
+        self.table.clear()
+
+    def __len__(self) -> int:
+        """Return the total number of registered data records.
 
         Returns:
-            int: Error code indicating unallocated item references.
+            int: The record count.
         """
-        return -1
+        return len(self.table)
 
-    def get_mode(self) -> int:
-        """Return the key-table mode code (``-1`` for a plain dict).
+    def __setitem__(self, key:str, row_id:int):
+        """Map a key to a row ID using item assignment (e.g., ``table[key] = row_id``)."""
+        self.set(key, row_id)
 
-        Returns:
-            int: The mode code.
+    def __getitem__(self, key:str) -> int:
+        """Retrieve a row ID using item access (e.g., ``table[key]``)."""
+        return self.get(key, -1)
+
+    def __delitem__(self, key:str):
+        """Delete a key mapping using the `del` keyword.
+
+        Raises:
+            KeyError: If the key does not exist.
         """
-        return -1
+        if self.pop(key, -1) < 0:
+            raise KeyError(f'{key}')
+
+    def __contains__(self, key:str) -> bool:
+        """Check if a key exists in the table using the `in` keyword."""
+        return self.get(key, -1) >= 0
+
+    def __iter__(self) -> Generator[str, None, None]:
+        """Iterate over the keys in the table."""
+        yield from self.table
+
+    def __eq__(self, obj:Union[KeyTableBase,Dict[str,int]]) -> bool:
+        """Check if this table contains the exact same key-row mappings as another object."""
+        if self is obj:
+            return True
+
+        size = len(obj)
+        table = self.table
+        if len(table) != size:
+            return False
+
+        for key,val in table.items():
+            _val = obj.get(key, -1)
+            if _val < 0 or (val >> ROW_ID_SHIFT) != _val:
+                return False
+
+        return True
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -856,56 +936,6 @@ class LiteKeyTable(KeyTable):
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-try:
-    from BTrees.OLBTree import OLBTree as BTree
-
-    class BTreeKeyTable(BTree):
-        """Key table backed by a B-tree (``BTrees.OLBTree``), for large sorted key sets."""
-        def __repr__(self) -> str:
-            return f'<{type(self).__name__} at {hex(id(self))}>'
-
-        def __eq__(self, obj) -> bool:
-            if self is obj:
-                return True
-
-            if len(self) != len(obj):
-                return False
-
-            for key,val in self.items():
-                if key not in obj:
-                    return False
-
-                if val != obj.get(key, -1):
-                    return False
-
-            return True
-
-        def copy(self) -> BTreeKeyTable:
-            """Return a copy of this B-tree key table.
-
-            Returns:
-                BTreeKeyTable: The copy.
-            """
-            return BTreeKeyTable(self)
-
-        def __getitem__(self, key:str) -> int:
-            return self.get(key, -1)
-
-        def get_mode(self) -> int:
-            """Return the key-table mode code (``-1`` for the B-tree table).
-
-            Returns:
-                int: The mode code.
-            """
-            return -1
-
-except ModuleNotFoundError:
-    BTreeKeyTable = None
-
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
-#-----------------------------------------------------------------------------
 g_KEY_J = JIoKEY_J()
 g_KEY_S = JIoKEY_S()
 g_KEY_M = JIoKEY_M()
@@ -919,9 +949,6 @@ g_VAL_U = JIoVAL_U()
 g_KEY_U = JIoKEY_U()
 g_HEAD = JIoHEAD()
 
-# data_type -> codec selector letters, indexed by the *_TYPE constants above.
-# Replaces the copy/pasted if/elif ladder that previously had to be duplicated
-# once per API version inside change_APIs().
 KEY_CODEC_lut = (
     'J',  # DEF_TYPE   (0)  -> remapped to J_S_TYPE before lookup
     'L',  # L_J_TYPE   (1)
@@ -1150,7 +1177,6 @@ class JIo(JIoBase):
         old_days = days & OLD_DAY_MASK
         new_days = (days & NEW_DAY_MASK) >> NEW_DAY_SHIFT
 
-        # NOTES: remove after API v3
         if old_days < NUM_1970_DAYS and old_days+new_days < NUM_1996_DAYS:  # pragma: no cover
             old_days += NUM_2000_DAYS
             old_date = THE_1ST_DATE + timedelta(days=old_days)
@@ -1244,7 +1270,7 @@ class JIo(JIoBase):
             key_limit (str | int, optional): Sizing constraint boundary for index memory.
 
                 - "no" | 0 = use DictKeyTable (dict). (default). 
-                - "bt" | -0x100 = use BTreeKeyTable.
+                - "bt" | -0x100 = use DickKeyTable(btree).
                 - "l0"-"l5" | -ve = use LiteKeyTable (fast load_keys()). 
                 - "<{n}" | +ve = use PartialKeyTable (fast load_keys()).
 
@@ -1314,7 +1340,7 @@ class JIo(JIoBase):
         self._val_codec     = val_codec
         self._key_codec     = key_codec
         self._data_type     = self._zip_type = self._key_limit = -1
-        self.key_table      = DictKeyTable() # must before self.key_limit = key_limit
+        self.key_table      = DictKeyTable(self) # must before self.key_limit = key_limit
         self.sync_id        = sync_id
         self.swap_id        = swap_id
         self.remv_id        = remv_id
@@ -1328,10 +1354,10 @@ class JIo(JIoBase):
             self.zip_type = zip_type
         self.key_limit      = key_limit
         self.file_table     = defaultdict(int)
-        self.groups         = JDbGroupDict()
+        self.groups         = {}
         self.key_table      = PartialKeyTable(self) if self._key_limit > 0 else \
-                                DictKeyTable() if self._key_limit == 0 else \
-                                BTreeKeyTable() if self._key_limit == -0x100 else \
+                                DictKeyTable(self) if self._key_limit == 0 else \
+                                DictKeyTable(self, btree=True) if self._key_limit == -0x100 else \
                                 LiteKeyTable(self, (-self._key_limit-1) | 0x1000)
 
         self.days = self.min_days = self._swap_id = self._remv_id = self.max_vfiles = -1
@@ -1361,7 +1387,7 @@ class JIo(JIoBase):
             raise TypeError
         if not isinstance(self._key_limit, int):
             raise TypeError
-        if not isinstance(self.key_table, (KeyTable, DictKeyTable, BTreeKeyTable)):
+        if not isinstance(self.key_table, (KeyTable, DictKeyTable)):
             raise TypeError
         if not (isinstance(self.pad_byte, bytes) and len(self.pad_byte) == 1):
             raise TypeError
@@ -1618,20 +1644,20 @@ class JIo(JIoBase):
         if not isinstance(value, int):
             raise TypeError(f'invalid key limit type {value}')
 
-        if value == -0x100 and BTreeKeyTable is None: # pragma: no cover
+        if value == -0x100 and BTree is None: # pragma: no cover
             raise ModuleNotFoundError("BTrees is not installed. Please pip install BTrees.")
 
         if self._key_limit != value and (self.key_table is not None):
             if value == 0:
                 if self._key_limit != 0:
                     self.key_table.clear()
-                    self.key_table = DictKeyTable()
+                    self.key_table = DictKeyTable(self)
                     self._n_records = self._n_lines = self.file_size = 0
 
             elif value == -0x100:
                 if self._key_limit != -0x100:
                     self.key_table.clear()
-                    self.key_table = BTreeKeyTable()
+                    self.key_table = DictKeyTable(self, btree=True)
                     self._n_records = self._n_lines = self.file_size = 0
 
             elif value < 0:
@@ -1925,6 +1951,19 @@ class JIo(JIoBase):
         row_id = (self.n_lines + row_id) if row_id < 0 else row_id
         return fp.seek(HEADER_SIZE + row_id * self.index_size)
 
+    def group_iter(self, fp:IO) -> Generator[str, None, None]:
+        key_table = self.key_table
+        if isinstance(key_table, KeyTable):
+            is_sync = key_table.size == self.n_records
+            if is_sync:
+                yield from self.groups
+            else:
+                for key,val in key_table._item_iter(fp):
+                    if val & JKeyFlag.GROUP:
+                        yield key
+        else:
+            yield from self.groups
+
     def get_dead_row(self, min_row_id:int, req_size:int) -> Tuple[int, int, int, int]:
         """Get the matched dead row from DEAD_rows cache.
 
@@ -1993,12 +2032,8 @@ class JIo(JIoBase):
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
         if key and file_id == 0x10 and row_size == 0:
-            # GROUP describes what the row IS, not what the caller asked for, so
-            # derive it here -- the mirror image of the KEY codecs, which
-            # synthesize it on every loads_v*. Without this the flag and the
-            # inline 0x10 marker can disagree on disk (e.g. a row moved into the
-            # DEAD area, where the other flags are deliberately reset).
             flags |= int(JKeyFlag.GROUP) # plain int: marshal/msgpack cannot encode an IntFlag
+
         data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days, flags)
         data_size = len(data)
         index_size = self.index_size
@@ -2156,9 +2191,6 @@ class JIo(JIoBase):
 
         file_table = self.file_table
         index_size = self.index_size
-        # An empty file_table means "not scanned yet", NOT "no VAL files": keep
-        # whatever read_header() gave us instead of persisting a 0 that would make
-        # the next update_file_table() under-scan and miss live VAL files.
         if file_table:
             self.max_vfiles = max(file_table) + 1
 
@@ -2169,8 +2201,7 @@ class JIo(JIoBase):
             data += pad_bytes
 
         elif pad_size < 0: # pragma: no cover
-            # never let the header spill into row 0 -- that silently corrupts the
-            # first record instead of failing here.
+            # never let the header spill into row 0
             raise JValueError(f'header too large: {len(data)+1} > {HEADER_SIZE} bytes')
 
         data += b'\n'
@@ -2435,7 +2466,6 @@ class JIo(JIoBase):
         swap_id         = self.swap_id
         remv_id         = self.remv_id
         sync_id         = self.sync_id
-        is_group_row    = lambda file_id,row_size,flags: bool(flags & JKeyFlag.GROUP) or (file_id == 0x10 and row_size == 0)
         fast_mode       = isinstance(key_table, KeyTable)
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
@@ -2527,10 +2557,8 @@ class JIo(JIoBase):
                             key_table.pop(key, 0)
 
                 if records < n_records:
-                    for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
-                        key_table[key] = records
-                        if is_group_row(file_id, row_size, flags): # pragma: no cover
-                            self.groups.setdefault(key, None)
+                    for (key, _file_id, _offset, _row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
+                        key_table.set(key, records, flags)
                         records += 1
 
                 if n_records == 0:
@@ -2568,14 +2596,14 @@ class JIo(JIoBase):
                     else:
                         KEY_loads = self.KEY_loads
                         line = bytearray(index_size)
-                        for (key, _f, _o, _rs, _vs, _v, _d, _kf) in self.KEY_iter(fp, n_records, min(n_lines, n_records+remv_diff)):
+                        for (key, _f, _o, _rs, _vs, _v, _d, _kflags) in self.KEY_iter(fp, n_records, min(n_lines, n_records+remv_diff)):
                             old_row = key_table.pop(key, -1)
                             if n_records > old_row >= 0:
                                 cur_pos = fp.tell()
                                 fp.seek(HEADER_SIZE + old_row * index_size)
                                 if fp.readinto(line) == index_size:
                                     new_rec = KEY_loads(line)
-                                    key_table[new_rec[0]] = old_row
+                                    key_table.set(new_rec[0], old_row, _kflags)
                                 fp.seek(cur_pos)
 
                     self._sync_id   = sync_id
@@ -2614,18 +2642,9 @@ class JIo(JIoBase):
         if n_records == 0:
             groups.clear()
         else:
-            new_groups = set()
-            for (key, file_id, _offset, row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
-                key_table[key] = records
-                if is_group_row(file_id, row_size, flags):
-                    new_groups.add(key)
+            for (key, _file_id, _offset, _row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
+                key_table.set(key, records, flags)
                 records += 1
-
-            for grp_name in new_groups:
-                groups.setdefault(grp_name, None)
-
-            for grp_name in (set(groups) - new_groups):
-                groups.pop(grp_name, None)
 
         self.update_file_table()
         self._sync_id   = sync_id
@@ -2802,6 +2821,7 @@ class JIo(JIoBase):
                 for idx in range(0, n_bytes, index_size):
                     try:
                         yield KEY_loads(mv_buf[idx:idx+index_size])
+
                     except ValueError: # pragma: no cover
                         cnt += n_lines
                         break
@@ -2820,6 +2840,7 @@ class JIo(JIoBase):
                 for idx in range(n_bytes-index_size, -index_size, -index_size):
                     try:
                         yield KEY_loads(mv_buf[idx:idx+index_size])
+
                     except ValueError: # pragma: no cover
                         cnt += n_lines
                         break

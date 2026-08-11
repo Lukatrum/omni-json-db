@@ -10,7 +10,7 @@ from unicodedata import east_asian_width
 from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
-from .jdb_io import JIo, KeyTable, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
+from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
 from .jdb_query import QUERY_OPS, Condition, \
@@ -131,7 +131,7 @@ class JDbKey:
                 io_read_key = io.read_key
                 io_conv_date = io.z_conv_date
                 for _key,_val in jdb.find_iter(key):
-                    row_id = key_table[_key] if not isinstance(key_table, KeyTable) else key_table.get(_key, -1, fp=key_fp)
+                    row_id = key_table.get(_key, -1, fp=key_fp)
                     _k, file_id, offset, size, vsize, ver, days, kflags = io_read_key(key_fp, row_id)
                     old_date, new_date  = io_conv_date(days)
                     matches[_key] = (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
@@ -148,7 +148,7 @@ class JDbKey:
             io, fp, key_fp = jdb.f_get_fp(fp)
             key = str(key) if not isinstance(key, str) else key
             key_table = io.key_table
-            row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row_id = key_table.get(key, -1, fp=key_fp)
             if io.n_records > row_id >= 0:
                 _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
                 old_date, new_date  = io.z_conv_date(days)
@@ -199,8 +199,7 @@ class JDbKey:
             with_hidden (bool, optional): Include records carrying
                 :attr:`JKeyFlag.HIDDEN`. This is a query API, so like
                 :meth:`JDbReader.find` and :meth:`JDbReader.show` it hides them
-                by default. A shorthand for ``key_flags='*h'``, which wins if
-                both are given. Defaults to ``False``.
+                by default. Defaults to ``False``.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
                 record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
                 flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
@@ -208,9 +207,7 @@ class JDbKey:
                 don't name keeps this method's default. So ``'+0-r'`` means "tagged
                 USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
                 every bit it names. ``h`` is the only flag with a non-neutral
-                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
-                returns only the records that would otherwise be hidden.
-                Defaults to None.
+                default. Defaults to None.
             **kwargs: Additional filtering arguments.
 
         Yields:
@@ -795,7 +792,7 @@ class JDbKey:
             if isinstance(key, str):
                 idx = key.find(SEP_SYM)
                 if idx < 0:
-                    row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+                    row_id = key_table.get(key, -1, fp=key_fp)
                     if io.n_records > row_id >= 0:
                         _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
                         old_date, new_date  = io.z_conv_date(days)
@@ -806,17 +803,20 @@ class JDbKey:
                 grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                 f_get_group = jdb.f_get_group
                 if not grp_name:
-                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not kflags & JKeyFlag.GROUP or (kflags & JKeyFlag.HIDDEN and not with_hidden): continue
+                    for grp_name in io.group_iter(key_fp):
+                        _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
+                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                            group_jdb = f_get_group(fp, grp_name)
+                            if isinstance(group_jdb, JDbReader):
+                                for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden):
+                                    yield grp_name+SEP_SYM+_key, _info
+                else:
+                    _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
+                    if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden):
                                 yield grp_name+SEP_SYM+_key, _info
-                else:
-                    group_jdb = f_get_group(fp, grp_name)
-                    if isinstance(group_jdb, JDbReader):
-                        for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden):
-                            yield grp_name+SEP_SYM+_key, _info
 
                 return
 
@@ -900,7 +900,7 @@ class JDbKey:
                     _key = str(_key)
                     if _key not in done: # pragma: no cover
                         done.add(_key)
-                        row_id = key_table[_key] if not isinstance(key_table, KeyTable) else key_table.get(_key, -1, fp=key_fp)
+                        row_id = key_table.get(_key, -1, fp=key_fp)
                         if row_id < 0:
                             if _key.find(SEP_SYM) >= 0: # pragma: no cover
                                 for kk,_info in self.item_iter(_key):
@@ -917,7 +917,7 @@ class JDbKey:
 
             # bytes | bytearray | bool
             key = str(key)
-            row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row_id = key_table.get(key, -1, fp=key_fp)
             if io.n_records > row_id >= 0:
                 _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
                 old_date, new_date = io.z_conv_date(days)
@@ -1045,7 +1045,7 @@ class JDbReader(JDbBase):
             key_limit (Union[str, int, None], optional): Key table limitation constraint.
                 
                 - "no" = use DictKeyTable. (default). 
-                - "bt" = use BTreeKeyTable.
+                - "bt" = use DictKeyTable(btree).
                 - "l0"-"l5" = use LiteKeyTable.
                 - +ve: use PartialKeyTable.
 
@@ -1112,7 +1112,6 @@ class JDbReader(JDbBase):
                 files_obj = JDiskFiles(KEY_file)
 
         elif KEY_file is None or isinstance(KEY_file, bytearray):
-            # KEY_file=bytearray(), VAL_table={}, LCK_file=bytearray()
             files_obj = JMemFiles(KEY_file, **kwargs)
 
         elif isinstance(KEY_file, JFilesBase):
@@ -1355,7 +1354,7 @@ class JDbReader(JDbBase):
                     jdb_key_table = jdb.io.key_table
                     jdb_key_fp = ref_fp[-1]
                     for key,row in self.io.sorted_key_table_items():
-                        ref_row = jdb_key_table[key] if not isinstance(jdb_key_table, KeyTable) else jdb_key_table.get(key, -1, fp=jdb_key_fp)
+                        ref_row = jdb_key_table.get(key, -1, fp=jdb_key_fp)
                         if ref_row < 0 or f_read(fp, key, row=row, copy=False) != jdb_read(ref_fp, key, row=ref_row, copy=False):
                             return False
 
@@ -1733,7 +1732,7 @@ class JDbReader(JDbBase):
 
             elif isinstance(key.start, str):
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-                _row_id = key_table[key.start] if not isinstance(key_table, KeyTable) else key_table.get(key.start, -1, fp=key_fp)
+                _row_id = key_table.get(key.start, -1, fp=key_fp)
                 if n_records > _row_id >= 0:
                     _k, _f, _o, _s, _vs, ver, _d, _kf = io.read_key(key_fp, _row_id)
                     min_ver = ver
@@ -1748,7 +1747,7 @@ class JDbReader(JDbBase):
 
             elif isinstance(key.stop, str):
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-                _row_id = key_table[key.stop] if not isinstance(key_table, KeyTable) else key_table.get(key.stop, -1, fp=key_fp)
+                _row_id = key_table.get(key.stop, -1, fp=key_fp)
                 if n_records > _row_id >= 0:
                     _k, _f, _o, _s, _vs, ver, _d, _kf = io.read_key(key_fp, _row_id)
                     max_ver = ver
@@ -2027,19 +2026,19 @@ class JDbReader(JDbBase):
 
             except AttributeError as e: # pragma: no cover
                 if not no_raise:
-                    raise AttributeError from e
+                    raise AttributeError(*e.args) from e
 
             except JKeyError as e: # pragma: no cover
                 if not no_raise:
-                    raise KeyError from e
+                    raise KeyError(*e.args) from e
 
             except JValueError as e: # pragma: no cover
                 if not no_raise:
-                    raise ValueError from e
+                    raise ValueError(*e.args) from e
 
             except JTypeError as e: # pragma: no cover
                 if not no_raise:
-                    raise TypeError from e
+                    raise TypeError(*e.args) from e
 
             except JError as e: # pragma: no cover
                 if not no_raise:
@@ -3095,8 +3094,7 @@ class JDbReader(JDbBase):
                 info = f'[KEY] {path}'
                 info += f'\n[JFiles] {files_obj}'
                 info += f'\n[Config] min_value_size:{io.min_value_size} max_file_size:{io.max_file_size/(2**20):,.1f}MB reserved:{io.reserved_rate*100.:.2f}% max_wsize:{self.max_wsize}'
-                # info += f'\n[LOCK] {self.file_lock}'
-
+                
                 api_ver = io.api_ver
                 zip_str = io.zip_type_str
                 type_str = io.data_type_str
@@ -3246,7 +3244,7 @@ class JDbReader(JDbBase):
             if isinstance(key, str):
                 idx = key.find(SEP_SYM)
                 if idx < 0:
-                    row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+                    row_id = key_table.get(key, -1, fp=key_fp)
                     if row_id >= 0:
                         yield key, self.f_read(fp, key, row=row_id, copy=False)
 
@@ -3255,17 +3253,20 @@ class JDbReader(JDbBase):
                 grp_name, jdb_key = key[:idx], key[idx+SEP_LEN:]
                 f_get_group = self.f_get_group
                 if not grp_name:
-                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not kflags & JKeyFlag.GROUP or (kflags & JKeyFlag.HIDDEN and not with_hidden): continue
-                        group_jdb = f_get_group(fp, grp_name)
-                        if isinstance(group_jdb, JDbReader):
-                            for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
-                                yield grp_name+SEP_SYM+_key, _val
+                    for grp_name in io.group_iter(key_fp):
+                        _rid, kflags = key_table.get_both(grp_name, key_fp)
+                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                            group_jdb = f_get_group(fp, grp_name)
+                            if isinstance(group_jdb, JDbReader):
+                                for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
+                                    yield grp_name+SEP_SYM+_key, _val
                 else:
                     group_jdb = f_get_group(fp, grp_name)
                     if isinstance(group_jdb, JDbReader):
-                        for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
-                            yield grp_name+SEP_SYM+_key, _val
+                        _rid, kflags = key_table.get_both(grp_name, key_fp)
+                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                            for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
+                                yield grp_name+SEP_SYM+_key, _val
 
                 return
 
@@ -3338,7 +3339,7 @@ class JDbReader(JDbBase):
                     if _key not in done:
                         done.add(_key)
 
-                        row_id = key_table[_key] if not isinstance(key_table, KeyTable) else key_table.get(_key, -1, fp=key_fp)
+                        row_id = key_table.get(_key, -1, fp=key_fp)
                         if row_id < 0:
                             if _key.find(SEP_SYM) >= 0:
                                 for kk,vv in self.item_iter(_key): # pragma: no cover
@@ -3353,7 +3354,7 @@ class JDbReader(JDbBase):
 
             # bytes | bytearray | bool
             key = str(key) if not isinstance(key, str) else key
-            row_id = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row_id = key_table.get(key, -1, fp=key_fp)
             if row_id >= 0:
                 yield key, self.f_read(fp, key, row=row_id, copy=False)
 
@@ -3412,18 +3413,14 @@ class JDbReader(JDbBase):
             with_hidden (bool, optional): Include records carrying
                 :attr:`JKeyFlag.HIDDEN`. The raw iterator returns them; it is
                 :meth:`find` and :meth:`show`, which wrap this method, that hide
-                them by default. A shorthand for ``key_flags='*h'``, which wins
-                if both are given. Defaults to ``True``.
+                them by default. Defaults to ``True``.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
                 record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
                 flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
-                it, ``'*r'`` explicitly leaves it unconstrained, and a flag you
-                don't name keeps this method's default. So ``'+0-r'`` means "tagged
-                USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
-                every bit it names. ``h`` is the only flag with a non-neutral
-                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
-                returns only the records that would otherwise be hidden.
-                Defaults to None.
+                it, and a flag you don't name keeps this method's default. 
+                So ``'+0-r'`` means "tagged USER0 and not read-only". 
+                An ``int``/:class:`JKeyFlag` requires every bit it names. 
+                ``h`` is the only flag with a non-neutral default. Defaults to None.
 
         Yields:
             (str, Any): Matching key and its associated value (or None if `with_value` is False).
@@ -3461,7 +3458,7 @@ class JDbReader(JDbBase):
         # Resolve the flag predicate once, before any branch needs it. Each flag is
         # in one of three states: required (need_flags), forbidden (deny_flags) or
         # unconstrained. with_hidden is simply the default state for HIDDEN, so
-        # naming 'h' in key_flags -- as '+h', '-h' or '*h' -- overrides it.
+        # naming 'h' in key_flags -- as '+h' or '-h'.
         need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else \
                     ((int(key_flags) & KEY_FLAG_MASK), 0) if key_flags is not None else (0, 0)
 
@@ -3519,20 +3516,17 @@ class JDbReader(JDbBase):
                 key_rule = keys[:idx]
                 key_rule = re_compile(key_rule) if key_rule else None
                 next_keys = keys[idx+SEP_LEN:]
-                next_idx = next_keys.find(SEP_SYM)
+                next_idx = next_keys.find(SEP_SYM) if next_keys else -1
 
                 if next_idx < 0 and not next_keys: # pragma: no cover
                     next_keys = None
 
                 with self.open(read_only=True) as fp:
                     io, fp, key_fp = self.f_get_fp(fp)
+                    key_table = io.key_table
                     f_get_group = self.f_get_group
-                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not kflags & JKeyFlag.GROUP: continue
-                        # only the HIDDEN part gates the descent: a flag rule filters
-                        # RECORDS, so key_flags='+0' must not also demand that the
-                        # group row itself be tagged. A hidden group, though, keeps
-                        # its whole subtree out of a query.
+                    for grp_name in io.group_iter(key_fp):
+                        _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
                         if not (kflags & deny_flags & JKeyFlag.HIDDEN) and not (key_rule and not key_rule.search(grp_name)):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
@@ -3865,9 +3859,7 @@ class JDbReader(JDbBase):
                 (:meth:`find`, :meth:`show`, :meth:`JDbKey.__call__`): every
                 iterator (:meth:`items`, :meth:`values`, :meth:`item_iter`,
                 ``iter()``, ``len()``, ``==``) returns hidden records normally,
-                and naming one directly always works. A shorthand for
-                ``key_flags='*h'``, which wins if both are given.
-                Defaults to ``False``.
+                and naming one directly always works. Defaults to ``False``.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
                 record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
                 flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
@@ -3939,9 +3931,7 @@ class JDbReader(JDbBase):
                 :attr:`JKeyFlag.HIDDEN`. Hiding applies only to the query APIs:
                 every iterator (:meth:`items`, :meth:`values`,
                 :meth:`item_iter`, ``iter()``, ``len()``, ``==``) returns hidden
-                records normally, and naming one directly always works. A
-                shorthand for ``key_flags='*h'``, which wins if both are given.
-                Defaults to ``False``.
+                records normally, and naming one directly always works. Defaults to ``False``.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Filter on the
                 record's :class:`JKeyFlag` bits. A ``chmod``-style string puts each
                 flag in one of three states: ``'+r'`` requires it, ``'-r'`` forbids
@@ -3949,9 +3939,7 @@ class JDbReader(JDbBase):
                 don't name keeps this method's default. So ``'+0-r'`` means "tagged
                 USER0 and not read-only". An ``int``/:class:`JKeyFlag` requires
                 every bit it names. ``h`` is the only flag with a non-neutral
-                default, so ``'*h'`` is exactly ``with_hidden=True`` and ``'+h'``
-                returns only the records that would otherwise be hidden.
-                Defaults to None.
+                default, Defaults to None.
 
         Returns:
             Dict[str, Any]: The subset of matched data, or — when *group_by*
@@ -4053,8 +4041,6 @@ class JDbReader(JDbBase):
                 return f"\x1b[4m'<{type(val).__name__}>\x1b[0m"
 
         def _get_display_width(s_str:str) -> int:
-            """Terminal display width of a string, counting East-Asian wide
-            characters as 2 and ignoring ANSI color codes."""
             width = 0
             s_str_ = clean_re.sub('', s_str) if s_str.find('\x1b[') >= 0 else s_str
             for ch in s_str_:
@@ -4143,8 +4129,7 @@ class JDbReader(JDbBase):
 
             if with_group:
                 io, fp, key_fp = self.f_get_fp(fp)
-                for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                    if not kflags & JKeyFlag.GROUP: continue
+                for grp_name in io.group_iter(key_fp):
                     group_jdb = self.f_get_group(fp, grp_name)
                     if isinstance(group_jdb, JDbReader):
                         group_jdb.sync(force=force, with_group=True)
@@ -4170,8 +4155,7 @@ class JDbReader(JDbBase):
             if with_group:
                 with self.open(read_only=True) as fp:
                     io, fp, key_fp = self.f_get_fp(fp)
-                    for (grp_name, _file_id, _offset, _row_size, _vsize, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, io.n_records):
-                        if not kflags & JKeyFlag.GROUP: continue
+                    for grp_name in io.group_iter(key_fp):
                         group_jdb = self.f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             group_jdb.unsync(with_group=True)
@@ -4240,12 +4224,11 @@ class JDbReader(JDbBase):
                 # the link lives inside the group, so ask the group
                 grp_name = key[:idx]
                 group_jdb = self.f_get_group(fp, grp_name)
-                return group_jdb.get_link(key[idx+SEP_LEN:], default_val) \
-                    if isinstance(group_jdb, JDbReader) else default_val
+                return group_jdb.get_link(key[idx+SEP_LEN:], default_val) if isinstance(group_jdb, JDbReader) else default_val
 
             io, fp, key_fp = self.f_get_fp(fp)
             key_table = io.key_table
-            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row = key_table.get(key, -1, fp=key_fp)
             if not io.n_records > row >= 0:
                 return default_val
 
@@ -4355,7 +4338,7 @@ class JDbReader(JDbBase):
             io = self.io
             key_table = io.key_table
             key_fp = fp[-1]
-            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row = key_table.get(key, -1, fp=key_fp)
             if row < 0:
                 return default_val
 
@@ -4596,7 +4579,7 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
-        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+        row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
             _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
             if _key == key and kflags & JKeyFlag.GROUP:
@@ -4640,14 +4623,13 @@ class JDbReader(JDbBase):
         idx = target.find(SEP_SYM)
         name = target if idx < 0 else target[:idx]
         key_table = io.key_table
-        row = key_table[name] if not isinstance(key_table, KeyTable) else key_table.get(name, -1, fp=key_fp)
+        row = key_table.get(name, -1, fp=key_fp)
         if not io.n_records > row >= 0:
             raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
 
         _key, _file_id, _offset, _size, _vsize, _ver, _days, kflags = row_info = io.read_key(key_fp, row)
         if kflags & JKeyFlag.LINK:
-            # links never nest, so resolution is bounded by the path length alone
-            # and needs no loop detection or depth limit
+            # links never nest
             raise JTypeError(f'link[{key}] points at another link[{name}]')
 
         if kflags & JKeyFlag.GROUP:
@@ -4774,16 +4756,6 @@ class JDbReader(JDbBase):
                     group_jdb = groups.get(key, None)
                     if not isinstance(group_jdb, JDbReader):
                         if row_size == 0 or isinstance(self.files_obj, JNetFiles):
-                            # row_size == 0 -> the inline 0x10 marker: the group is
-                            # at add_group(key) by definition.
-                            #
-                            # A foreign group instead stores its KEY path, but that
-                            # path names storage in the SERVER's process/filesystem.
-                            # A network client must never open it directly (it would
-                            # silently get a private empty '<MEM>' database, or a
-                            # same-machine file the server is not actually serving).
-                            # add_group() asks our server for the group, and the
-                            # server resolves it through its own linked registry.
                             group_jdb = self.create_jdb(KEY_file=self.files_obj.add_group(key))
                         else:
                             val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
@@ -4905,7 +4877,7 @@ class JDbReader(JDbBase):
         io = self.io
         key_fp = fp_dict[-1]
         key_table = io.key_table
-        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+        row = key_table.get(key, -1, fp=key_fp)
         if not io.n_records > row >= 0:
             return b''
 
@@ -4941,7 +4913,7 @@ class JDbReader(JDbBase):
         io = self.io
         key_fp = fp_dict[-1]
         key_table = io.key_table
-        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+        row = key_table.get(key, -1, fp=key_fp)
         if not io.n_records > row >= 0: # pragma: no cover
             raise JKeyError(key)
 
@@ -4952,9 +4924,6 @@ class JDbReader(JDbBase):
             return group, None
 
         if kflags & JKeyFlag.LINK:
-            # Resolve to the target so value AND byte rules see the real record.
-            # A dangling link reads as None, so a query sees it as a None-valued
-            # record rather than skipping it.
             target = self._f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size)
             return self.f_link_read_with_bytes(fp_dict, _key, target)
 
@@ -5000,7 +4969,7 @@ class JDbReader(JDbBase):
         # Priority: cache > file
         _cache = self._cache
         if _cache:
-            _row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            _row = key_table.get(key, -1, fp=key_fp)
             if row is None or _row == row:
                 val = _cache.get(key, MISSING)
                 if val is not MISSING:
@@ -5008,7 +4977,7 @@ class JDbReader(JDbBase):
                     return deepcopy(val) if copy else val
 
         if row is None:
-            row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+            row = key_table.get(key, -1, fp=key_fp)
             if row < 0:
                 if default_val is not MISSING:
                     return default_val
@@ -5016,11 +4985,7 @@ class JDbReader(JDbBase):
                 raise JKeyError(key)
 
         if row >= io.n_records: # pragma: no cover
-            if isinstance(key_table, KeyTable):
-                key_table.pop(key, fp=key_fp)
-            else:
-                key_table.pop(key, -1)
-
+            key_table.pop(key, fp=key_fp)
             if default_val is not MISSING:
                 return default_val
 
@@ -5103,7 +5068,7 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
-        row = key_table[key] if not isinstance(key_table, KeyTable) else key_table.get(key, -1, fp=key_fp)
+        row = key_table.get(key, -1, fp=key_fp)
         if row < 0:
             for (_key, _f, _o, _r, _v, _ver, _d, _kf) in io.KEY_iter(key_fp, io.n_records, io.n_lines):
                 if _key == key:
@@ -5112,10 +5077,7 @@ class JDbReader(JDbBase):
             return ('x', io._sync_id) # Not exist
 
         if row >= io.n_records: #  pragma: no cover
-            if isinstance(key_table, KeyTable):
-                key_table.pop(key, fp=key_fp)
-            else:
-                key_table.pop(key, -1)
+            key_table.pop(key, fp=key_fp)
             return ('x', io._sync_id) # Not exist
 
         _key, _f, _o, _r, _v, _ver, _d, _kf = io.read_key(key_fp, row)
@@ -5359,8 +5321,6 @@ class JDbReader(JDbBase):
                 Defaults to ``0``.
         """
         if key_flags & JKeyFlag.NO_CACHE:
-            # checked before cache_limit so a record that opted out is evicted
-            # even if the limit was lowered to 0 after it was cached
             self._cache.pop(key, None)
             return
 
@@ -5475,10 +5435,7 @@ class JDbReader(JDbBase):
             jio.groups[name] = group_jdb
             return group_jdb
 
-        # Network parent. The server owns its groups, so it creates storage of
-        # the group's own kind and the records are copied over: the server
-        # cannot reach this process's memory, and a path it could open would
-        # make two owners of one store.
+        # Network parent.
         group_KEY = group_files.get_KEY()
         jio.groups[name] = remote_jdb = self.create_jdb(files_obj.add_group(name, kind='mem' if group_KEY.startswith('<MEM') else 'disk', KEY=group_KEY), ref=group_jdb)
         return remote_jdb

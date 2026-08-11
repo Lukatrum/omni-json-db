@@ -32,10 +32,6 @@ class JAttributeError(JError, AttributeError):
     pass
 
 MISSING = object()
-
-#: Returned by :meth:`JDb.f_delete` when the record carries a
-#: :data:`WRITE_LOCK_MASK` bit. A distinct object, because ``None`` is a
-#: legal stored value and callers must not report a locked row as deleted.
 LOCKED = object()
 
 #-----------------------------------------------------------------------------
@@ -193,10 +189,6 @@ class JKeyFlag(IntFlag):
         """
         return ''.join(ch if flag in self else '_' for flag, ch in KEY_FLAG_LETTERS.items())
 
-
-#: Canonical flag -> letter table. The order defines the layout of
-#: ``str(JKeyFlag)``: append new entries at the END so existing string
-#: positions stay stable for anything that parses them.
 KEY_FLAG_LETTERS = {
     JKeyFlag.READ_ONLY:   'r',
     JKeyFlag.GROUP:       'g',
@@ -287,8 +279,6 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int]:
         (3, 0)
         >>> conv_to_key_flags('+h-c')
         (16, 32)
-        >>> conv_to_key_flags('*h+0')
-        (4096, 0)
     """
     set_mask = clr_mask = 0
     if flags and isinstance(flags, str):
@@ -377,8 +367,6 @@ def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:in
         return int(old_flags) & mask
 
     if isinstance(flags, str):
-        # any_mask is a query-only state: when writing, "don't care" is the same
-        # as not naming the flag at all
         set_mask, clr_mask = conv_to_key_flags(flags)
         return ((int(old_flags) | set_mask) & ~clr_mask) & mask
 
@@ -526,8 +514,6 @@ except ImportError: # pragma: no cover
                 self._buf[idx >> 3] &= 0xff ^ (1 << (idx & 7))
 
         def extend(self, bits: Union[str, int]):
-            """Append bits. Accepts a '01' string (bitarray-compatible, e.g.
-            '0'*n) or an int meaning "append this many zero bits"."""
             if isinstance(bits, int):
                 n_new, ones = bits, ()
             else:
@@ -569,6 +555,15 @@ class JDbBase(metaclass=ABCMeta): # pragma: no cover
 
 class JIoBase(metaclass=ABCMeta): # pragma: no cover
     pass
+
+class KeyTableBase(metaclass=ABCMeta): # pragma: no cover
+    def get_mode(self) -> int:
+        """Get the current classification mode configuration.
+
+        Returns:
+            int: The constant indicating the current mode, defaults to -1.
+        """
+        return -1
 
 def deepcopy(src:Any) -> Any:
     """Create a selective deep copy optimised for the types used in JDb.
