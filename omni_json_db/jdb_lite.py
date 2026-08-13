@@ -10,14 +10,14 @@ from unicodedata import east_asian_width
 from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
-from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE
+from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE, THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
 from .jdb_query import QUERY_OPS, Condition, \
             sorted_by_rules, parse_group_by, grouped_by_rules, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeError, \
-                JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, \
+                JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, EXPIRED, \
                 KEY_FLAG_MASK, conv_to_key_flags
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -129,12 +129,12 @@ class JDbKey:
                 io, fp, key_fp = jdb.f_get_fp(fp)
                 key_table = io.key_table
                 io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
                 for _key,_val in jdb.find_iter(key):
                     row_id = key_table.get(_key, -1, fp=key_fp)
-                    _k, file_id, offset, size, vsize, ver, days, kflags = io_read_key(key_fp, row_id)
-                    old_date, new_date  = io_conv_date(days)
-                    matches[_key] = (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                    _k, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                    cdate = THE_1ST_DATE + timedelta(days=cdays)
+                    mdate = THE_1ST_DATE + timedelta(days=mdays)
+                    matches[_key] = (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
             return matches
 
@@ -150,9 +150,10 @@ class JDbKey:
             key_table = io.key_table
             row_id = key_table.get(key, -1, fp=key_fp)
             if io.n_records > row_id >= 0:
-                _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
-                old_date, new_date  = io.z_conv_date(days)
-                return (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                mdate = THE_1ST_DATE + timedelta(days=mdays)
+                return (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
         return None
 
@@ -627,7 +628,7 @@ class JDbKey:
         """
         return self.jdb.has_all(keys)
 
-    def get_flags(self, key:Union[str,Any]=None) -> Dict[str,int]:
+    def get_flags(self, key:Union[str,Any]=None) -> Dict[str,Tuple[int,int]]:
         """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
 
         Thin wrapper over :meth:`JDbReader.get_key_flags`; see there for the
@@ -638,13 +639,14 @@ class JDbKey:
                 :meth:`item_iter`. ``None`` matches every record. Defaults to None.
 
         Returns:
-            Dict[str, int]: ``{key: flags}``, always a dict even for a single
-            key name. Values are plain ints; wrap them in :class:`JKeyFlag` to
-            test individual bits.
+            Dict[str, Tuple[int, int]]: ``{key: (flags, ttl)}``, always a dict
+            even for a single key name. ``flags`` is a plain int; wrap it in
+            :class:`JKeyFlag` to test individual bits. ``ttl`` is 0 for a record
+            without one.
 
         Example:
             >>> jdb.keys.get_flags('audit/2026-08')
-            {'audit/2026-08': 20}
+            {'audit/2026-08': (20, 0)}
         """
         return self.jdb.get_key_flags(key)
 
@@ -658,7 +660,8 @@ class JDbKey:
                         user0:Optional[bool]=None,\
                         user1:Optional[bool]=None,\
                         user2:Optional[bool]=None,\
-                        user3:Optional[bool]=None) -> Dict[str,int]:
+                        user3:Optional[bool]=None,\
+                        ttl:Optional[int]=None) -> Dict[str,Tuple[int,int]]:
         """Set or clear :class:`JKeyFlag` bits on every record matching ``key``.
 
         Thin wrapper over :meth:`JDb.set_key_flags`; see there for the full
@@ -687,17 +690,22 @@ class JDbKey:
             user1 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER1`. Defaults to None.
             user2 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER2`. Defaults to None.
             user3 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER3`. Defaults to None.
+            ttl (Optional[int], optional): Lifetime in days from the record's
+                *modified* date, clamped to :data:`MAX_TTL_DAYS` (511). ``0``
+                removes the TTL and restores the wide 22-bit modified-delta
+                layout; ``None`` (the default) leaves it as it is. Defaults to None.
 
         Returns:
-            Dict[str, int]: ``{key: new_flags}`` for the records that changed.
+            Dict[str, Tuple[int, int]]: ``{key: (new_flags, new_ttl)}`` for the
+            records that changed.
 
         Example:
             >>> jdb.keys.set_flags('audit/2026-08', append_only=True, no_revert=True)
-            {'audit/2026-08': 20}
+            {'audit/2026-08': (20,0)}
         """
-        return self.jdb.set_key_flags(key, flags, read_only, append_only, no_cache, no_revert, hidden, user0, user1, user2, user3)
+        return self.jdb.set_key_flags(key, flags, read_only, append_only, no_cache, no_revert, hidden, user0, user1, user2, user3, ttl)
 
-    def item_iter(self, key:Optional[Any]=None, with_hidden:bool=True) -> Generator[Tuple[str,tuple], None, None]:
+    def item_iter(self, key:Optional[Any]=None, with_hidden:bool=True, with_expired:bool=True) -> Generator[Tuple[str,tuple], None, None]:
         """
         Iterate over keys and their corresponding metadata tuples based on filter criteria.
 
@@ -751,6 +759,12 @@ class JDbKey:
                 carrying :attr:`JKeyFlag.HIDDEN` too. Pass ``False`` to skip
                 them, the way :meth:`find` and :meth:`show` do.
                 Defaults to ``True``.
+            with_expired (bool, optional): Yield records whose TTL has run out.
+                This is the metadata view, so it defaults to ``True``: an
+                expired record no longer answers :meth:`JDbReader.get`, and
+                being able to still see its row -- and its ``ttl`` -- is the
+                point. Pass ``False`` for a listing that agrees with what
+                reads will actually return. Defaults to ``True``.
 
         Yields:
             (str, tuple):
@@ -764,10 +778,12 @@ class JDbKey:
                     - [3] row_size:int
                     - [4] val_size:int
                     - [5] version:int
-                    - [6] days:int - combine modified date + created date
-                    - [7] kflags:int - key flags
-                    - [8] modified date: str (eg. '2000-01-01')
-                    - [9] created date: str  (eg. '2000-01-01')
+                    - [6] cdays:int - created day index
+                    - [7] mdays:int - last modified day index
+                    - [8] ttl:int - lifetime in days from mdays (0 = no TTL)
+                    - [9] kflags:int - key flags
+                    - [10] modified date: str (eg. '2000-01-01')
+                    - [11] created date: str  (eg. '2000-01-01')
         """
         if isinstance(key, Pattern):
             is_matched = key.search
@@ -789,14 +805,21 @@ class JDbKey:
         with jdb.open(read_only=True) as fp:
             io, fp, key_fp = jdb.f_get_fp(fp)
             key_table = io.key_table
+            io_days = io.days
+            skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
+                (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
+                (lambda _mdays, _ttl, _kflags: _kflags & JKeyFlag.HIDDEN) if with_expired else \
+                (lambda _mdays, _ttl, _kflags: _kflags & JKeyFlag.HIDDEN or _ttl > 0 and io_days > (_mdays+_ttl))
             if isinstance(key, str):
                 idx = key.find(SEP_SYM)
                 if idx < 0:
                     row_id = key_table.get(key, -1, fp=key_fp)
                     if io.n_records > row_id >= 0:
-                        _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
-                        old_date, new_date  = io.z_conv_date(days)
-                        yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                        _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+                        if not skip(mdays, ttl, kflags):
+                            cdate = THE_1ST_DATE + timedelta(days=cdays)
+                            mdate = THE_1ST_DATE + timedelta(days=mdays)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
                     return
 
@@ -808,14 +831,14 @@ class JDbKey:
                         if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
-                                for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden):
+                                for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden, with_expired=with_expired):
                                     yield grp_name+SEP_SYM+_key, _info
                 else:
                     _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
                     if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
-                            for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden):
+                            for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden, with_expired=with_expired):
                                 yield grp_name+SEP_SYM+_key, _info
 
                 return
@@ -824,9 +847,11 @@ class JDbKey:
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
-                    _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
-                    old_date, new_date = io.z_conv_date(days)
-                    yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                    _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+                    if not skip(mdays, ttl, kflags):
+                        cdate = THE_1ST_DATE + timedelta(days=cdays)
+                        mdate = THE_1ST_DATE + timedelta(days=mdays)
+                        yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
                 return
 
@@ -834,29 +859,29 @@ class JDbKey:
                 sync_id = int(key)
                 sync_id = (io.sync_id + sync_id) if sync_id < 0 else sync_id
                 if not (sync_id >= io.sync_id or sync_id < 0):
-                    io_conv_date = io.z_conv_date
                     row_id = 0
-                    for (_key, file_id, offset, size, vsize, ver, days, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if ver == sync_id and (with_hidden or not kflags & JKeyFlag.HIDDEN):
-                            old_date, new_date = io_conv_date(days)
-                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                    for (_key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
+                        if ver == sync_id and not skip(mdays, ttl, kflags):
+                            cdate = THE_1ST_DATE + timedelta(days=cdays)
+                            mdate = THE_1ST_DATE + timedelta(days=mdays)
+                            yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
                         row_id += 1
 
                 return
 
             if isinstance(key, (slice, dt_date, datetime, Condition)):
-                yield from jdb.f_key_iter(fp, key, with_hidden=with_hidden)
+                yield from jdb.f_key_iter(fp, key, with_hidden=with_hidden, with_expired=with_expired)
                 return
 
             if k_arg_cnt > 0:
                 io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
                 if k_arg_cnt == 2:
                     row_id = 0
-                    for (_key, file_id, offset, size, vsize, ver, days, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if with_hidden or not kflags & JKeyFlag.HIDDEN:
-                            old_date, new_date = io_conv_date(days)
-                            val = (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                    for (_key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
+                        if not skip(mdays, ttl, kflags):
+                            cdate = THE_1ST_DATE + timedelta(days=cdays)
+                            mdate = THE_1ST_DATE + timedelta(days=mdays)
+                            val = (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
                             if is_matched(_key, val):
                                 yield _key, val
                         row_id += 1
@@ -865,10 +890,11 @@ class JDbKey:
                     for _key,row_id in io.key_table.items():
                         if io.n_records > row_id >= 0 and is_matched(_key):
                             key_fp = fp[-1]
-                            _key, file_id, offset, size, vsize, ver, days, kflags = io_read_key(key_fp, row_id)
-                            if with_hidden or not kflags & JKeyFlag.HIDDEN:
-                                old_date, new_date = io_conv_date(days)
-                                yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                            _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                            if not skip(mdays, ttl, kflags):
+                                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                                mdate = THE_1ST_DATE + timedelta(days=mdays)
+                                yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
                 return
 
@@ -882,7 +908,6 @@ class JDbKey:
             elif hasattr(key, '__iter__'):
                 done = set()
                 io_read_key = io.read_key
-                io_conv_date = io.z_conv_date
                 for _key in key:
                     if isinstance(_key, (int, float)): # pragma: no cover
                         row_id = int(_key)
@@ -891,9 +916,11 @@ class JDbKey:
 
                         if io.n_records > row_id >= 0:
                             key_fp = fp[-1]
-                            _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
-                            old_date, new_date = io_conv_date(days)
-                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                            _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+                            if not skip(mdays, ttl, kflags):
+                                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                                mdate = THE_1ST_DATE + timedelta(days=mdays)
+                                yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
                         continue
 
@@ -903,15 +930,17 @@ class JDbKey:
                         row_id = key_table.get(_key, -1, fp=key_fp)
                         if row_id < 0:
                             if _key.find(SEP_SYM) >= 0: # pragma: no cover
-                                for kk,_info in self.item_iter(_key):
+                                for kk,_info in self.item_iter(_key, with_hidden=with_hidden, with_expired=with_expired):
                                     yield kk,_info
 
                             continue
 
                         if row_id < io.n_records:
-                            _key, file_id, offset, size, vsize, ver, days, kflags = io_read_key(key_fp, row_id)
-                            old_date, new_date = io_conv_date(days)
-                            yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                            _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                            if not skip(mdays, ttl, kflags):
+                                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                                mdate = THE_1ST_DATE + timedelta(days=mdays)
+                                yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
                 return
 
@@ -919,9 +948,11 @@ class JDbKey:
             key = str(key)
             row_id = key_table.get(key, -1, fp=key_fp)
             if io.n_records > row_id >= 0:
-                _key, file_id, offset, size, vsize, ver, days, kflags = io.read_key(key_fp, row_id)
-                old_date, new_date = io.z_conv_date(days)
-                yield _key, (row_id, file_id, offset, size, vsize, ver, days, kflags, str(new_date), str(old_date))
+                _key, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+                if not skip(mdays, ttl, kflags):
+                    cdate = THE_1ST_DATE + timedelta(days=cdays)
+                    mdate = THE_1ST_DATE + timedelta(days=mdays)
+                    yield _key, (row_id, file_id, offset, size, vsize, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
     def items(self, with_hidden:bool=True) -> Generator[Tuple[str,tuple], None, None]:
         """
@@ -939,10 +970,12 @@ class JDbKey:
                     - [3] row_size:int
                     - [4] val_size:int
                     - [5] version:int
-                    - [6] days:int - combine modified date + created date
-                    - [7] kflags:int - key flags
-                    - [8] modified date: str (eg. '2000-01-01')
-                    - [9] created date: str  (eg. '2000-01-01')
+                    - [6] cdays:int - created day index
+                    - [7] mdays:int - last modified day index
+                    - [8] ttl:int - lifetime in days from mdays (0 = no TTL)
+                    - [9] kflags:int - key flags
+                    - [10] modified date: str (eg. '2000-01-01')
+                    - [11] created date: str  (eg. '2000-01-01')
         """
         yield from self.item_iter(with_hidden=with_hidden)
 
@@ -959,10 +992,12 @@ class JDbKey:
                 - [3] row_size:int
                 - [4] val_size:int
                 - [5] version:int
-                - [6] days:int - combine modified date + created date
-                - [7] kflags:int - key flags
-                - [8] modified date: str (eg. '2000-01-01')
-                - [9] created date: str  (eg. '2000-01-01')
+                - [6] cdays:int - created day index
+                - [7] mdays:int - last modified day index
+                - [8] ttl:int - lifetime in days from mdays (0 = no TTL)
+                - [9] kflags:int - key flags
+                - [10] modified date: str (eg. '2000-01-01')
+                - [11] created date: str  (eg. '2000-01-01')
         """
         for _key,val in self.item_iter(with_hidden=with_hidden):
             yield val
@@ -978,7 +1013,7 @@ class JDbReader(JDbBase):
     data modification. Designed for safe, concurrent read operations.
     """
     __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
-                'io', 'fsize', 'fp_table', 'th_table', 'safe_line', 'chg_keys',
+                'io', 'fsize', 'th_table', 'safe_line', 'chg_keys',
                 'write_hook', 'max_wsize', 'flags')
 
     def __init__(self,\
@@ -1143,8 +1178,7 @@ class JDbReader(JDbBase):
                                         remove=files_obj.LCK_remove)
         self.lock = RLock() # solve iter issue [cannot use Lock]
         self.fsize = self.safe_line = 0
-        self.fp_table:Dict[int,dict] = {}
-        self.th_table:Dict[int,int] = {}
+        self.th_table:Dict[int,dict] = {}
         self.chg_keys:Set = set()
         self._cache:Dict[str,Any] = OrderedDict()
         self._cache_limit = cache_limit
@@ -1170,16 +1204,17 @@ class JDbReader(JDbBase):
         Destructor to ensure all internal file descriptors and locks are safely released upon garbage collection.
         """
         with self.lock:
-            fp_table = self.fp_table
-            if fp_table: # pragma: no cover
-                for _ident,fp_dict in fp_table.items():
+            th_table = self.th_table
+            if th_table: # pragma: no cover
+                for _ident,thd in th_table.items():
+                    fp_dict = thd.get('fp', {})
                     for fp in fp_dict.values():
                         if fp is not None:
                             fp.close()
 
                     fp_dict.clear()
 
-                fp_table.clear()
+                th_table.clear()
 
             self.file_lock.release()
 
@@ -1734,7 +1769,7 @@ class JDbReader(JDbBase):
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
                 _row_id = key_table.get(key.start, -1, fp=key_fp)
                 if n_records > _row_id >= 0:
-                    _k, _f, _o, _s, _vs, ver, _d, _kf = io.read_key(key_fp, _row_id)
+                    _k, _f, _o, _s, _vs, ver, _cd, _md, _tl, _kf = io.read_key(key_fp, _row_id)
                     min_ver = ver
                 else:
                     min_ver = 0
@@ -1749,7 +1784,7 @@ class JDbReader(JDbBase):
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
                 _row_id = key_table.get(key.stop, -1, fp=key_fp)
                 if n_records > _row_id >= 0:
-                    _k, _f, _o, _s, _vs, ver, _d, _kf = io.read_key(key_fp, _row_id)
+                    _k, _f, _o, _s, _vs, ver, _cd, _md, _tl, _kf = io.read_key(key_fp, _row_id)
                     max_ver = ver
                 else:
                     max_ver = sync_id
@@ -1789,11 +1824,11 @@ class JDbReader(JDbBase):
             chg_keys = self.chg_keys
             _cache = self._cache
             files_obj = self.files_obj
-            fp_table = self.fp_table
             th_table = self.th_table
             io = self.io
-            fp_table[ident] = fp_dict = fp_table.get(ident, {-1:None})
-            th_table[ident] = th_table.get(ident, 0) + 1
+            th_table.setdefault(ident, {'cnt':0, 'fp':{-1:None}, 'expired':[]})
+            thd = th_table[ident]
+            fp_dict = thd['fp']
             try:
                 try:
                     if file_lock.get_count(ident) > 1: # pragma: no cover
@@ -1805,14 +1840,17 @@ class JDbReader(JDbBase):
                                     fp_dict.pop(_id, None)
 
                         key_fp = fp_dict.get(-1, None)
+                        thd['cnt'] += 1
                         return fp_dict
 
                     data_type = io._data_type
                     if read_only:
+                        io.update_days()
                         if data_type != 0 and io.is_updated():
                             if files_obj.KEY_size() == io.file_size:
                                 self.safe_line = io.n_records
                                 chg_keys.clear()
+                                thd['cnt'] += 1
                                 return fp_dict
 
                         is_latest = False # pragma: no cover
@@ -1841,6 +1879,7 @@ class JDbReader(JDbBase):
 
                 self.safe_line = self.io.n_records
                 chg_keys.clear()
+                thd['cnt'] += 1
                 return fp_dict
 
             except: # pragma: no cover
@@ -1853,12 +1892,56 @@ class JDbReader(JDbBase):
                     if fp is not None:
                         fp.close()
 
-                fp_dict.clear()
-                fp_table.pop(ident, None)
                 file_lock.release()
+                fp_dict.clear()
                 raise
 
         return None
+
+    def f_drop_expired(self, fp_dict:Dict[int,IO], expired_keys:List[Tuple[int,str]]) -> None:
+        """Delete the records queued as expired by :meth:`f_read`, then clear the queue.
+
+        Reads cannot delete anything themselves -- they may hold only a
+        read-only handle -- so they record the row and leave it to whichever
+        exit path runs next. Both :meth:`open` and :meth:`f_close` call this, so
+        a record expires exactly once no matter which API opened the database.
+
+        The queued row id is only a hint: it is re-resolved through the key
+        table, because a delete earlier in the same batch may have moved the
+        row. A record that has already gone is skipped.
+
+        On a :class:`JDbReader` there is nothing to delete with, so the queue is
+        simply dropped.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            expired_keys (List[Tuple[int, str]]): The queued ``(row_id, key)`` pairs.
+        """
+        if not expired_keys:
+            return
+
+        if hasattr(self, 'f_delete'):
+            has_SIGINT = self.file_lock.has_SIGINT
+            files_obj = self.files_obj
+            io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
+            expired_keys.sort(reverse=True)
+            f_delete = self.f_delete
+            key_table = io.key_table
+            for _row_id, key in expired_keys:
+                if has_SIGINT():
+                    break
+
+                row_id = key_table.get(key, -1, fp=key_fp)
+                if row_id >= 0:
+                    try:
+                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=JKeyFlag.UNLOCK)
+                        if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
+                            jdb.remove_fast(jdb, key_flags=JKeyFlag.UNLOCK)
+
+                    except (OSError, KeyError): # pragma: no cover
+                        continue
+
+        expired_keys.clear()
 
     def f_close(self):
         """Release one :meth:`f_open` acquisition for the current thread.
@@ -1874,15 +1957,18 @@ class JDbReader(JDbBase):
             _cache = self._cache
             file_lock = self.file_lock
             files_obj = self.files_obj
-            fp_table = self.fp_table
-            fp_dict = fp_table.get(ident, None)
-            if fp_dict is None: # pragma: no cover
-                self.th_table.pop(ident, 0)
+            th_table = self.th_table
+            thd = th_table.get(ident, None)
+            if thd is None: # pragma: no cover
+                return # f_close() without a matching f_open()
+
+            fp_dict = thd['fp']
+            if not fp_dict: # pragma: no cover
+                th_table.pop(ident, None)
                 return
 
-            th_table = self.th_table
-            th_cnt = th_table.get(ident, 0) - 1
             try:
+                self.f_drop_expired(fp_dict, thd['expired'])
                 io = self.io
                 if not io.is_updated():
                     if file_lock.mode == 'w':
@@ -1914,7 +2000,8 @@ class JDbReader(JDbBase):
                         self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
             finally:
-                if th_cnt <= 0:
+                thd['cnt'] = cnt = thd['cnt'] - 1
+                if cnt <= 0:
                     flags = self.flags
                     chg_keys.clear()
                     is_dirty = file_lock.mode == 'w'
@@ -1925,10 +2012,7 @@ class JDbReader(JDbBase):
                             fp.close()
 
                     fp_dict.clear()
-                    fp_table.pop(ident, None)
                     th_table.pop(ident, 0)
-                else:
-                    th_table[ident] = th_cnt
 
                 file_lock.release()
 
@@ -1962,12 +2046,13 @@ class JDbReader(JDbBase):
             chg_keys = self.chg_keys
             _cache = self._cache
             files_obj = self.files_obj
-            fp_table = self.fp_table
             th_table = self.th_table
-            fp_table[ident] = fp_dict = fp_table.get(ident, {-1:None})
-            th_table[ident] = th_cnt = th_table.get(ident, 0) + 1
+            th_table.setdefault(ident, {'cnt':0, 'fp':{-1:None}, 'expired':[]})
+            thd = th_table[ident]
+            fp_dict = thd['fp']
             io = self.io
             try:
+                thd['cnt'] += 1
                 try:
                     if file_lock.get_count(ident) > 1:
                         if not read_only:
@@ -2086,6 +2171,7 @@ class JDbReader(JDbBase):
 
             finally:
                 try:
+                    self.f_drop_expired(fp_dict, thd['expired'])
                     io = self.io
                     if not io.is_updated():
                         if file_lock.mode == 'w':
@@ -2107,8 +2193,8 @@ class JDbReader(JDbBase):
                             self.fsize = io.n_records = io.n_lines = io._n_records = io._n_lines = io.file_size = 0
 
                 finally:
-                    th_cnt -= 1
-                    if th_cnt <= 0:
+                    thd['cnt'] = cnt = thd['cnt'] - 1
+                    if cnt <= 0:
                         flags = self.flags
                         chg_keys.clear()
                         is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
@@ -2119,10 +2205,7 @@ class JDbReader(JDbBase):
                                 fp.close()
 
                         fp_dict.clear()
-                        fp_table.pop(ident, None)
                         th_table.pop(ident, 0)
-                    else:
-                        th_table[ident] = th_cnt
 
                     file_lock.release()
 
@@ -2793,12 +2876,21 @@ class JDbReader(JDbBase):
         else: # pragma: no cover
             keys = {str(keys)}
 
-        with self.open(read_only=True):
-            key_table = self.io.key_table
+        with self.open(read_only=True) as fp:
+            io, fp, key_fp = self.f_get_fp(fp)
+            key_table = io.key_table
+            n_records = io.n_records
+            io_days = io.days
             for key in keys:
                 key = str(key) if not isinstance(key, str) else key
-                if key not in key_table:
+                row_id, kflags = key_table.get_both(key, fp=key_fp)
+                if row_id < 0:
                     return False
+
+                if kflags & JKeyFlag.EXPIRE and n_records > row_id >= 0:
+                    _k, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kf = io.read_key(key_fp, row_id)
+                    if ttl > 0 and io_days > (mdays+ttl):
+                        return False
 
         return True
 
@@ -3094,7 +3186,7 @@ class JDbReader(JDbBase):
                 info = f'[KEY] {path}'
                 info += f'\n[JFiles] {files_obj}'
                 info += f'\n[Config] min_value_size:{io.min_value_size} max_file_size:{io.max_file_size/(2**20):,.1f}MB reserved:{io.reserved_rate*100.:.2f}% max_wsize:{self.max_wsize}'
-                
+
                 api_ver = io.api_ver
                 zip_str = io.zip_type_str
                 type_str = io.data_type_str
@@ -3246,7 +3338,9 @@ class JDbReader(JDbBase):
                 if idx < 0:
                     row_id = key_table.get(key, -1, fp=key_fp)
                     if row_id >= 0:
-                        yield key, self.f_read(fp, key, row=row_id, copy=False)
+                        val = self.f_read(fp, key, EXPIRED, row=row_id, copy=False)
+                        if val is not EXPIRED:
+                            yield key, val
 
                     return
 
@@ -3274,8 +3368,10 @@ class JDbReader(JDbBase):
                 n_records = io.n_records
                 row_id = (n_records + key) if key < 0 else key
                 if n_records > row_id >= 0:
-                    _key, _file_id, _offset, _size, _vsize, _ver, _days, _kflags = io.read_key(key_fp, row_id)
-                    yield _key, self.f_read(fp, _key, row=row_id, copy=False)
+                    _key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, _kflags = io.read_key(key_fp, row_id)
+                    val = self.f_read(fp, _key, EXPIRED, row=row_id, copy=False)
+                    if val is not EXPIRED:
+                        yield _key, val
 
                 return
 
@@ -3284,9 +3380,11 @@ class JDbReader(JDbBase):
                 sync_id = (io.sync_id + sync_id) if sync_id < 0 else sync_id
                 if not (sync_id >= io.sync_id or sync_id < 0):
                     row_id = 0
-                    for (_key, _file_id, _offset, _size, _vsize, _ver, _days, _kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
+                    for (_key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, _kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
                         if _ver == sync_id and (with_hidden or not _kflags & JKeyFlag.HIDDEN):
-                            yield _key, self.f_read(fp, _key, row=row_id, copy=False)
+                            val = self.f_read(fp, _key, EXPIRED, row=row_id, copy=False)
+                            if val is not EXPIRED:
+                                yield _key, val
                         row_id += 1
 
                 return
@@ -3298,7 +3396,7 @@ class JDbReader(JDbBase):
             if isinstance(key, (slice, dt_date, datetime)):
                 f_decode_value = self.f_decode_value
                 n_records = io.n_records
-                for _key, (row_id, file_id, offset, size, vsize, _ver, _days, kflags, _mdate, _cdate) in self.f_key_iter(fp, key, with_hidden=with_hidden):
+                for _key, (row_id, file_id, offset, size, vsize, _ver, _cdays, _mdays, _ttl, kflags, _mdate, _cdate) in self.f_key_iter(fp, key, with_hidden=with_hidden, with_expired=False):
                     if n_records > row_id >= 0:
                         yield _key, f_decode_value(fp, _key, file_id, offset, size, vsize, kflags, update_cache=False, copy=False)
 
@@ -3306,21 +3404,22 @@ class JDbReader(JDbBase):
 
             if k_arg_cnt > 0:
                 f_read = self.f_read
-                io_read_key = io.read_key
                 n_records = io.n_records
-                is_visible = (lambda row: True) if with_hidden else \
-                        (lambda row: not (n_records > row >= 0 and io_read_key(fp[-1], row)[7] & JKeyFlag.HIDDEN))
+                is_visible = (lambda key,row: True) if with_hidden else \
+                        (lambda key,row: not (n_records > row >= 0 and key_table.get_both(key, fp=key_fp)[1] & JKeyFlag.HIDDEN))
                 if k_arg_cnt == 2:
                     for _key,row_id in key_table.items():
-                        if is_visible(row_id):
-                            val = f_read(fp, _key, row=row_id, copy=False)
-                            if is_matched(_key, val):
+                        if is_visible(_key, row_id):
+                            val = f_read(fp, _key, EXPIRED, row=row_id, copy=False)
+                            if val is not EXPIRED and is_matched(_key, val):
                                 yield _key, val
 
                 elif k_arg_cnt == 1:
                     for _key,row_id in key_table.items():
-                        if is_matched(_key) and is_visible(row_id):
-                            yield _key, f_read(fp, _key, row=row_id, copy=False)
+                        if is_matched(_key) and is_visible(_key, row_id):
+                            val = f_read(fp, _key, EXPIRED, row=row_id, copy=False)
+                            if val is not EXPIRED:
+                                yield _key, val
 
                 return
 
@@ -3347,8 +3446,9 @@ class JDbReader(JDbBase):
 
                             continue
 
-                        val = f_read(fp, _key, row=row_id, copy=False)
-                        yield _key, val
+                        val = f_read(fp, _key, EXPIRED, row=row_id, copy=False)
+                        if val is not EXPIRED:
+                            yield _key, val
 
                 return
 
@@ -3356,7 +3456,9 @@ class JDbReader(JDbBase):
             key = str(key) if not isinstance(key, str) else key
             row_id = key_table.get(key, -1, fp=key_fp)
             if row_id >= 0:
-                yield key, self.f_read(fp, key, row=row_id, copy=False)
+                val = self.f_read(fp, key, EXPIRED, row=row_id, copy=False)
+                if val is not EXPIRED:
+                    yield key, val
 
     def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, reverse:bool=False, with_hidden:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
@@ -3588,7 +3690,6 @@ class JDbReader(JDbBase):
             count = skipped = 0
             n_records = io.n_records
             io_read_key = io.read_key
-            io_conv_date = io.z_conv_date
             data_type = io.data_type_str
             _j_type = data_type.endswith('J')
             _val_conds = []
@@ -3601,6 +3702,8 @@ class JDbReader(JDbBase):
                     _val_conds.append(({cmd:rules}, use_bytes))
 
             cache = self._cache
+            key_table = io.key_table
+            io_days = io.days
             for key,row_id in io.sorted_key_table_items(reverse=reverse):
                 n_loops += 1
                 if count >= limit > 0:
@@ -3612,15 +3715,23 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp[-1]
+                _row_id, _kflags = key_table.get_both(key, fp=key_fp)
+                if _kflags & JKeyFlag.EXPIRE:
+                    _k, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kflags = io_read_key(key_fp, row_id)
+                    if ttl > 0 and io_days > (mdays + ttl):
+                        k_filter += 1
+                        continue
+
                 if date or has_flag_rule:
                     # one read_key serves both filters
-                    _k, _fi, _of, _rs, _vs, mod_id, _days, _kflags = io_read_key(key_fp, row_id)
+                    _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
                     if (_kflags & need_flags) != need_flags or (_kflags & deny_flags):
                         k_filter += 1
                         continue
 
                     if date:
-                        cdate, mdate = io_conv_date(_days)
+                        cdate = THE_1ST_DATE + timedelta(days=_cdays)
+                        mdate = THE_1ST_DATE + timedelta(days=_mdays)
                         if not match_DATE_rules(cdate, mdate, date):
                             d_filter += 1
                             continue
@@ -3637,8 +3748,9 @@ class JDbReader(JDbBase):
 
                     if with_date:
                         if cdate is None:
-                            _k, _fi, _of, _rs, _vs, mod_id, _days, _kflags = io_read_key(key_fp, row_id)
-                            cdate, mdate = io_conv_date(_days)
+                            _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
+                            cdate = THE_1ST_DATE + timedelta(days=_cdays)
+                            mdate = THE_1ST_DATE + timedelta(days=_mdays)
                         yield key, (None, cdate, mdate, mod_id)
                     else:
                         yield key, None
@@ -3682,8 +3794,9 @@ class JDbReader(JDbBase):
                     continue
 
                 if cdate is None:
-                    _k, _fi, _of, _rs, _vs, mod_id, _days, _kflags = io_read_key(key_fp, row_id)
-                    cdate, mdate = io_conv_date(_days)
+                    _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
+                    cdate = THE_1ST_DATE + timedelta(days=_cdays)
+                    mdate = THE_1ST_DATE + timedelta(days=_mdays)
 
                 for rules,use_bytes in _val_conds:
                     if use_bytes:
@@ -4232,7 +4345,7 @@ class JDbReader(JDbBase):
             if not io.n_records > row >= 0:
                 return default_val
 
-            _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
+            _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
             if _key != key or not kflags & JKeyFlag.LINK:
                 return default_val
 
@@ -4253,7 +4366,7 @@ class JDbReader(JDbBase):
         """
         raise JAttributeError('read only')
 
-    def get_key_flags(self, key:Union[str,Any]=None) -> Dict[str,int]:
+    def get_key_flags(self, key:Union[str,Any]=None) -> Dict[str,Tuple[int,int]]:
         """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
 
         Read-only and cheap: only KEY index rows are touched, values are never
@@ -4274,54 +4387,24 @@ class JDbReader(JDbBase):
                 Defaults to None.
 
         Returns:
-            Dict[str, int]: ``{key: flags}`` for every matched record.
+            Dict[str, Tuple[int, int]]: ``{key: (flags, ttl)}`` for every matched
+            record. ``ttl`` is 0 for a record without one.
 
         Example:
             >>> jdb.get_key_flags('audit/2026-08')
-            {'audit/2026-08': 20}
-            >>> JKeyFlag(jdb.get_key_flags('audit/2026-08')['audit/2026-08'])
+            {'audit/2026-08': (20, 0)}
+            >>> JKeyFlag(jdb.get_key_flags('audit/2026-08')['audit/2026-08'][0])
             <JKeyFlag.APPEND_ONLY|NO_REVERT: 20>
         """
         has_SIGINT = self.file_lock.has_SIGINT
         matched_keys = {}
-        for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _days, old_kflags, _mdate, _cdate) in self.keys.item_iter(key):
+        for _key,(_row_id, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, old_ttl, old_kflags, _mdate, _cdate) in self.keys.item_iter(key):
             if has_SIGINT():
                 break
 
-            matched_keys[_key] = old_kflags
+            matched_keys[_key] = (old_kflags,old_ttl)
 
         return matched_keys
-
-    def set_key_flags(self, key:Union[str,Any]=None,\
-                        flags:Optional[Union[str,int,JKeyFlag]]=None,\
-                        read_only:Optional[bool]=None,\
-                        append_only:Optional[bool]=None,\
-                        no_cache:Optional[bool]=None,\
-                        no_revert:Optional[bool]=None,\
-                        hidden:Optional[bool]=None,\
-                        user0:Optional[bool]=None,\
-                        user1:Optional[bool]=None,\
-                        user2:Optional[bool]=None,\
-                        user3:Optional[bool]=None) -> Dict[str,int]:
-
-        """Not available on a reader: writing flags mutates the KEY index.
-
-        Overridden by :meth:`JDb.set_key_flags` on a writable database. The
-        signature is kept in sync so the two are interchangeable for typing.
-
-        Args:
-            key (Union[str, Any], optional): Unused. Defaults to None.
-            flags (Optional[Union[str, int, JKeyFlag]], optional): Unused. Defaults to None.
-            read_only (Optional[bool], optional): Unused. Defaults to None.
-            append_only (Optional[bool], optional): Unused. Defaults to None.
-            no_cache (Optional[bool], optional): Unused. Defaults to None.
-            no_revert (Optional[bool], optional): Unused. Defaults to None.
-
-        Raises:
-            JAttributeError: Always. It subclasses ``AttributeError``, so
-                ``except AttributeError`` still catches it.
-        """
-        raise JAttributeError('read only')
 
     def get(self, key:str, default_val:Any=None, copy:bool=True) -> Any:
         """Safely fetch a value for a specific key, returning a default if not found.
@@ -4343,7 +4426,8 @@ class JDbReader(JDbBase):
                 return default_val
 
             try:
-                return self.f_read(fp, key, copy=copy, row=row)
+                # f_read also answers "missing" for a record whose TTL has run out
+                return self.f_read(fp, key, default_val, copy=copy, row=row)
 
             except KeyError: # pragma: no cover
                 return default_val
@@ -4352,7 +4436,9 @@ class JDbReader(JDbBase):
         """
         Retrieve a value, checking the in-memory cache first to avoid disk
         I/O. A cache hit is returned without verifying against the file, so
-        the value may be stale if another process modified the database.
+        the value may be stale if another process modified the database -- and,
+        for the same reason, a cached value is returned without checking the
+        record's TTL. Use :meth:`get` when expiry has to be honoured.
 
         Args:
             key (str): The target key.
@@ -4456,7 +4542,7 @@ class JDbReader(JDbBase):
 
         Returns:
             dict: ``{row_id: [key, file_id, offset, row_size, val_size, ver,
-            days, is_active(, value)]}`` — see :meth:`f_read_version`.
+            cdays, mdays, ttl, kflags, is_active(, value)]}`` — see :meth:`f_read_version`.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_version(fp, version=version, max_version=max_version, with_value=with_value)
@@ -4473,8 +4559,8 @@ class JDbReader(JDbBase):
 
         Returns:
             Optional[tuple]: ``(key, file_id, offset, row_size, val_size, ver,
-            days, is_active(, value))``, or ``None`` if ``row_id`` is out of
-            range.
+            cdays, mdays, ttl, kflags, is_active(, value))``, or ``None`` if
+            ``row_id`` is out of range.
         """
         with self.open(read_only=True) as fp:
             return self.f_read_row(fp, row_id, with_value)
@@ -4520,7 +4606,7 @@ class JDbReader(JDbBase):
                         ver = io._sync_id
 
                     max_ver = io.sync_id
-                    for (_key, _f, _o, _r, _v, _ver, _d, _kf) in io.KEY_iter(key_fp, 0, io.n_records):
+                    for (_key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf) in io.KEY_iter(key_fp, 0, io.n_records):
                         if max_ver >= _ver >= ver:
                             if _key not in status:
                                 status[_key] = ('+', _ver)
@@ -4581,7 +4667,7 @@ class JDbReader(JDbBase):
         key_table = io.key_table
         row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
-            _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
+            _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
             if _key == key and kflags & JKeyFlag.GROUP:
                 group = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
                 if isinstance(group, JDbReader):
@@ -4627,7 +4713,7 @@ class JDbReader(JDbBase):
         if not io.n_records > row >= 0:
             raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
 
-        _key, _file_id, _offset, _size, _vsize, _ver, _days, kflags = row_info = io.read_key(key_fp, row)
+        _key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, kflags = row_info = io.read_key(key_fp, row)
         if kflags & JKeyFlag.LINK:
             # links never nest
             raise JTypeError(f'link[{key}] points at another link[{name}]')
@@ -4672,7 +4758,7 @@ class JDbReader(JDbBase):
             with group.open(read_only=True) as grp_fp:
                 return group.f_link_read(grp_fp, key, rest, copy=copy)
 
-        _key, file_id, offset, row_size, val_size, _ver, _days, kflags = rest
+        _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = rest
         return self.f_decode_value(fp_dict, group, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=copy, follow_link=False)
 
     def f_link_read_with_bytes(self, fp_dict:Dict[int,IO], key:str, target:str) -> Tuple[Any, bytes]:
@@ -4800,7 +4886,7 @@ class JDbReader(JDbBase):
 
         Returns:
             Optional[tuple]: ``(key, file_id, offset, row_size, val_size, ver,
-            days, is_active(, value))`` where ``is_active`` is ``True`` for a
+            cdays, mdays, ttl, kflags, is_active(, value))`` where ``is_active`` is ``True`` for a
             live record and ``False`` for a dead/history row, or ``None`` if
             ``row_id`` is out of range.
         """
@@ -4812,12 +4898,12 @@ class JDbReader(JDbBase):
 
         if io.n_lines > row_id >= 0:
             # [Case B] -------------------------------------
-            key, file_id, offset, row_size, val_size, ver, days, kflags =  io.read_key(key_fp, row_id)
+            key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
             if with_value:
                 val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False)
-                return key, file_id, offset, row_size, val_size, ver, days, kflags, row_id < io.n_records, val
+                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < io.n_records, val
 
-            return key, file_id, offset, row_size, val_size, ver, days, kflags, row_id < io.n_records
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < io.n_records
 
         # [Case C] -------------------------------------
         return None
@@ -4836,7 +4922,7 @@ class JDbReader(JDbBase):
 
         Returns:
             Dict[int, list]: ``{row_id: [key, file_id, offset, row_size,
-            val_size, ver, days, is_active(, value)]}``.
+            val_size, ver, cdays, mdays, ttl, kflags, is_active(, value)]}``.
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         if max_version is None:
@@ -4847,9 +4933,9 @@ class JDbReader(JDbBase):
         f_decode_value = self.f_decode_value
         n_records = io.n_records
         row_id = 0
-        for (key, file_id, offset, row_size, val_size, ver, days, kflags) in io.KEY_iter(key_fp, row_id, io.n_lines):
+        for (key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags) in io.KEY_iter(key_fp, row_id, io.n_lines):
             if max_version >= ver >= version:
-                data = [key, file_id, offset, row_size, val_size, ver, days, kflags, row_id < n_records]
+                data = [key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < n_records]
                 if with_value:
                     val = f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False)
                     data.append(val)
@@ -4882,7 +4968,7 @@ class JDbReader(JDbBase):
             return b''
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-        _key, file_id, offset, row_size, val_size, _ver, _days, _kflags = io.read_key(key_fp, row)
+        _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, _kflags = io.read_key(key_fp, row)
         if _kflags & JKeyFlag.GROUP: # pragma: no cover
             io.groups.setdefault(_key, None)
 
@@ -4918,7 +5004,7 @@ class JDbReader(JDbBase):
             raise JKeyError(key)
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-        _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
+        _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
         if kflags & JKeyFlag.GROUP:
             group = self.f_get_group(fp_dict, _key)
             return group, None
@@ -4961,15 +5047,28 @@ class JDbReader(JDbBase):
 
         Returns:
             Any: The deserialized value, or ``default_val``.
+
+        Note:
+            An expired record (:attr:`JKeyFlag.EXPIRE` set and its TTL run out)
+            reads as missing. Nothing is deleted *here* -- a read may hold only
+            a read-only handle -- but the row is queued on the calling thread
+            and :meth:`open` drops it on the way out, if the database is
+            writable. On a :class:`JDbReader` the queue is simply discarded.
         """
         key = str(key) if not isinstance(key, str) else key
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
-        # Priority: cache > file
         _cache = self._cache
-        if _cache:
-            _row = key_table.get(key, -1, fp=key_fp)
+        _row, kflags = key_table.get_both(key, fp=key_fp) if (_cache or row is None) else (-1, 0)
+
+        # EXPIRE rides in the key table, so a record without a TTL never pays
+        # for a row read here; one that has a TTL skips the cache and lets the
+        # read_key below decide, rather than reading the row twice
+        may_expire = bool(kflags & JKeyFlag.EXPIRE)
+
+        # Priority: cache > file
+        if _cache and not may_expire:
             if row is None or _row == row:
                 val = _cache.get(key, MISSING)
                 if val is not MISSING:
@@ -4977,7 +5076,7 @@ class JDbReader(JDbBase):
                     return deepcopy(val) if copy else val
 
         if row is None:
-            row = key_table.get(key, -1, fp=key_fp)
+            row = _row
             if row < 0:
                 if default_val is not MISSING:
                     return default_val
@@ -4991,7 +5090,18 @@ class JDbReader(JDbBase):
 
             raise JKeyError(key)
 
-        _key, file_id, offset, row_size, val_size, _ver, _days, kflags = io.read_key(key_fp, row)
+        _key, file_id, offset, row_size, val_size, _ver, _cdays, mdays, ttl, kflags = io.read_key(key_fp, row)
+        if ttl > 0 and io.days > (mdays + ttl):
+            thd = self.th_table.get(get_ident(), None) # absent only outside open()
+            if thd is not None:
+                thd['expired'].append((row, _key))
+
+            _cache.pop(key, None) # a stale value must not outlive the record
+            if default_val is not MISSING:
+                return default_val
+
+            raise JKeyError(key)
+
         return self.f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=copy)
 
     def f_load_keys(self, fp_dict:Dict[int,IO], force:bool=False):
@@ -5070,7 +5180,7 @@ class JDbReader(JDbBase):
         key_table = io.key_table
         row = key_table.get(key, -1, fp=key_fp)
         if row < 0:
-            for (_key, _f, _o, _r, _v, _ver, _d, _kf) in io.KEY_iter(key_fp, io.n_records, io.n_lines):
+            for (_key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf) in io.KEY_iter(key_fp, io.n_records, io.n_lines):
                 if _key == key:
                     return ('-', _ver) # deleted
 
@@ -5080,7 +5190,7 @@ class JDbReader(JDbBase):
             key_table.pop(key, fp=key_fp)
             return ('x', io._sync_id) # Not exist
 
-        _key, _f, _o, _r, _v, _ver, _d, _kf = io.read_key(key_fp, row)
+        _key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf = io.read_key(key_fp, row)
         if ver is None:
             return ('', _ver) # get status and current version
 
@@ -5103,8 +5213,7 @@ class JDbReader(JDbBase):
             engine, the file-pointer table, and the open KEY file pointer.
         """
         if fp_dict is None:
-            ident = get_ident()
-            fp_dict = self.fp_table[ident]
+            fp_dict = self.th_table[get_ident()]['fp']
 
         io = self.io
         key_fp = fp_dict.get(-1, None)
@@ -5212,7 +5321,7 @@ class JDbReader(JDbBase):
 
         return val_fp, file_id, offset
 
-    def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition], with_hidden:bool=True) -> Generator[Tuple[str,tuple], None, None]:
+    def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition], with_hidden:bool=True, with_expired:bool=True) -> Generator[Tuple[str,tuple], None, None]:
         """Iterate over keys and their stored metadata for a slice / date /
         Condition filter (resolved by :meth:`f_slice`).
 
@@ -5225,19 +5334,27 @@ class JDbReader(JDbBase):
                 (:meth:`find`, :meth:`show`, :meth:`JDbKey.__call__`) hide them
                 by default; pass ``False`` to skip them here as well.
                 Defaults to ``True``.
+            with_expired (bool, optional): Yield records whose TTL has run out.
+                See :meth:`JDbKey.item_iter`. Defaults to ``True``.
 
         Yields:
             (str, tuple): ``key, (row_id, file_id, offset, row_size, val_size,
-            version, days, modified_date, created_date)``. When a version
+            version, cdays, mdays, ttl, kflags, modified_date, created_date)``.
+            When a version
             (float) slice includes dead/history rows, their keys are yielded
             decorated as ``'|<key>|~~<ver>~\t\t'`` so they cannot collide with
             live keys.
         """
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
-        io_conv_date = io.z_conv_date
         io_read_key = io.read_key
-        new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_new_date = self.f_slice(fp_dict, slice_obj)
+        io_days = io.days
+        HIDDEN_FLAG = int(JKeyFlag.HIDDEN)
+        skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
+                (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
+                (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG) if with_expired else \
+                (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG or _ttl > 0 and io_days > (_mdays+_ttl))
+        new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_date = self.f_slice(fp_dict, slice_obj)
         start, stop, step = new_slice.start, new_slice.stop, new_slice.step
         if key_rules:
             for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop):
@@ -5245,35 +5362,38 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp_dict[-1]
-                __key, file_id, offset, row_size, val_size, ver, days, kflags = io_read_key(key_fp, row_id)
-                if not max_ver > ver >= min_ver or (not with_hidden and kflags & JKeyFlag.HIDDEN):
+                __key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver or skip(mdays, ttl, kflags):
                     continue
 
-                old_date, new_date = io_conv_date(days)
-                if chk_new_date and (min_date and new_date < min_date or max_date and new_date >= max_date) or \
-                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date): # pragma: no cover
+                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                mdate = THE_1ST_DATE + timedelta(days=mdays)
+
+                if chk_date and (min_date and mdate < min_date or max_date and mdate >= max_date) or \
+                        not chk_date and (min_date and cdate < min_date or max_date and cdate >= max_date): # pragma: no cover
                     continue
 
-                yield __key, (row_id, file_id, offset, row_size, val_size, ver, days, kflags, str(new_date), str(old_date))
+                yield __key, (row_id, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
         else:
             for row_id in range(start, stop, step):
                 key_fp = fp_dict[-1]
-                _key, file_id, offset, row_size, val_size, ver, days, kflags = io_read_key(key_fp, row_id)
-                if not max_ver > ver >= min_ver or (not with_hidden and kflags & JKeyFlag.HIDDEN):
+                _key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                if not max_ver > ver >= min_ver or skip(mdays, ttl, kflags):
                     continue
 
-                old_date, new_date = io_conv_date(days)
-                if chk_new_date and (min_date and new_date < min_date or max_date and new_date >= max_date) or \
-                        not chk_new_date and (min_date and old_date < min_date or max_date and old_date >= max_date):
+                cdate = THE_1ST_DATE + timedelta(days=cdays)
+                mdate = THE_1ST_DATE + timedelta(days=mdays)
+                if chk_date and (min_date and mdate < min_date or max_date and mdate >= max_date) or \
+                        not chk_date and (min_date and cdate < min_date or max_date and cdate >= max_date):
                     continue
 
                 if row_id >= n_records:
                     _key = f'|{_key}|~~{ver}~\t\t'
 
-                yield _key, (row_id, file_id, offset, row_size, val_size, ver, days, kflags, str(new_date), str(old_date))
+                yield _key, (row_id, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, str(mdate), str(cdate))
 
-    def f_items(self, fp_dict:Dict[int,IO], with_value:bool=True, reverse:bool=False, with_hidden:bool=True) -> Generator[Tuple[str,Any], None, None]:
+    def f_items(self, fp_dict:Dict[int,IO], with_value:bool=True, reverse:bool=False, with_hidden:bool=True, with_expired:bool=False) -> Generator[Tuple[str,Any], None, None]:
         """Iterate over all active ``(key, value)`` pairs in row order, reading
         the KEY file in large blocks for speed.
 
@@ -5291,6 +5411,10 @@ class JDbReader(JDbBase):
                 (:meth:`find`, :meth:`show`, :meth:`JDbKey.__call__`) hide them
                 by default; pass ``False`` to skip them here as well.
                 Defaults to ``True``.
+            with_expired (bool, optional): Yield records whose TTL has run out.
+                Defaults to ``False``: an expired record no longer answers
+                :meth:`get`, so keeping it out of here is what makes
+                ``dict(jdb.items())`` agree with reading the keys one by one.
 
         Yields:
             (str, Any): Each record's key and value (or ``None``).
@@ -5298,9 +5422,16 @@ class JDbReader(JDbBase):
         n_records = self.io.n_records
         if n_records > 0:
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+            io_days = io.days
             f_decode_value = self.f_decode_value
-            for (key, file_id, offset, row_size, val_size, _ver, _days, kflags) in io.KEY_iter(key_fp, 0, n_records, reverse=reverse):
-                if with_hidden or not kflags & JKeyFlag.HIDDEN:
+            HIDDEN_FLAG = int(JKeyFlag.HIDDEN)
+            skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
+                (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
+                (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG) if with_expired else \
+                (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG or _ttl > 0 and io_days > (_mdays+_ttl))
+
+            for (key, file_id, offset, row_size, val_size, _ver, _cdays, mdays, ttl, kflags) in io.KEY_iter(key_fp, 0, n_records, reverse=reverse):
+                if not skip(mdays, ttl, kflags):
                     yield key, f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False) if with_value else None
 
     def _update_cache(self, key:str, val:Any, copy:bool=True, key_flags:int=0):

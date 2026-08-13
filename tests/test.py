@@ -8,7 +8,8 @@ from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     JNetFiles, JDiskFiles, run_files_server, LOCKED, \
                     GraphDb, loads, dumps, Query, JIoVAL_U, \
                     register_user_val_codec, register_user_key_codec, \
-                    unregister_user_val_codec, unregister_user_key_codec
+                    unregister_user_val_codec, unregister_user_key_codec, \
+                    MAX_TTL_DAYS
 
 try:
     import resource
@@ -371,8 +372,8 @@ class TestJDb(unittest.TestCase):
             # ---------------- READ_ONLY ----------------
             ro_key = 'key3'
             ro_val = jdb[ro_key]
-            self.assertEqual(jdb.set_key_flags(ro_key, read_only=True), {ro_key: int(JKeyFlag.READ_ONLY)})
-            self.assertEqual(jdb.get_key_flags(ro_key), {ro_key: int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.set_key_flags(ro_key, read_only=True), {ro_key: (int(JKeyFlag.READ_ONLY), 0)})
+            self.assertEqual(jdb.get_key_flags(ro_key), {ro_key: (int(JKeyFlag.READ_ONLY),0)})
 
             jdb[ro_key] = 'blocked'                   # refused silently
             self.assertEqual(jdb[ro_key], ro_val)
@@ -387,7 +388,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, expect)
 
             # set_flags is privileged: it is the only way back out
-            self.assertEqual(jdb.keys.set_flags(ro_key, read_only=False), {ro_key: 0})
+            self.assertEqual(jdb.keys.set_flags(ro_key, read_only=False), {ro_key: (0,0)})
             jdb[ro_key] = 'writable again'
             self.assertEqual(jdb[ro_key], 'writable again')
             jdb.unmodify(ro_key)
@@ -399,32 +400,32 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(isinstance(grp, JDb))
             grp.insert(sub_expect)
             self.assertEqual(grp, sub_expect)
-            self.assertEqual(jdb.keys.get_flags('grp'), {'grp': int(JKeyFlag.GROUP)})
+            self.assertEqual(jdb.keys.get_flags('grp'), {'grp': (int(JKeyFlag.GROUP),0)})
 
             # the derived GROUP bit must survive any flag rewrite, or the group
             # becomes unreadable
-            self.assertEqual(jdb.keys.set_flags('grp', no_cache=True), {'grp': int(JKeyFlag.GROUP | JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb.keys.set_flags('grp', no_cache=True), {'grp': (int(JKeyFlag.GROUP | JKeyFlag.NO_CACHE),0)})
             self.assertEqual(jdb['grp'], sub_expect)
             with jdb.open() as fp:
                 self.assertTrue(jdb.f_write_key_flags(fp, 'grp', JKeyFlag.READ_ONLY))
 
-            self.assertEqual(JKeyFlag(jdb.keys['grp'][7]), JKeyFlag.READ_ONLY | JKeyFlag.GROUP)
+            self.assertEqual(JKeyFlag(jdb.keys['grp'][9]), JKeyFlag.READ_ONLY | JKeyFlag.GROUP)
             self.assertEqual(jdb['grp'], sub_expect)
-            self.assertEqual(jdb.keys.set_flags('grp', read_only=False), {'grp': int(JKeyFlag.GROUP)})
+            self.assertEqual(jdb.keys.set_flags('grp', read_only=False), {'grp': (int(JKeyFlag.GROUP),0)})
 
             # ... and it is never accepted from a caller either
             val = jdb.set('plain', 10, key_flags='+gc')
             self.assertEqual(val, 10)
-            self.assertEqual(jdb.keys.get_flags('plain'), {'plain': int(JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb.keys.get_flags('plain'), {'plain': (int(JKeyFlag.NO_CACHE),0)})
             self.assertEqual(jdb['plain'], 10)
 
             # a group-scoped selector is routed to the child index
-            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=True), {'grp:::g1': int(JKeyFlag.READ_ONLY)})
-            self.assertEqual(grp.keys.get_flags('g1'), {'g1': int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=True), {'grp:::g1': (int(JKeyFlag.READ_ONLY),0)})
+            self.assertEqual(grp.keys.get_flags('g1'), {'g1': (int(JKeyFlag.READ_ONLY),0)})
 
             grp['g1'] = 'blocked'
             self.assertEqual(grp, sub_expect)
-            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=False), {'grp:::g1': 0})
+            self.assertEqual(jdb.keys.set_flags('grp:::g1', read_only=False), {'grp:::g1': (0,0)})
 
             del jdb['grp:::g1']
             self.assertEqual(grp, {'g2': [2, 3]})
@@ -433,7 +434,7 @@ class TestJDb(unittest.TestCase):
             # ---------------- APPEND_ONLY ----------------
             log_key = 'audit'
             jdb[log_key] = [1]
-            self.assertEqual(jdb.keys.set_flags(log_key, append_only=True), {log_key: int(JKeyFlag.APPEND_ONLY)})
+            self.assertEqual(jdb.keys.set_flags(log_key, append_only=True), {log_key: (int(JKeyFlag.APPEND_ONLY),0)})
 
             jdb[log_key] = [1, 2]                     # strict extension -> allowed
             self.assertEqual(jdb[log_key], [1, 2])
@@ -451,7 +452,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb[log_key], [1, 2, 3, 4])
 
             jdb['txt'] = 'ab'
-            self.assertEqual(jdb.keys.set_flags('txt', append_only=True), {'txt': int(JKeyFlag.APPEND_ONLY)})
+            self.assertEqual(jdb.keys.set_flags('txt', append_only=True), {'txt': (int(JKeyFlag.APPEND_ONLY),0)})
             jdb['txt'] = 'abc'
             self.assertEqual(jdb['txt'], 'abc')
             jdb['txt'] = 'xabc'                       # not a suffix append -> refused
@@ -459,7 +460,7 @@ class TestJDb(unittest.TestCase):
 
             if jdb.data_type.endswith(('+S', '+M', '+P')):
                 jdb['set'] = val = {'a', 'b', 'c'}
-                self.assertEqual(jdb.keys.set_flags('set', append_only=True), {'set': int(JKeyFlag.APPEND_ONLY)})
+                self.assertEqual(jdb.keys.set_flags('set', append_only=True), {'set': (int(JKeyFlag.APPEND_ONLY),0)})
                 jdb['set'] = {'a'}
                 self.assertEqual(jdb['set'], val)
                 jdb['set'] = {'a', 'b', 'e'}
@@ -468,14 +469,14 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(jdb['set'], _val)
 
             jdb['map'] = {'a': 1}
-            self.assertEqual(jdb.keys.set_flags('map', append_only=True), {'map': int(JKeyFlag.APPEND_ONLY)})
+            self.assertEqual(jdb.keys.set_flags('map', append_only=True), {'map': (int(JKeyFlag.APPEND_ONLY),0)})
             jdb['map'] = {'a': 1, 'b': 2}
             self.assertEqual(jdb['map'], {'a': 1, 'b': 2})
             jdb['map'] = {'a': 9, 'b': 2}             # changed an existing key -> refused
             jdb['map'] = {'b': 2}                     # dropped an existing key -> refused
             self.assertEqual(jdb['map'], {'a': 1, 'b': 2})
 
-            self.assertEqual(jdb.keys.set_flags(log_key, append_only=False), {log_key: 0})
+            self.assertEqual(jdb.keys.set_flags(log_key, append_only=False), {log_key: (0,0)})
             jdb[log_key] = []
             self.assertEqual(jdb[log_key], [])
 
@@ -486,7 +487,7 @@ class TestJDb(unittest.TestCase):
             if cache_limit != 0:
                 self.assertTrue('blob' in jdb._cache)
 
-            self.assertEqual(jdb.keys.set_flags('blob', no_cache=True), {'blob': int(JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb.keys.set_flags('blob', no_cache=True), {'blob': (int(JKeyFlag.NO_CACHE),0)})
             self.assertFalse('blob' in jdb._cache)    # turning it on evicts immediately
             self.assertEqual(jdb['blob'], blob)
             self.assertFalse('blob' in jdb._cache)    # a read never re-populates
@@ -499,7 +500,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['hot'], 'hot')
             self.assertEqual('hot' in jdb._cache, cache_limit != 0)
 
-            self.assertEqual(jdb.keys.set_flags('blob', no_cache=False), {'blob': 0})
+            self.assertEqual(jdb.keys.set_flags('blob', no_cache=False), {'blob': (0,0)})
             self.assertEqual(jdb['blob'], blob * 2)
             self.assertEqual('blob' in jdb._cache, cache_limit != 0)
 
@@ -507,7 +508,7 @@ class TestJDb(unittest.TestCase):
             # NOTE: adding a NEW key consumes the SAFE region, so create both
             # rows first and only then give an existing key a history to protect.
             jdb['cnt', 'ctl'] = 0
-            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=True), {'cnt': int(JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=True), {'cnt': (int(JKeyFlag.NO_REVERT),0)})
 
             hist_key = 'key5'
             hist_val = jdb[hist_key]
@@ -534,7 +535,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue('ctl' in jdb.unmodify('ctl'))  # a previous version WAS parked
             self.assertNotEqual(jdb['ctl'], 63)
 
-            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=False), {'cnt': 0})
+            self.assertEqual(jdb.keys.set_flags('cnt', no_revert=False), {'cnt': (0,0)})
             jdb['cnt'] = 64
             self.assertTrue('cnt' in jdb.unmodify('cnt'))
             self.assertEqual(jdb['cnt'], 63)
@@ -542,7 +543,7 @@ class TestJDb(unittest.TestCase):
             # ---------------- LINK ----------------
             jdb['report'] = {'rows': 12}
             self.assertTrue(jdb.set_link('latest', 'report'))
-            self.assertEqual(jdb.get_key_flags('latest'), {'latest': int(JKeyFlag.LINK)})
+            self.assertEqual(jdb.get_key_flags('latest'), {'latest': (int(JKeyFlag.LINK),0)})
             self.assertEqual(jdb.get_link('latest'), 'report')
             self.assertEqual(jdb.get_link('report', '-'), '-')   # not a link
             self.assertEqual(jdb.get_link('nosuch', '-'), '-')   # not a key
@@ -616,18 +617,18 @@ class TestJDb(unittest.TestCase):
             with jdb.open() as fp:
                 self.assertTrue(jdb.f_write(fp, 'notalink', 'report', key_flags=JKeyFlag.LINK))
 
-            self.assertEqual(jdb.get_key_flags('notalink'), {'notalink': 0})
+            self.assertEqual(jdb.get_key_flags('notalink'), {'notalink': (0,0)})
             self.assertEqual(jdb['notalink'], 'report')
 
             # ... and a flag rewrite never drops it
-            self.assertEqual(jdb.keys.set_flags('latest', no_revert=True), {'latest': int(JKeyFlag.LINK | JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb.keys.set_flags('latest', no_revert=True), {'latest': (int(JKeyFlag.LINK | JKeyFlag.NO_REVERT), 0)})
             self.assertEqual(jdb['latest'], {'rows': 13})
-            self.assertEqual(jdb.keys.set_flags('latest', no_revert=False), {'latest': int(JKeyFlag.LINK)})
+            self.assertEqual(jdb.keys.set_flags('latest', no_revert=False), {'latest': (int(JKeyFlag.LINK), 0)})
 
             # a locked record refuses to become a link
-            self.assertEqual(jdb.keys.set_flags('notalink', read_only=True), {'notalink': int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.keys.set_flags('notalink', read_only=True), {'notalink': (int(JKeyFlag.READ_ONLY),0)})
             self.assertFalse(jdb.set_link('notalink', 'report'))
-            self.assertEqual(jdb.keys.set_flags('notalink', read_only=False), {'notalink': 0})
+            self.assertEqual(jdb.keys.set_flags('notalink', read_only=False), {'notalink': (0,0)})
 
             # deleting a link removes the link alone and reports its target path
             self.assertEqual(jdb.remove('cur'), {'cur': 'archive:::2026-08'})
@@ -658,29 +659,26 @@ class TestJDb(unittest.TestCase):
             jdb.remove('cur', 't1', 'deepx', 'notalink')
             del jdb['archive:::newest']
 
-            # a reader cannot create one
-            self.assertRaises(AttributeError, JDbReader(jdb).set_link, 'x', 'key1')
-
             # ---------------- string (chmod-style) flag arguments ----------------
             jdb['strf'] = [1]
             # a string is RELATIVE: bare letters set, '+' sets, '-' clears
-            self.assertEqual(jdb.set_key_flags('strf', 'ra'), {'strf': int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)})
-            self.assertEqual(jdb.set_key_flags('strf', '-a+c'), {'strf': int(JKeyFlag.READ_ONLY | JKeyFlag.NO_CACHE)})
-            self.assertEqual(jdb.keys.set_flags('strf', '+h'), {'strf': int(JKeyFlag.READ_ONLY | JKeyFlag.NO_CACHE | JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('strf', 'ra'), {'strf': (int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY), 0)})
+            self.assertEqual(jdb.set_key_flags('strf', '-a+c'), {'strf': (int(JKeyFlag.READ_ONLY | JKeyFlag.NO_CACHE),0)})
+            self.assertEqual(jdb.keys.set_flags('strf', '+h'), {'strf': (int(JKeyFlag.READ_ONLY | JKeyFlag.NO_CACHE | JKeyFlag.HIDDEN),0)})
             self.assertEqual(jdb.set_key_flags('strf', 'RCH'), {})      # case-insensitive -> no change
             self.assertEqual(jdb.set_key_flags('strf', '+x'), {})       # unknown letter ignored
 
             # an int/JKeyFlag is ABSOLUTE: the record ends up with exactly those bits
-            self.assertEqual(jdb.set_key_flags('strf', JKeyFlag.NO_REVERT), {'strf': int(JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb.set_key_flags('strf', JKeyFlag.NO_REVERT), {'strf': (int(JKeyFlag.NO_REVERT),0)})
 
             # per-flag keywords still win over the string
-            self.assertEqual(jdb.set_key_flags('strf', '+r+c', no_cache=False), {'strf': int(JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT)})
+            self.assertEqual(jdb.set_key_flags('strf', '+r+c', no_cache=False), {'strf': (int(JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT),0)})
 
             # USER0-3 use digit letters and must parse
-            self.assertEqual(jdb.set_key_flags('strf', '-r+0+3'), {'strf': int(JKeyFlag.NO_REVERT | JKeyFlag.USER0 | JKeyFlag.USER3)})
+            self.assertEqual(jdb.set_key_flags('strf', '-r+0+3'), {'strf': (int(JKeyFlag.NO_REVERT | JKeyFlag.USER0 | JKeyFlag.USER3),0)})
 
             # derived bits can never be set from a string
-            self.assertEqual(jdb.set_key_flags('strf', '-v-0-3+g+l'), {'strf': 0})
+            self.assertEqual(jdb.set_key_flags('strf', '-v-0-3+g+l'), {'strf': (0,0)})
             jdb.remove('strf')
 
             # f_write / f_append / f_write_key_flags accept the same forms
@@ -689,22 +687,22 @@ class TestJDb(unittest.TestCase):
                 self.assertTrue(jdb.f_append(fp, 'sa', 1, key_flags='+h+0'))
                 self.assertTrue(jdb.f_write_key_flags(fp, 'sw', '-a'))
 
-            self.assertEqual(jdb.get_key_flags('sw'), {'sw': int(JKeyFlag.READ_ONLY)})
-            self.assertEqual(jdb.get_key_flags('sa'), {'sa': int(JKeyFlag.HIDDEN | JKeyFlag.USER0)})
+            self.assertEqual(jdb.get_key_flags('sw'), {'sw': (int(JKeyFlag.READ_ONLY),0)})
+            self.assertEqual(jdb.get_key_flags('sa'), {'sa': (int(JKeyFlag.HIDDEN | JKeyFlag.USER0),0)})
             jdb.set_key_flags('sw', '-r')
             jdb.remove('sw', 'sa')
 
             # a group keeps its derived GROUP bit through a string flag write
             sgrp = jdb.add_group('sgrp')
             sgrp['x'] = 1
-            self.assertEqual(jdb.set_key_flags('sgrp', '+c'), {'sgrp': int(JKeyFlag.GROUP | JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb.set_key_flags('sgrp', '+c'), {'sgrp': (int(JKeyFlag.GROUP | JKeyFlag.NO_CACHE),0)})
             self.assertEqual(jdb['sgrp'], {'x': 1})
             jdb.remove('sgrp')
 
             # ---------------- HIDDEN ----------------
             jdb['shown'] = [1]
             jdb['quiet'] = [9]
-            self.assertEqual(jdb.set_key_flags('quiet', hidden=True), {'quiet': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('quiet', hidden=True), {'quiet': (int(JKeyFlag.HIDDEN),0)})
 
             # the three query APIs hide it ...
             self.assertFalse('quiet' in jdb.find())
@@ -731,7 +729,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue('quiet' in set(jdb.keys))
             self.assertTrue('quiet' in dict(jdb.keys.items()))
             self.assertEqual(len(dict(jdb.items())), len(jdb))
-            self.assertEqual(jdb.get_key_flags('quiet'), {'quiet': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.get_key_flags('quiet'), {'quiet': (int(JKeyFlag.HIDDEN),0)})
 
             # find_iter is the raw iterator: it does NOT hide
             self.assertTrue('quiet' in dict(jdb.find_iter()))
@@ -747,21 +745,21 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(sorted(jdb.map(lambda k, v: k, keys=r'^(shown|quiet)$', with_hidden=True)), ['quiet', 'shown'])
             self.assertRaises(TypeError, jdb.map, None)
 
-            self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': 0})
+            self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': (0,0)})
             self.assertTrue('quiet' in jdb.find())
-            self.assertEqual(jdb.set_key_flags('quiet', 'h'), {'quiet': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('quiet', 'h'), {'quiet': (int(JKeyFlag.HIDDEN),0)})
             self.assertEqual(jdb.set_key_flags('quiet', '+h'), {})   # already hidden -> no change
-            self.assertEqual(jdb.set_key_flags('quiet', '+r+0'), {'quiet': int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
-            self.assertEqual(jdb.set_key_flags('quiet', hidden=False), {'quiet': int(JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
-            self.assertEqual(jdb.set_key_flags('quiet', hidden=True), {'quiet': int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0)})
-            self.assertEqual(jdb.set_key_flags('quiet', '-r-0'), {'quiet': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('quiet', '+r+0'), {'quiet': (int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0),0)})
+            self.assertEqual(jdb.set_key_flags('quiet', hidden=False), {'quiet': (int(JKeyFlag.READ_ONLY | JKeyFlag.USER0),0)})
+            self.assertEqual(jdb.set_key_flags('quiet', hidden=True), {'quiet': (int(JKeyFlag.HIDDEN | JKeyFlag.READ_ONLY | JKeyFlag.USER0), 0)})
+            self.assertEqual(jdb.set_key_flags('quiet', '-r-0'), {'quiet': (int(JKeyFlag.HIDDEN),0)})
 
             # ... and take every selector set_key_flags does
-            self.assertEqual(jdb.set_key_flags(re.compile(r'^shown$'), '+h'), {'shown': int(JKeyFlag.HIDDEN)})
-            self.assertEqual(jdb.set_key_flags(lambda k: k == 'shown', '-h'), {'shown': 0})
-            self.assertEqual(jdb.set_key_flags(['shown'], hidden=True), {'shown': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags(re.compile(r'^shown$'), '+h'), {'shown': (int(JKeyFlag.HIDDEN),0)})
+            self.assertEqual(jdb.set_key_flags(lambda k: k == 'shown', '-h'), {'shown': (0,0)})
+            self.assertEqual(jdb.set_key_flags(['shown'], hidden=True), {'shown': (int(JKeyFlag.HIDDEN),0)})
             self.assertEqual(sorted(jdb.find(keys=r'^(shown|quiet)$')), [])
-            self.assertEqual(jdb.set_key_flags('shown', hidden=False), {'shown': 0})
+            self.assertEqual(jdb.set_key_flags('shown', hidden=False), {'shown': (0,0)})
 
             # a bare keys() call is still a QUERY, so it hides -- and it must not
             # short-circuit past limit/skip either
@@ -775,7 +773,7 @@ class TestJDb(unittest.TestCase):
             # ---- update_if: a Query sweep must not reach a hidden record ----
             jdb['ud1'] = {'hcnt': 1}
             jdb['ud2'] = {'hcnt': 2}
-            self.assertEqual(jdb.set_key_flags('ud2', hidden=True), {'ud2': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jdb.set_key_flags('ud2', hidden=True), {'ud2': (int(JKeyFlag.HIDDEN),0)})
 
             self.assertEqual(jdb.update_if(Query().hcnt > 0, {'seen': True}), 1)
             self.assertEqual(jdb['ud1'], {'hcnt': 1, 'seen': True})
@@ -794,7 +792,7 @@ class TestJDb(unittest.TestCase):
             from csv import DictReader
             jhid = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jhid.insert({'c1': {'n': 1}, 'c2': {'n': 2}, '_meta': {'n': 9, 'secret': 'x'}})
-            self.assertEqual(jhid.set_key_flags('_meta', '+h'), {'_meta': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(jhid.set_key_flags('_meta', '+h'), {'_meta': (int(JKeyFlag.HIDDEN),0)})
 
             # a dump leaves the hidden row out -- and never discovers its columns
             with io.StringIO() as fp:
@@ -816,13 +814,13 @@ class TestJDb(unittest.TestCase):
             # a clone is faithful by default (backup/restore/upgrade rely on it)
             cln = jhid.clone_to(JDb(data_type=jdb.data_type, zip_type=jdb.zip_type), signal='')
             self.assertEqual(len(cln), 3)
-            self.assertEqual(cln.get_key_flags('_meta'), {'_meta': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(cln.get_key_flags('_meta'), {'_meta': (int(JKeyFlag.HIDDEN),0)})
             self.assertEqual(cln['_meta'], {'n': 9, 'secret': 'x'})
 
             # ... but can be asked to strip the bookkeeping, groups included
             hgrp = jhid.add_group('hgrp')
             hgrp.insert({'g': {'n': 1}, '_g': {'n': 2}})
-            self.assertEqual(hgrp.set_key_flags('_g', 'h'), {'_g': int(JKeyFlag.HIDDEN)})
+            self.assertEqual(hgrp.set_key_flags('_g', 'h'), {'_g': (int(JKeyFlag.HIDDEN),0)})
 
             cln = jhid.clone_to(JDb(data_type=jdb.data_type, zip_type=jdb.zip_type), signal='', with_hidden=False)
             self.assertEqual(set(cln.keys(with_hidden=True)), {'c1', 'c2', 'hgrp'})
@@ -830,26 +828,26 @@ class TestJDb(unittest.TestCase):
 
             # ---- a hidden GROUP keeps its subtree out of a query ----
             self.assertEqual(sorted(jhid.find(':::')), ['hgrp:::g'])
-            self.assertEqual(jhid.set_key_flags('hgrp', 'h'), {'hgrp': int(JKeyFlag.GROUP | JKeyFlag.HIDDEN)})
+            self.assertEqual(jhid.set_key_flags('hgrp', 'h'), {'hgrp': (int(JKeyFlag.GROUP | JKeyFlag.HIDDEN),0)})
             self.assertEqual(sorted(jhid.find(':::')), [])
             self.assertEqual(sorted(jhid.find(':::', with_hidden=True)), ['hgrp:::_g', 'hgrp:::g'])
             self.assertEqual(jhid['hgrp']['g'], {'n': 1})        # still reachable by name
 
             # a group-scoped selector routes to the child index
-            self.assertEqual(jhid.set_key_flags('hgrp:::g', 'h'), {'hgrp:::g': int(JKeyFlag.HIDDEN)})
-            self.assertEqual(hgrp.get_key_flags('g'), {'g': int(JKeyFlag.HIDDEN)})
-            self.assertEqual(jhid.set_key_flags('hgrp:::g', '-h'), {'hgrp:::g': 0})
+            self.assertEqual(jhid.set_key_flags('hgrp:::g', 'h'), {'hgrp:::g': (int(JKeyFlag.HIDDEN),0)})
+            self.assertEqual(hgrp.get_key_flags('g'), {'g': (int(JKeyFlag.HIDDEN),0)})
+            self.assertEqual(jhid.set_key_flags('hgrp:::g', '-h'), {'hgrp:::g': (0,0)})
 
             # un-hiding needs no special casing
-            self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': 0})
+            self.assertEqual(jdb.set_key_flags('quiet', '-h'), {'quiet': (0,0)})
             self.assertTrue('quiet' in jdb.find())
             jdb.remove('quiet', 'shown')
 
             # ---------------- UNLOCK: a per-call sudo ----------------
             jdb['lk'] = [1]
             jdb['ao'] = [1]
-            self.assertEqual(jdb.set_key_flags('lk', '+r+2'), {'lk': int(JKeyFlag.READ_ONLY | JKeyFlag.USER2)})
-            self.assertEqual(jdb.set_key_flags('ao', '+a'), {'ao': int(JKeyFlag.APPEND_ONLY)})
+            self.assertEqual(jdb.set_key_flags('lk', '+r+2'), {'lk': (int(JKeyFlag.READ_ONLY | JKeyFlag.USER2),0)})
+            self.assertEqual(jdb.set_key_flags('ao', '+a'), {'ao': (int(JKeyFlag.APPEND_ONLY),0)})
 
             # without it, the locks hold
             self.assertIsNone(jdb.set('lk', [9]))
@@ -864,15 +862,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['ao'], [0])
 
             # ... and the record's own flags are untouched
-            self.assertEqual(jdb.get_key_flags('lk'), {'lk': int(JKeyFlag.READ_ONLY | JKeyFlag.USER2)})
-            self.assertEqual(jdb.get_key_flags('ao'), {'ao': int(JKeyFlag.APPEND_ONLY)})
+            self.assertEqual(jdb.get_key_flags('lk'), {'lk': (int(JKeyFlag.READ_ONLY | JKeyFlag.USER2),0)})
+            self.assertEqual(jdb.get_key_flags('ao'), {'ao': (int(JKeyFlag.APPEND_ONLY),0)})
             self.assertIsNone(jdb.set('lk', [8]))                 # still locked afterwards
             self.assertEqual(jdb['lk'], [9])
 
             # UNLOCK can be combined with real flag changes
             self.assertEqual(jdb.set('lk', [9, 9], key_flags='+u+c'), [9, 9])
-            self.assertEqual(jdb.get_key_flags('lk'),\
-                             {'lk': int(JKeyFlag.READ_ONLY | JKeyFlag.USER2 | JKeyFlag.NO_CACHE)})
+            self.assertEqual(jdb.get_key_flags('lk'), {'lk': (int(JKeyFlag.READ_ONLY | JKeyFlag.USER2 | JKeyFlag.NO_CACHE),0)})
 
             # deletes: remove() / pop() / f_delete()
             self.assertEqual(jdb.remove('lk'), {})                # refused, not reported
@@ -903,10 +900,10 @@ class TestJDb(unittest.TestCase):
                 self.assertTrue(jdb.f_write(fp, 'tr2', [1], key_flags='u'))
                 self.assertTrue(jdb.f_append(fp, 'tr3', [1], key_flags='+u+r'))
 
-            self.assertEqual(jdb.get_key_flags('tr2'), {'tr2': 0})
-            self.assertEqual(jdb.get_key_flags('tr3'), {'tr3': int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.get_key_flags('tr2'), {'tr2': (0,0)})
+            self.assertEqual(jdb.get_key_flags('tr3'), {'tr3': (int(JKeyFlag.READ_ONLY),0)})
             self.assertEqual(jdb.set_key_flags('tr', 'u'), {})     # nothing to store
-            self.assertEqual(jdb.get_key_flags('tr'), {'tr': 0})
+            self.assertEqual(jdb.get_key_flags('tr'), {'tr': (0,0)})
             self.assertEqual(jdb.find(key_flags='+u'), jdb.find())  # not a query predicate
             jdb.set_key_flags('tr3', '-r')
             jdb.remove('tr', 'tr2', 'tr3')
@@ -970,7 +967,7 @@ class TestJDb(unittest.TestCase):
             # ---------------- USER0-3: stored, inert ----------------
             user_all = int(JKeyFlag.USER0 | JKeyFlag.USER1 | JKeyFlag.USER2 | JKeyFlag.USER3)
             self.assertEqual(JKeyFlag('0123'), JKeyFlag(user_all))
-            self.assertEqual(jdb.set_key_flags('key7', '+0+3'), {'key7': int(JKeyFlag.USER0 | JKeyFlag.USER3)})
+            self.assertEqual(jdb.set_key_flags('key7', '+0+3'), {'key7': (int(JKeyFlag.USER0 | JKeyFlag.USER3),0)})
             self.assertEqual(jdb['key7'], expect['key7'])        # no behaviour attached
             jdb['key7'] = expect['key7'] + [99]
             self.assertEqual(jdb['key7'], expect['key7'] + [99])
@@ -978,42 +975,194 @@ class TestJDb(unittest.TestCase):
             # they survive a delete/undelete round-trip and combine with real flags
             self.assertEqual(jdb.remove('key7'), {'key7': expect['key7'] + [99]})
             self.assertTrue('key7' in jdb.unremove('key7'))
-            self.assertEqual(jdb.get_key_flags('key7'), {'key7': int(JKeyFlag.USER0 | JKeyFlag.USER3)})
-            self.assertEqual(jdb.set_key_flags('key7', '12r'), {'key7': user_all | int(JKeyFlag.READ_ONLY)})
+            self.assertEqual(jdb.get_key_flags('key7'), {'key7': (int(JKeyFlag.USER0 | JKeyFlag.USER3),0)})
+            self.assertEqual(jdb.set_key_flags('key7', '12r'), {'key7': (user_all | int(JKeyFlag.READ_ONLY),0)})
             jdb['key7'] = 'blocked'
             self.assertEqual(jdb['key7'], expect['key7'] + [99])
-            self.assertEqual(jdb.set_key_flags('key7', '-0-1-2-3', read_only=False), {'key7': 0})
+            self.assertEqual(jdb.set_key_flags('key7', '-0-1-2-3', read_only=False), {'key7': (0,0)})
             jdb['key7'] = expect['key7']
 
             # ---------------- flags survive a delete/undelete round-trip ----------------
             jdb['ghost'] = 1
-            ghost_flags = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT)
+            ghost_flags = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT), 0
             self.assertEqual(jdb.keys.set_flags('ghost', '+c', no_revert=True), {'ghost': ghost_flags})
             del jdb['ghost']
             self.assertFalse('ghost' in jdb)
             self.assertTrue('ghost' in jdb.unremove('ghost'))
             self.assertEqual(jdb['ghost'], 1)
-            self.assertEqual(jdb.keys.get_flags('ghost'), {'ghost': int(ghost_flags)})
+            self.assertEqual(jdb.keys.get_flags('ghost'), {'ghost': ghost_flags})
 
             # ---------------- set_flags: selectors and tri-state ----------------
             jdb['sel1', 'sel2'] = 1
-            both = int(JKeyFlag.NO_CACHE)
+            both = int(JKeyFlag.NO_CACHE), 0
             self.assertEqual(jdb.keys.set_flags(['sel1', 'sel2'], no_cache=True), {'sel1': both, 'sel2': both})
             self.assertEqual(jdb.keys.set_flags(re.compile(r'sel[12]$'), no_cache=True), {})  # already set
             self.assertEqual(jdb.keys.set_flags('sel1'), {})                                  # all None -> no-op
 
-            both = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT)
-            self.assertEqual(jdb.keys.set_flags(Query().startswith('sel'), no_revert=True), {'sel1': both, 'sel2': both})                                    # no_cache untouched
-            self.assertEqual(jdb.keys.set_flags('sel1', no_cache=False), {'sel1': int(JKeyFlag.NO_REVERT)})
-            self.assertEqual(jdb.keys.set_flags(lambda k: k.startswith('sel'), '-c-v'), {'sel1': 0, 'sel2': 0})
+            both = int(JKeyFlag.NO_CACHE | JKeyFlag.NO_REVERT), 0
+            self.assertEqual(jdb.keys.set_flags(Query().startswith('sel'), no_revert=True), {'sel1': both, 'sel2': both}) # no_cache untouched
+            self.assertEqual(jdb.keys.set_flags('sel1', no_cache=False), {'sel1': (int(JKeyFlag.NO_REVERT),0)})
+            self.assertEqual(jdb.keys.set_flags(lambda k: k.startswith('sel'), '-c-v'), {'sel1': (0,0), 'sel2': (0,0)})
 
-            # a reader has no index to write to
-            self.assertRaises(AttributeError, JDbReader(jdb).set_key_flags, 'sel1', True)
+            # ---------------- EXPIRE: derived from ttl, never from the caller ----------------
+            expire = int(JKeyFlag.EXPIRE)
+            jdb['exp'] = 1
+            self.assertEqual(jdb.get_key_flags('exp'), {'exp': (0, 0)})
+
+            # a ttl sets EXPIRE, and the reported ttl is what actually got stored
+            self.assertEqual(jdb.set_key_flags('exp', ttl=30), {'exp': (expire, 30)})
+            self.assertEqual(jdb.get_key_flags('exp'), {'exp': (expire, 30)})
+            self.assertEqual(jdb.set_key_flags('exp', ttl=30), {})   # unchanged -> not reported
+
+            # ttl=None leaves it alone, ttl=0 removes it
+            self.assertEqual(jdb.set_key_flags('exp', ttl=None), {})
+            self.assertEqual(jdb.get_key_flags('exp'), {'exp': (expire, 30)})
+            self.assertEqual(jdb.set_key_flags('exp', ttl=0), {'exp': (0, 0)})
+            self.assertEqual(jdb.set_key_flags('exp', ttl=0), {})     # already gone
+
+            # out of range is clamped, and the return value never claims otherwise
+            self.assertEqual(jdb.set_key_flags('exp', ttl=MAX_TTL_DAYS * 100), {'exp': (expire, MAX_TTL_DAYS)})
+            self.assertEqual(jdb.get_key_flags('exp'), {'exp': (expire, MAX_TTL_DAYS)})
+            self.assertEqual(jdb.set_key_flags('exp', ttl=-5), {'exp': (0, 0)})    # <=0 clears
+
+            # EXPIRE is derived: a caller may never set it by name
+            jdb['exp2'] = 1
+            self.assertEqual(jdb.set_key_flags('exp2', '+e'), {})
+            self.assertEqual(jdb.set_key_flags('exp2', JKeyFlag.EXPIRE), {})
+            self.assertEqual(jdb.get_key_flags('exp2'), {'exp2': (0, 0)})
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'exp2', 2, key_flags=JKeyFlag.EXPIRE))
+
+            self.assertEqual(jdb.get_key_flags('exp2'), {'exp2': (0, 0)})
+
+            # ... nor clear one: an absolute int flags= only speaks for writable bits
+            self.assertEqual(jdb.set_key_flags('exp2', ttl=7), {'exp2': (expire, 7)})
+            self.assertEqual(jdb.set_key_flags('exp2', JKeyFlag.READ_ONLY), {'exp2': (expire | int(JKeyFlag.READ_ONLY), 7)})
+            self.assertEqual(jdb.set_key_flags('exp2', '-r'), {'exp2': (expire, 7)})
+
+            # a ttl combines with the writable flags and survives a rewrite
+            self.assertEqual(jdb.set_key_flags('exp2', '+c+0'), {'exp2': (expire | int(JKeyFlag.NO_CACHE | JKeyFlag.USER0), 7)})
+            jdb['exp2'] = 3
+            self.assertEqual(jdb['exp2'], 3)
+            self.assertEqual(jdb.get_key_flags('exp2'), {'exp2': (expire | int(JKeyFlag.NO_CACHE | JKeyFlag.USER0), 7)})
+
+            # ... and a delete/undelete round-trip
+            del jdb['exp2']
+            self.assertTrue('exp2' in jdb.unremove('exp2'))
+            self.assertEqual(jdb.get_key_flags('exp2'), {'exp2': (expire | int(JKeyFlag.NO_CACHE | JKeyFlag.USER0), 7)})
+
+            # the EXPIRE layout narrows the modified-delta, so the dates must still hold
+            old_date = dt.date.today() - dt.timedelta(days=400)
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'exp3', 1, cdays=old_date, ttl=45))
+
+            _meta = jdb.keys['exp3']
+            self.assertEqual(_meta[8], 45)
+            self.assertTrue(_meta[9] & expire)
+            self.assertEqual(_meta[11], str(old_date))                  # created
+            self.assertEqual(_meta[10], str(dt.date.today()))           # modified
+            self.assertEqual(_meta[7] - _meta[6], 400)                  # delta survives 13 bits
+
+            # f_write inherits the ttl on a plain rewrite and ttl=0 clears it
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'exp3', 2, overwrite=True))
+
+            self.assertEqual(jdb.keys['exp3'][8], 45)
+            self.assertEqual(jdb.keys['exp3'][11], str(old_date))       # creation date untouched
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'exp3', 3, ttl=0, overwrite=True))
+
+            self.assertEqual(jdb.keys['exp3'][8], 0)
+            self.assertFalse(jdb.keys['exp3'][9] & expire)
+
+            # a group hides nothing: ttl routes into the child the way other flags do
+            egrp = jdb.add_group('egrp')
+            egrp['g1'] = 1
+            self.assertEqual(jdb.set_key_flags('egrp:::g1', ttl=9), {'egrp:::g1': (expire, 9)})
+            self.assertEqual(egrp.get_key_flags('g1'), {'g1': (expire, 9)})
+            self.assertEqual(jdb.set_key_flags('egrp:::g1', ttl=0), {'egrp:::g1': (0, 0)})
+            del jdb['egrp']
+
+            for _k in ('exp', 'exp2', 'exp3'):
+                del jdb[_k]
+
+            self.assertEqual(jdb.unremove(['exp', 'exp2', 'exp3']).keys() | set(), {'exp', 'exp2', 'exp3'})
+            jdb.set_key_flags(['exp2'], '-c-0')
+            for _k in ('exp', 'exp2', 'exp3'):
+                del jdb[_k]
+
+            # ---------------- an expired record reads as gone, everywhere ----------------
+            today = dt.date.today()
+            _ago = lambda n: today - dt.timedelta(days=n)
+            with jdb.open() as _fp:
+                jdb.f_write(_fp, 'x_live', 1, ttl=30)
+                jdb.f_write(_fp, 'x_edge', 2, cdays=_ago(5),  mdays=_ago(5),  ttl=5)
+                jdb.f_write(_fp, 'x_dead', 3, cdays=_ago(10), mdays=_ago(10), ttl=5)
+                jdb.f_write(_fp, 'x_none', 4)
+
+            # the metadata view shows it, and says why -- check before any read,
+            # since reading an expired record is what queues it for deletion
+            ret = jdb.keys.get_flags('x_dead')
+            self.assertEqual(ret['x_dead'][1], 5)
+            self.assertTrue(ret['x_dead'][0] & expire)
+            self.assertEqual(dict(jdb.keys.item_iter('x_dead', with_expired=False)), {})
+
+            # ttl counts days remaining, so a record whose last day is today lives
+            self.assertEqual(jdb['x_edge'], 2)
+            self.assertEqual(jdb.get('x_dead', 'GONE'), 'GONE')
+            self.assertRaises(KeyError, lambda: jdb['x_dead'])
+            self.assertFalse('x_dead' in jdb)
+            self.assertFalse({'x_live', 'x_dead'} in jdb)
+            self.assertTrue({'x_live', 'x_edge'} in jdb)
+
+            # every value view agrees with the single-key read
+            self.assertNotIn('x_dead', dict(jdb.items()))
+            self.assertNotIn('x_dead', dict(jdb[:]))
+            self.assertNotIn('x_dead', dict(jdb[lambda k: True]))
+            self.assertNotIn('x_dead', dict(jdb[['x_live', 'x_dead']]))
+            self.assertNotIn('x_dead', jdb.find(''))
+            self.assertEqual(len(jdb[:dt.date.today() + dt.timedelta(days=1)]), len(dict(jdb.items())))
+
+            # reading it queued the row; open() dropped it on the way out
+            self.assertEqual(dict(jdb.keys.item_iter('x_dead')), {})
+            self.assertEqual(sorted(k for k in dict(jdb.items()) if k.startswith('x_')), ['x_edge', 'x_live', 'x_none'])
+            self.assertEqual(len(jdb), len(dict(jdb.items()))) # len() agrees again
+
+            # a cached value must not outlive the record it came from
+            self.assertEqual(jdb['x_live'], 1)
+            with jdb.open() as _fp:
+                jdb.f_write(_fp, 'x_live', 9, cdays=_ago(10), mdays=_ago(10), ttl=5, overwrite=True)
+
+            self.assertEqual(jdb.get('x_live', 'GONE'), 'GONE')
+
+            # the f_open/f_close pair drops expired rows too, not just open()
+            with jdb.open() as _fp:
+                jdb.f_write(_fp, 'x_fc', 1, cdays=_ago(10), mdays=_ago(10), ttl=5)
+
+            _fp = jdb.f_open(read_only=False)
+            try:
+                self.assertEqual(jdb.f_read(_fp, 'x_fc', 'GONE'), 'GONE')
+            finally:
+                jdb.f_close()
+
+            self.assertEqual(dict(jdb.keys.item_iter('x_fc')), {})
+            jdb.f_close() # without a matching f_open: must not raise
+
+            # recycle() sheds expired rows even with nothing ever reading them
+            with jdb.open() as _fp:
+                jdb.f_write(_fp, 'x_rec', 1, cdays=_ago(10), mdays=_ago(10), ttl=5)
+
+            self.assertIn('x_rec', dict(jdb.keys.item_iter(None)))
+            jdb.recycle(verbose=False)
+            self.assertEqual(dict(jdb.keys.item_iter('x_rec')), {})
+
+            for _k in ('x_edge', 'x_none'):
+                del jdb[_k]
 
             # ---------------- teardown: unlock everything ----------------
             jdb.keys.set_flags(None, read_only=False, append_only=False, no_cache=False, no_revert=False)
             for _key, _meta in jdb.keys.items():
-                self.assertEqual(JKeyFlag(_meta[7]) & ~JKeyFlag.GROUP, JKeyFlag(0), _key)
+                self.assertEqual(JKeyFlag(_meta[9]) & ~JKeyFlag.GROUP, JKeyFlag(0), _key)
 
             jdb.remove(jdb)
             self.assertEqual(len(jdb), 0)
@@ -6607,7 +6756,7 @@ class TestJDb(unittest.TestCase):
             chg = {}
             ret = jdb.check_version(0, with_value=True)
             for row,val in ret.items():
-                key, file_id, offset, rsize, vsize, _ver, _days, _kflags, valid, val = val
+                key, file_id, offset, rsize, vsize, _ver, _cdays, _mdays, _ttl, _kflags, valid, val = val
                 self.assertLessEqual(row, jdb.n_lines)
                 if rsize > 0:
                     self.assertIn(file_id, jdb.file_table)
@@ -7017,7 +7166,7 @@ class TestJDb(unittest.TestCase):
                 self.assertFalse(ret)
 
             ret = jdb.keys.set_flags(Query().endswith(('y1', 'y2')), read_only=False)
-            self.assertEqual(ret, {'key1':0, 'key2':0})
+            self.assertEqual(ret, {'key1': (0,0), 'key2': (0,0)})
 
             ret = jdb.keys.set_flags(re.compile(r'key[12]$'), read_only=False)
             self.assertEqual(ret, {})
@@ -9739,7 +9888,7 @@ class TestJDb(unittest.TestCase):
 
     def test_date(self):
         now = dt.datetime.now()
-        old_date = now - dt.timedelta(days=10)
+        cdate = now - dt.timedelta(days=10)
         for config in self.jdb_configs:
             st_time = time.perf_counter()
             filename = config['KEY_file']
@@ -9752,8 +9901,8 @@ class TestJDb(unittest.TestCase):
             jdb1 = JDb(jdb)
 
             _now = jdb.io.z_conv_days(now.timestamp())
-            _old_date = jdb.io.z_conv_days(old_date.timestamp())
-            self.assertEqual(_old_date + 10, _now)
+            _cdate = jdb.io.z_conv_days(cdate.timestamp())
+            self.assertEqual(_cdate + 10, _now)
 
             _today = dt.date.today()
             _next_day = _today + dt.timedelta(days=1)
@@ -9797,9 +9946,9 @@ class TestJDb(unittest.TestCase):
             matches_2 = jdb.keys[Query()._date >= dt.date(2010,1,1)]
             self.assertEqual(matches, matches_2)
 
-            matches = jdb[old_date:]
+            matches = jdb[cdate:]
             self.assertEqual(matches, expect)
-            matches = jdb.keys[old_date:]
+            matches = jdb.keys[cdate:]
             self.assertEqual(set(matches), set(expect))
 
             matches = jdb[:_next_day]
@@ -9818,14 +9967,14 @@ class TestJDb(unittest.TestCase):
             matches = jdb.keys[:dt.date(2010, 1, 1)]
             matches_2 = jdb.keys[Query()._date <= dt.date(2010, 1, 1)]
 
-            matches = jdb[:old_date]
+            matches = jdb[:cdate]
             self.assertTrue(not matches)
-            matches = jdb.keys[:old_date]
+            matches = jdb.keys[:cdate]
             self.assertTrue(not matches)
 
-            matches = jdb[old_date:_now]
+            matches = jdb[cdate:_now]
             self.assertEqual(matches, expect)
-            matches = jdb.keys[old_date:_now]
+            matches = jdb.keys[cdate:_now]
             self.assertEqual(set(matches), set(expect))
 
             matches = jdb[dt.datetime(2010, 1, 1):_now]
@@ -9835,23 +9984,23 @@ class TestJDb(unittest.TestCase):
             matches_2 = jdb.keys[Query()._date.between(dt.datetime(2010, 1, 1),_now)]
             self.assertEqual(matches, matches_2)
 
-            matches = jdb[now:old_date]
+            matches = jdb[now:cdate]
             self.assertTrue(not matches)
-            matches = jdb.keys[now:old_date]
+            matches = jdb.keys[now:cdate]
             self.assertTrue(not matches)
 
             info0 = jdb.keys['kk1']
-            self.assertNotEqual(info0[-1], str(old_date.date()))
+            self.assertNotEqual(info0[-1], str(cdate.date()))
 
             with jdb.open(read_only=False) as fp:
-                jdb.f_change_days(fp, 'kk1', _old_date)
+                jdb.f_change_days(fp, 'kk1', _cdate)
 
-            self.assertEqual(jdb.keys['kk1'][-1], str(old_date.date()))
+            self.assertEqual(jdb.keys['kk1'][-1], str(cdate.date()))
             info1 = jdb.keys['kk2']
-            self.assertNotEqual(info1[-1], str(old_date.date()))
-            jdb.keys['kk2'] = _old_date
+            self.assertNotEqual(info1[-1], str(cdate.date()))
+            jdb.keys['kk2'] = _cdate
 
-            _old = old_date + dt.timedelta(days=1)
+            _old = cdate + dt.timedelta(days=1)
             matches = jdb[:_old]
             self.assertEqual(len(matches), 2)
             self.assertEqual(expect['kk1'], matches['kk1'])
@@ -9874,26 +10023,35 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(matches['kk2'], 'test')
 
             info = jdb.keys['kk3']
-            self.assertNotEqual(info[-1], str(old_date.date()))
-            jdb.set_days('kk3', old_date.date())
+            self.assertNotEqual(info[-1], str(cdate.date()))
+            jdb.set_date('kk3', cdate.date())
             info1 = jdb.keys['kk3']
             self.assertNotEqual(info, info1)
-            self.assertEqual(info1[-1], str(old_date.date()))
+            self.assertEqual(info1[-1], str(cdate.date()))
+            self.assertNotEqual(info1[-2], str(cdate.date()))
+
+            jdb.set_date('kk3', mdate=cdate.date())
+            info2 = jdb.keys['kk3']
+            self.assertNotEqual(info, info2)
+            self.assertNotEqual(info1, info2)
+            self.assertEqual(info2[-1], str(cdate.date()))
+            self.assertEqual(info2[-2], str(cdate.date()))
 
             del jdb['kk3']
             jdb.unremove('kk3')
             info = jdb.keys['kk3']
-            self.assertEqual(info[-1], str(old_date.date()))
+            self.assertEqual(info[-1], str(cdate.date()))
+            self.assertEqual(info[-2], str(cdate.date()))
 
             val = jdb['kk3']
             jdb.remove('kk3')
             jdb['kk3'] = val
             info = jdb.keys['kk3']
-            self.assertNotEqual(info[-1], str(old_date.date()))
+            self.assertNotEqual(info[-1], str(cdate.date()))
             ref_days = jdb.keys['kk4'][-1]
             self.assertEqual(info[-1], ref_days)
 
-            jdb.set_days('kk3', old_date.date())
+            jdb.set_date('kk3', cdate.date())
             jdb2 = JDb(jdb)
             self.assertEqual(jdb, jdb2)
             jdb['kk3'] = 'kk3'
@@ -9904,46 +10062,50 @@ class TestJDb(unittest.TestCase):
 
             info = jdb.keys['kk3']
             self.assertNotEqual(info[-1], ref_days)
-            self.assertEqual(info[-1], str(old_date.date()))
+            self.assertEqual(info[-1], str(cdate.date()))
 
             jdb.remove('kk3')
             jdb.unremove('kk3')
             info = jdb.keys['kk3']
-            self.assertEqual(info[-1], str(old_date.date()))
+            self.assertEqual(info[-1], str(cdate.date()))
 
             jdb.upgrade()
             info = jdb.keys['kk3']
-            self.assertEqual(info[-1], str(old_date.date()))
+            self.assertEqual(info[-1], str(cdate.date()))
 
-            jdb.set_days('kk3', '1000-01-01')
+            jdb.set_date('kk3', '1000-01-01')
             info1 = jdb.keys['kk3']
             self.assertEqual(info1[-1], '1000-01-01')
             self.assertEqual(info[-2], info1[-2])
 
-            jdb.set_days('kk3', '2000-10-10 1900-01-01')
+            jdb.set_date('kk3', '1990-01-01', '2000-10-10', ttl=30)
             info2 = jdb.keys['kk3']
-            self.assertEqual(info2[-1], '1900-01-01')
+            self.assertEqual(info2[-1], '1990-01-01')
             self.assertEqual(info2[-2], '2000-10-10')
+            # ttl=30 from a 2000-10-10 modified date: the row is long expired.
+            # keys[...] is the metadata view and still shows it ...
             self.assertEqual(len(jdb.keys[:dt.date(2000,12,12)]), 1)
-            self.assertEqual(len(jdb.keys[:dt.date(1900,12,12)]), 0)
-            self.assertEqual(len(jdb.keys[:dt.datetime(1900,12,12)]), 1)
-            self.assertEqual(len(jdb[:dt.date(2000,12,12)]), 1)
-            self.assertEqual(len(jdb[:dt.date(1900,12,12)]), 0)
-            self.assertEqual(len(jdb[:dt.datetime(1900,12,12)]), 1)
+            self.assertEqual(len(jdb.keys[:dt.date(1990,12,12)]), 0)
+            self.assertEqual(len(jdb.keys[:dt.datetime(1990,12,12)]), 1)
+            # ... while the value view no longer has a value to return for it
+            self.assertEqual(len(jdb[:dt.date(2000,12,12)]), 0)
+            self.assertEqual(len(jdb[:dt.date(1990,12,12)]), 0)
+            self.assertEqual(len(jdb[:dt.datetime(1990,12,12)]), 0)
+            self.assertEqual(dict(jdb.keys.item_iter('kk3', with_expired=False)), {})
             self.assertEqual(set(jdb.find('kk', date='2000-10-10')), {'kk3'})
             self.assertEqual(set(jdb.find('kk', date={'$between': ('2000-10-01', '2000-10-30')})), {'kk3'})
-            self.assertEqual(set(jdb.find('kk', date='1900-12-1 1900-12-30')), set())
+            self.assertEqual(set(jdb.find('kk', date='1990-12-1 1990-12-30')), set())
             self.assertEqual(set(jdb.find('kk', date=dt.date(2000, 10, 10))), {'kk3'})
-            self.assertEqual(set(jdb.find('kk', date=dt.datetime(1900, 1, 1))), {'kk3'})
+            self.assertEqual(set(jdb.find('kk', date=dt.datetime(1990, 1, 1))), {'kk3'})
 
-            jdb.keys['kk3'] = '2000-1-1 1900-10-10'
+            jdb.keys['kk3'] = '2000-1-1 1990-10-10'
             info2 = jdb.keys['kk3']
-            self.assertEqual(info2[-1], '1900-10-10')
+            self.assertEqual(info2[-1], '1990-10-10')
             self.assertEqual(info2[-2], '2000-01-01')
 
-            jdb.keys['kk3'] = '1900-10-10 2000-1-1'
+            jdb.keys['kk3'] = '1990-10-10 2000-1-1'
             info2 = jdb.keys['kk3']
-            self.assertEqual(info2[-1], '1900-10-10')
+            self.assertEqual(info2[-1], '1990-10-10')
             self.assertEqual(info2[-2], '2000-01-01')
 
             today = dt.date.today()
@@ -9978,7 +10140,7 @@ class TestJDb(unittest.TestCase):
             jmem.keys['group:::kk3'] = dt.datetime(yesterday.year, yesterday.month, yesterday.day)
             info2 = jdb.keys['kk3']
             self.assertEqual(info2[-1], str(yesterday))
-            self.assertEqual(info2[-2], str(today))
+            self.assertEqual(info2[-2], str(yesterday))
 
             jdb.keys['kk4'] = yesterday
             info2 = jdb.keys['kk4']
@@ -10004,11 +10166,11 @@ class TestJDb(unittest.TestCase):
             jmem.keys[':::kk3'] = today
             info2 = jdb.keys['kk3']
             self.assertEqual(info2[-2], str(today))
-            jdb.keys[::'kk4'] = '2000-1-1 1900-10-10'
+            jdb.keys[::'kk4'] = '2000-1-1 1990-10-10'
             matches = jdb.keys[::'kk4']
             self.assertTrue(len(matches) > 4)
             for key,info2 in matches.items():
-                self.assertEqual(info2[-1], '1900-10-10', filename)
+                self.assertEqual(info2[-1], '1990-10-10', filename)
                 self.assertEqual(info2[-2], '2000-01-01', filename)
 
             matches = jdb.keys[1]
@@ -10077,7 +10239,7 @@ class TestJDb(unittest.TestCase):
                 self.assertEqual(info, {})
 
             with jdb.open() as fp:
-                jdb.f_write(fp, 'new_key100', 'new_value', days=str(yesterday))
+                jdb.f_write(fp, 'new_key100', 'new_value', cdays=str(yesterday))
 
             info = jdb.keys['new_key100']
             self.assertEqual(info[-1], str(yesterday))

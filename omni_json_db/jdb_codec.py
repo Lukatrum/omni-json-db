@@ -613,6 +613,27 @@ from .utils import JValueError, JKeyFlag, KEY_FLAG_MASK
 
 FULL_DAY_MASK = 0xFFFF_FFFF_FFFF
 KEY_FLAG_SHIFT = 48
+
+# --- EXPIRE clear: [ 22-bit delta @26 ][ 26-bit created @0 ] ---
+NEW_DAY_SHIFT   = 26
+OLD_DAY_MASK    = 0x3FF_FFFF                        # created, bit 0..25
+MAX_DAY_DELTA   = 0x3F_FFFF
+NEW_DAY_MASK    = MAX_DAY_DELTA << NEW_DAY_SHIFT    # delta, bits 26..47
+
+# --- EXPIRE set: [ 9-bit ttl @39 ][ 13-bit delta @26 ][ 26-bit created @0 ] ---
+TTL_SHIFT       = 39
+TTL_DAY_MASK    = 0x1FF
+MAX_EXP_DELTA   = 0x1FFF                            # 8191 days ~ 22.4 years
+MAX_TTL_DAYS    = TTL_DAY_MASK                      # 511 days
+TTL_MASK        = TTL_DAY_MASK << TTL_SHIFT         # bits 39..47
+EXP_DELTA_MASK  = MAX_EXP_DELTA << NEW_DAY_SHIFT    # bits 26..38
+
+EXPIRE_FLAG     = int(JKeyFlag.EXPIRE)
+GROUP_FLAG      = int(JKeyFlag.GROUP)
+
+if (NEW_DAY_MASK | OLD_DAY_MASK | TTL_MASK) & ~FULL_DAY_MASK: # pragma: no cover
+    raise RuntimeError('collide with JKeyFlag')
+
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -851,114 +872,172 @@ class JIoKEY(metaclass=ABCMeta): # pragma: no cover
     """Abstract codec for one KEY index row.
 
     A KEY row holds the fixed-width metadata for one record:
-        ``(key, file_id, offset, row_size, val_size, ver, days, flags)``.
+    ``(key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags)``.
 
-    All ``loads_*`` methods return the same 8-field tuple regardless of the
-    on-disk layout, and all ``dumps_*`` methods accept the same 8 arguments, so
+    ``cdays``/``mdays``/``ttl`` are the codec's *public* form of the single
+    ``days`` field that is actually stored: creation day, last-modified day
+    (absolute, not a delta) and lifetime in days. Folding and unfolding happen
+    inside the codec, so no caller has to know the flag-dependent bit layout.
+    The :attr:`JKeyFlag.EXPIRE` bit selects that layout and is *derived* from
+    ``ttl`` by :meth:`JIo.write_key` before it reaches a codec, so the two can
+    never disagree on disk.
+
+    All ``loads_*`` methods return the same 10-field tuple regardless of the
+    on-disk layout, and all ``dumps_*`` methods accept the same 10 arguments, so
     callers never have to branch on ``api_ver``:
 
     * ``_v0`` -- 6 stored fields; ``val_size`` is packed into the high 32 bits of
-      ``row_size`` and ``flags`` is dropped on write / returned as
-      ``0`` on read.
-    * ``_v1`` -- 7 stored fields; ``flags`` is dropped on write / returned as
-      ``0`` on read.
-    * ``_v2`` -- 8 stored fields; ``flags`` round-trips (see :class:`JKeyFlag`).
+      ``row_size`` and ``flags`` rides above ``days``.
+    * ``_v1`` -- 7 stored fields; ``flags`` rides above ``days``.
+    * ``_v2`` -- 8 stored fields; ``flags`` has its own field (see :class:`JKeyFlag`).
     """
     @abstractmethod
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row in the v0 layout (``val_size`` packed into ``row_size``, ``flags`` dropped)."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v0 layout (``val_size`` packed into ``row_size``)."""
     @abstractmethod
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
-        """Parse a v0 KEY row; ``flags`` is always ``0``."""
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
+        """Parse a v0 KEY row."""
     @abstractmethod
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row in the v1 layout (all fields separate, ``flags`` dropped)."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v1 layout (all sizes separate)."""
     @abstractmethod
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
-        """Parse a v1 KEY row; ``flags`` is always ``0``."""
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
+        """Parse a v1 KEY row."""
     @abstractmethod
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row in the v2 layout (all 8 fields stored separately)."""
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row in the v2 layout (8 stored fields)."""
     @abstractmethod
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
-        """Parse a v2 KEY row into ``(key, file_id, offset, row_size, val_size, ver, days, flags)``."""
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
+        """Parse a v2 KEY row into ``(key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags)``."""
 
 class JIoKEY_J(JIoKEY):
     """KEY row codec using JSON (one JSON array per row)."""
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as a JSON array (v0 layout); ``flags`` is dropped."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v0 layout)."""
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days))
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v0 JSON KEY row, unpacking val_size from the high bits of row_size."""
         try:
             args = _json_loads(data)
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
 
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as a JSON array (v1 layout); ``flags`` is dropped."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v1 layout)."""        
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return _json_dumps((key, file_id, offset, row_size, val_size, ver, days))
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            return _json_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v1 JSON KEY row."""
         try:
             key, file_id, offset, row_size, val_size, ver, days = _json_loads(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
 
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as a JSON array (v2 layout, 8 fields)."""
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as a JSON array (v2 layout, 8 stored fields)."""        
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
-        """Parse a v2 JSON KEY row (8 fields; a v1 row is rejected, not widened)."""
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
+        """Parse a v2 JSON KEY row (8 stored fields; a v1 row is rejected, not widened)."""
         try:
-            args = _json_loads(data)
-            return args[:8]
+            key, file_id, offset, row_size, val_size, ver, days, flags = _json_loads(data)[:8]
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
 
 class JIoKEY_S(JIoKEY):
     """KEY row codec using msgpack, prefixed with a 3-byte length header."""
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v0 layout); ``flags`` is dropped."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v0 layout)."""
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) or b''
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v0 msgpack KEY row, unpacking val_size from the high bits of row_size."""
         try:
             prefix0, prefix1, prefix2, info0 = data[:4]
@@ -966,27 +1045,43 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
-                flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-                days &= FULL_DAY_MASK
-                return key, file_id, offset, row_size & 0X_FFFF_FFFF, row_size >> 32, ver, days, flags
+                val_size = row_size >> 32
+                row_size &= 0X_FFFF_FFFF
+                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+                cdays = days & OLD_DAY_MASK
+                if flags & EXPIRE_FLAG:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                else:
+                    mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                    ttl = 0
+                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v1 layout); ``flags`` is dropped."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v1 layout)."""
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days)) or b''
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int, int]:
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v1 msgpack KEY row."""
         try:
             prefix0, prefix1, prefix2, info0 = data[:4]
@@ -994,18 +1089,33 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, val_size, ver, days = _msg_loads(data[3:end_idx])[:7]
-                flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-                days &= FULL_DAY_MASK
-                return key, file_id, offset, row_size, val_size, ver, days, flags
+                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+                cdays = days & OLD_DAY_MASK
+                if flags & EXPIRE_FLAG:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                else:
+                    mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                    ttl = 0
+                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v2 layout, 8 fields)."""
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with msgpack behind a 3-byte length prefix (v2 layout, 8 stored fields)."""
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -1013,14 +1123,22 @@ class JIoKEY_S(JIoKEY):
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v2 msgpack KEY row (fixarray(8); a v1 fixarray(7) row is rejected)."""
         try:
             prefix0, prefix1, prefix2, info0 = data[:4]
             if prefix0 == 0xcd and info0 == 0x98: # 0x98 = msgpack fixarray(8)
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
-                return _msg_loads(data[3:end_idx])[:8]
+                key, file_id, offset, row_size, val_size, ver, days, flags = _msg_loads(data[3:end_idx])[:8]
+                cdays = days & OLD_DAY_MASK
+                if flags & EXPIRE_FLAG:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                else:
+                    mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                    ttl = 0
+                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1029,17 +1147,25 @@ class JIoKEY_S(JIoKEY):
 
 class JIoKEY_M(JIoKEY):
     """KEY row codec using Python ``marshal`` (fast, CPython-specific)."""
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with marshal (v0 layout); ``flags`` is dropped."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v0 layout)."""
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days)) # tuple smaller than list
+            return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v0 marshal KEY row, unpacking val_size from the high bits of row_size."""
         try:
             # nosemgrep
@@ -1047,54 +1173,90 @@ class JIoKEY_M(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with marshal (v1 layout); ``flags`` is dropped."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v1 layout)."""
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days)) # tuple smaller than list
+            return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v1 marshal KEY row."""
         try:
             # nosemgrep
             key, file_id, offset, row_size, val_size, ver, days = marshal_loads(data)[:7] # nosec B302
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row with marshal (v2 layout, 8 fields)."""
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row with marshal (v2 layout, 8 stored fields)."""
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
             return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) # tuple smaller than list
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
-        """Parse a v2 marshal KEY row (8 fields; a v1 row is rejected, not widened)."""
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
+        """Parse a v2 marshal KEY row (8 stored fields; a v1 row is rejected, not widened)."""
         try:
             # nosemgrep
-            args = list(marshal_loads(data)) # nosec B302
-            return args[:8]
+            key, file_id, offset, row_size, val_size, ver, days, flags = marshal_loads(data)[:8] # nosec B302
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
@@ -1103,17 +1265,25 @@ class JIoKEY_M(JIoKEY):
 
 class JIoKEY_L(JIoKEY):
     """KEY row codec using a plain comma-separated text line."""
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as comma-separated text (v0 layout); ``flags`` is dropped."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v0 layout)."""
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days}'
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
             return data.encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v0 comma-separated KEY row (keys may contain commas)."""
         try:
             if isinstance(data, memoryview):
@@ -1143,24 +1313,38 @@ class JIoKEY_L(JIoKEY):
 
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as comma-separated text (v1 layout); ``flags`` is dropped."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v1 layout)."""
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days}'
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
             return data.encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v1 comma-separated KEY row (keys may contain commas)."""
         try:
             if isinstance(data, memoryview):
@@ -1171,23 +1355,38 @@ class JIoKEY_L(JIoKEY):
             n_fields = len(fields)
             key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
             file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
             raise JValueError from e
 
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row as comma-separated text (v2 layout, 8 fields)."""
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row as comma-separated text (v2 layout, 8 stored fields)."""
         try:
-            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days},{int(flags)}'
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days},{flags}'
             return data.encode('utf8')
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a v2 comma-separated KEY row (keys may contain commas)."""
         try:
             if isinstance(data, memoryview):
@@ -1198,7 +1397,14 @@ class JIoKEY_L(JIoKEY):
             n_fields = len(fields)
             key = ','.join(fields[:-7]) if n_fields > 8 else fields[0]
             file_id, offset, row_size, val_size, ver, days, flags = (int(field) for field in fields[-7:])
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError) as e: # pragma: no cover
             raise JValueError from e
@@ -1206,13 +1412,18 @@ class JIoKEY_L(JIoKEY):
 class JIoKEY_U(JIoKEY):
     """Pluggable KEY (row index) codec ("U+U" data_type).
 
-    Like :class:`JIoVAL_U`, but for the KEY row metadata
-    ``(key, file_id, offset, row_size, val_size, ver, days, flags)``. Most
-    developers only need to customize the VAL codec (``J+U`` / ``S+U``); this
-    exists for the rarer case where the KEY row itself must be transformed too
-    (e.g. to obfuscate record keys on disk).
+    Like :class:`JIoVAL_U`, but for the KEY row metadata. Most developers only
+    need to customize the VAL codec (``J+U`` / ``S+U``); this exists for the
+    rarer case where the KEY row itself must be transformed too (e.g. to
+    obfuscate record keys on disk).
 
-    ``dumps``/``loads`` describe the *current* (API v2, 8-field) layout. When no
+    The registered callables see the row in its *stored* form -- the 8-tuple
+    ``(key, file_id, offset, row_size, val_size, ver, days, flags)`` with the
+    day fields already folded -- exactly like the built-in codecs' on-disk
+    layouts. The ``cdays``/``mdays``/``ttl`` split is applied on this side of
+    the boundary, so an existing developer codec keeps working unchanged.
+
+    ``dumps``/``loads`` describe the *current* (API v2) layout. When no
     version-specific callables are supplied they are reused for the v0/v1
     layouts as well, which is correct for length-agnostic encoders such as
     msgpack or JSON. Supply ``dumps_v1``/``loads_v1`` (7 fields) or
@@ -1242,8 +1453,8 @@ class JIoKEY_U(JIoKEY):
         Args:
             dumps (Callable): Receives a single packed row tuple
                 ``(key, file_id, offset, row_size, val_size, ver, days, flags)``
-                (API v2 layout) and returns ``bytes``. Called with *one* tuple
-                argument, not 8 separate positional arguments.
+                (API v2 stored layout) and returns ``bytes``. Called with *one*
+                tuple argument, not 8 separate positional arguments.
             loads (Callable[[bytes], Tuple]): ``bytes -> (key, file_id, offset,
                 row_size, val_size, ver, days, flags)``.
             dumps_v0 (Callable, optional): Same as ``dumps`` but for the legacy v0
@@ -1264,7 +1475,6 @@ class JIoKEY_U(JIoKEY):
             if not callable(fn):
                 raise TypeError('dumps/loads must be callable')
 
-        # test_val mirrors the real call convention: dumps() always receives ONE
         # packed 8-tuple (key, file_id, offset, row_size, val_size, ver, days, flags).
         test_val = ('1', 2, 3, 4, 5, 6, 7, 8)
         try:
@@ -1307,78 +1517,120 @@ class JIoKEY_U(JIoKEY):
             "data_type 'U+U' (KEY) is selected but no codec is registered. "
             "Call register_user_key_codec(dumps, loads) before opening the JDb.")
 
-    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
+    def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row (v2 layout) using the registered developer codec."""
         if self._dumps is None: # pragma: no cover
             self._missing()
 
         try:
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v2(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a KEY row (v2 layout) using the registered developer codec."""
         if self._loads is None: # pragma: no cover
             self._missing()
 
         try:
-            args = self._loads(data)
-            return args[:8]
+            key, file_id, offset, row_size, val_size, ver, days, flags = self._loads(data)[:8]
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row (v1 layout) using the registered developer codec; ``flags`` is dropped."""
+    def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row (v1 layout) using the registered developer codec."""
         if self._dumps is None: # pragma: no cover
             self._missing()
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return self._dumps((key, file_id, offset, row_size, val_size, ver, days))
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            return self._dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v1(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a KEY row (v1 layout) using the registered developer codec."""
         if self._loads is None: # pragma: no cover
             self._missing()
-
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
-
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
         raise JValueError
 
-    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, days:int, flags:int=0) -> bytes:
-        """Serialize a KEY row (v0 layout) using the registered developer codec; ``flags`` is dropped."""
+    def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
+        """Serialize a KEY row (v0 layout) using the registered developer codec."""
         if self._dumps_v0 is None: # pragma: no cover
             self._missing()
         try:
-            days = ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT) | (days & FULL_DAY_MASK)
-            return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days))
+            if ttl <= 0:
+                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+            else:
+                delta = mdays - cdays
+                if delta > MAX_EXP_DELTA:
+                    cdays = (cdays + delta) & OLD_DAY_MASK
+                    delta = 0
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+            return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e
 
-    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int]:
+    def loads_v0(self, data:bytes) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Parse a KEY row (v0 layout) using the registered developer codec."""
         if self._loads_v0 is None: # pragma: no cover
             self._missing()
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads_v0(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & 0XFFFF | JKeyFlag.GROUP) if row_size == 0 and file_id == 0x10 else ((days >> KEY_FLAG_SHIFT) & 0XFFFF)
-            days &= FULL_DAY_MASK
-            return key, file_id, offset, row_size, val_size, ver, days, flags
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            cdays = days & OLD_DAY_MASK
+            if flags & EXPIRE_FLAG:
+                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                ttl = (days & TTL_MASK) >> TTL_SHIFT
+            else:
+                mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+                ttl = 0
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
             raise JValueError from e

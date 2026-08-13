@@ -119,7 +119,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Groups Mode`_]
 
-* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups. [refer to `Record Flags`_]
+* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups. [refer to `Record Flags`_ + `Symbolic Links`_ + `Expiring Records (TTL)`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
@@ -320,103 +320,6 @@ Groups Mode
    # find fruits which contain 'a' from all groups
    matches = jdb.find(r':::a')
    print(matches) # Output: ['red:::apple', 'red:::tomato', 'yellow:::banana', 'yellow:::mango']
-
-
-Record Flags
-------------
-Every record carries a set of ``JKeyFlag`` bits in the key index, giving it
-file-system-like attributes. Set them with a ``chmod``-style string: a bare
-letter or ``+`` sets a flag, ``-`` clears it, and anything you don't name keeps
-its current value.
-
-======  ===============  =======================================================================================
-Letter  Flag             Effect
-======  ===============  =======================================================================================
-``r``   ``READ_ONLY``    Writes and deletes are refused.
-``a``   ``APPEND_ONLY``  The value may only grow; shrinking, rewriting and deleting are refused.
-``h``   ``HIDDEN``       Skipped by ``find()`` / ``show()``; every other API still sees it.
-``c``   ``NO_CACHE``     Never enters the LRU read cache — keeps big blobs from evicting hot records.
-``v``   ``NO_REVERT``    No previous version is kept, so a hot counter never grows the index.
-``0``   ``USER0``        Free for your application (``0``–``3``); carries no engine behaviour.
-``g``   ``GROUP``        *Derived* — the record holds a group. Never settable.
-``l``   ``LINK``         *Derived* — a symbolic link; set it with ``set_link()``.
-``u``   ``UNLOCK``       **Transient** — waives read-only/append-only locks for a single operation. Not stored.
-======  ===============  =======================================================================================
-
-.. code-block:: python
-
-   from omni_json_db import JDb, JKeyFlag
-
-   jdb = JDb()
-   jdb['config']        = {'theme': 'dark'}
-   jdb['audit/2026-08'] = ['created']
-
-   # read-only: writes are refused, silently
-   jdb.set_key_flags('config', 'r')
-   jdb['config'] = {'theme': 'light'}
-   print(jdb['config'])                    # Output: {'theme': 'dark'}
-
-   # append-only + no history: an audit log that can only grow
-   jdb.set_key_flags('audit/2026-08', 'av')
-   jdb['audit/2026-08'] = ['created', 'updated']   # extension -> allowed
-   jdb['audit/2026-08'] = ['wiped']                # not an extension -> refused
-   del jdb['audit/2026-08']                        # refused too
-   print(jdb['audit/2026-08'])             # Output: ['created', 'updated']
-
-   # inspect, then unlock again ('-r' clears only READ_ONLY)
-   print(str(JKeyFlag(jdb.get_key_flags('audit/2026-08')['audit/2026-08'])))
-                                           # Output: __a_v______
-   jdb.set_key_flags('config', '-r')
-   jdb['config'] = {'theme': 'light'}
-   print(jdb['config'])                    # Output: {'theme': 'light'}
-
-   # hidden: kept out of query results, but not a secret — items() still sees it
-   jdb['_scratch'] = 'internal'
-   jdb.set_key_flags('_scratch', 'h')
-   print(list(jdb.find()))                 # Output: ['config', 'audit/2026-08']
-   print(jdb['_scratch'])                  # Output: internal
-   print(list(jdb.find(with_hidden=True))) # Output: ['config', 'audit/2026-08', '_scratch']
-
-   # tag records for your own use, and combine flags freely
-   jdb.set_key_flags('config', '+0')       # USER0
-   jdb.keys.set_flags('config', '+c-0')    # add NO_CACHE, drop USER0
-
-Symbolic Links
-^^^^^^^^^^^^^^
-``set_link()`` points one key at another record, at a group, or at a key inside a
-group. Reads and writes are forwarded to the target; deleting the link leaves the
-target alone.
-
-.. code-block:: python
-
-   from omni_json_db import JDb
-
-   jdb = JDb()
-   reports = jdb.add_group('reports')
-   reports['2026-08'] = {'rows': 12}
-
-   # link to a record inside a group
-   jdb.set_link('latest', 'reports:::2026-08')
-   print(jdb['latest'])                    # Output: {'rows': 12}
-
-   jdb['latest'] = {'rows': 13}            # writes through to the target
-   print(reports['2026-08'])               # Output: {'rows': 13}
-
-   # link to a whole group, like a folder
-   jdb.set_link('current', 'reports')
-   print(jdb['current']['2026-08'])        # Output: {'rows': 13}
-
-   print(jdb.get_link('latest'))           # Output: reports:::2026-08
-   del jdb['latest']                       # removes the link only
-   print(reports['2026-08'])               # Output: {'rows': 13}
-
-.. note::
-
-   Flags are enforced by the library, not by the operating system — an older
-   release reading the same file will not know about newer flags. ``HIDDEN`` in
-   particular is **not** access control: it only filters ``find()`` and
-   ``show()``, so ``dict(jdb.items())`` still contains the record. A flag on a
-   group row applies to that row alone, not to the records inside the group.
 
 
 Graph Database
@@ -1569,6 +1472,143 @@ Methods & Operators Reference
    * - ``._id`` / ``._date``
      - system reserved keys: access Document ID (Primary key) and Timestamp respectively
      - ``User._id``, ``User._date``
+
+Record Flags
+------------
+Every record carries a set of ``JKeyFlag`` bits in the key index, giving it
+file-system-like attributes. Set them with a ``chmod``-style string: a bare
+letter or ``+`` sets a flag, ``-`` clears it, and anything you don't name keeps
+its current value.
+
+======  ===============  =======================================================================================
+Letter  Flag             Effect
+======  ===============  =======================================================================================
+``r``   ``READ_ONLY``    Writes and deletes are refused.
+``a``   ``APPEND_ONLY``  The value may only grow; shrinking, rewriting and deleting are refused.
+``h``   ``HIDDEN``       Skipped by ``find()`` / ``show()``; every other API still sees it.
+``c``   ``NO_CACHE``     Never enters the LRU read cache — keeps big blobs from evicting hot records.
+``v``   ``NO_REVERT``    No previous version is kept, so a hot counter never grows the index.
+``0``   ``USER0``        Free for your application (``0``–``3``); carries no engine behaviour.
+``e``   ``EXPIRE``       *Derived* — the record has a TTL. Set it with ``ttl=``, never by name.
+``g``   ``GROUP``        *Derived* — the record holds a group. Never settable.
+``l``   ``LINK``         *Derived* — a symbolic link; set it with ``set_link()``.
+``u``   ``UNLOCK``       **Transient** — waives read-only/append-only locks for a single operation. Not stored.
+======  ===============  =======================================================================================
+
+.. code-block:: python
+
+   from omni_json_db import JDb, JKeyFlag
+
+   jdb = JDb()
+   jdb['config']        = {'theme': 'dark'}
+   jdb['audit/2026-08'] = ['created']
+
+   # read-only: writes are refused, silently
+   jdb.set_key_flags('config', 'r')
+   jdb['config'] = {'theme': 'light'}
+   print(jdb['config'])                    # Output: {'theme': 'dark'}
+
+   # append-only + no history: an audit log that can only grow
+   jdb.set_key_flags('audit/2026-08', 'av')
+   jdb['audit/2026-08'] = ['created', 'updated']   # extension -> allowed
+   jdb['audit/2026-08'] = ['wiped']                # not an extension -> refused
+   del jdb['audit/2026-08']                        # refused too
+   print(jdb['audit/2026-08'])             # Output: ['created', 'updated']
+
+   # inspect, then unlock again ('-r' clears only READ_ONLY).
+   # every flag API returns {key: (flags, ttl)}
+   flags, ttl = jdb.get_key_flags('audit/2026-08')['audit/2026-08']
+   print(str(JKeyFlag(flags)), ttl)        # Output: __a_v________ 0
+   jdb.set_key_flags('config', '-r')
+   jdb['config'] = {'theme': 'light'}
+   print(jdb['config'])                    # Output: {'theme': 'light'}
+
+   # hidden: kept out of query results, but not a secret — items() still sees it
+   jdb['_scratch'] = 'internal'
+   jdb.set_key_flags('_scratch', 'h')
+   print(list(jdb.find()))                 # Output: ['config', 'audit/2026-08']
+   print(jdb['_scratch'])                  # Output: internal
+   print(list(jdb.find(with_hidden=True))) # Output: ['config', 'audit/2026-08', '_scratch']
+
+   # tag records for your own use, and combine flags freely
+   jdb.set_key_flags('config', '+0')       # USER0
+   jdb.keys.set_flags('config', '+c-0')    # add NO_CACHE, drop USER0
+
+Expiring Records (TTL)
+^^^^^^^^^^^^^^^^^^^^^^
+A record can be given a lifetime in days with ``ttl=``, counted from the day it
+was last modified. ``ttl`` reads as *days remaining*, so a record written today
+with ``ttl=1`` is still readable today and gone tomorrow. The maximum is
+``MAX_TTL_DAYS`` (511); larger values are clamped.
+
+``EXPIRE`` is **derived**: it is set whenever the record has a TTL and cleared
+when it does not. Naming ``'e'`` yourself does nothing — use ``ttl=``.
+
+.. code-block:: python
+
+   from omni_json_db import JDb, JKeyFlag
+
+   jdb = JDb()
+   jdb['session/abc'] = {'user': 'ana'}
+
+   # give an existing record a lifetime
+   print(jdb.set_key_flags('session/abc', ttl=7))
+                                           # Output: {'session/abc': (128, 7)}
+   flags, ttl = jdb.get_key_flags('session/abc')['session/abc']
+   print(str(JKeyFlag(flags)), ttl)        # Output: _______e_____ 7
+
+   # a TTL combines with the other flags, and survives a rewrite
+   print(jdb.set_key_flags('session/abc', '+r'))
+                                           # Output: {'session/abc': (129, 7)}
+
+   # ttl=0 removes it; ttl=None (the default) leaves it untouched
+   print(jdb.set_key_flags('session/abc', ttl=0))
+                                           # Output: {'session/abc': (1, 0)}
+
+   # or set it as the record is written
+   with jdb.open() as fp:
+       jdb.f_write(fp, 'otp/123', '558021', ttl=1)
+
+   print(jdb.get_key_flags('otp/123'))     # Output: {'otp/123': (128, 1)}
+
+Symbolic Links
+^^^^^^^^^^^^^^
+``set_link()`` points one key at another record, at a group, or at a key inside a
+group. Reads and writes are forwarded to the target; deleting the link leaves the
+target alone.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb()
+   reports = jdb.add_group('reports')
+   reports['2026-08'] = {'rows': 12}
+
+   # link to a record inside a group
+   jdb.set_link('latest', 'reports:::2026-08')
+   print(jdb['latest'])                    # Output: {'rows': 12}
+
+   jdb['latest'] = {'rows': 13}            # writes through to the target
+   print(reports['2026-08'])               # Output: {'rows': 13}
+
+   # link to a whole group, like a folder
+   jdb.set_link('current', 'reports')
+   print(jdb['current']['2026-08'])        # Output: {'rows': 13}
+
+   print(jdb.get_link('latest'))           # Output: reports:::2026-08
+   del jdb['latest']                       # removes the link only
+   print(reports['2026-08'])               # Output: {'rows': 13}
+
+.. note::
+
+   Flags are enforced by the library, not by the operating system — an older
+   release reading the same file will not know about newer flags. ``HIDDEN`` in
+   particular is **not** access control: it only filters ``find()`` and
+   ``show()``, so ``dict(jdb.items())`` still contains the record. ``EXPIRE`` is
+   not access control either — expiry is measured in whole days against the
+   local clock, so it is a housekeeping tool, not a security deadline. A flag on
+   a group row applies to that row alone, not to the records inside the group.
 
 Advanced
 --------

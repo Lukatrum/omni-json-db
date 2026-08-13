@@ -31,8 +31,9 @@ class JTypeError(JError, TypeError):
 class JAttributeError(JError, AttributeError):
     pass
 
-MISSING = object()
+MISSING = object()  # 'not found' -> raise
 LOCKED = object()
+EXPIRED = object()  # 'found but its TTL ran out' -> drop from a (key, value) stream
 
 #-----------------------------------------------------------------------------
 KEY_FLAG_MASK = 0xFFFF # on-disk width reserved for JKeyFlag
@@ -124,6 +125,14 @@ class JKeyFlag(IntFlag):
     #: must move the row and still parks the old value for reclamation.
     NO_REVERT = 0x40
 
+    #: ``'e'`` -- the record carries a TTL. **Derived**: it is set iff the row's
+    #: 9-bit ttl field (bits 39..47 of ``days``) is non-zero, and is never taken
+    #: from a caller's ``key_flags`` -- use the ``ttl=`` argument of
+    #: :meth:`JDb.f_write` or :meth:`JDb.set_key_flags`.
+    #: While set, ``days`` switches layout: the modified-delta narrows from 22
+    #: to 13 bits.
+    EXPIRE = 0x80
+
     #: ``'0'`` -- free for the application. Carries no engine behaviour: it is
     #: stored, round-trips through delete/undelete and defragmentation, and can
     #: be filtered on, but nothing in JDb reads it. Use these instead of
@@ -197,6 +206,7 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.NO_REVERT:   'v',
     JKeyFlag.LINK:        'l',
     JKeyFlag.HIDDEN:      'h',
+    JKeyFlag.EXPIRE:      'e',
     JKeyFlag.USER0:       '0',
     JKeyFlag.USER1:       '1',
     JKeyFlag.USER2:       '2',
@@ -204,41 +214,17 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.UNLOCK:      'u',
 }
 
-KEY_FLAG_BY_LETTER = {v: k for k, v in KEY_FLAG_LETTERS.items()}
+KEY_FLAG_BY_LETTER  = {v: k for k, v in KEY_FLAG_LETTERS.items()}
 
-# Guard against two flags claiming the same letter, which would make
-# JKeyFlag('x') and conv_to_key_flags('x') silently resolve to only one of them
-# and make __str__ ambiguous. Deliberately not an ``assert``: those are stripped
-# under ``python -O``.
-if len(KEY_FLAG_BY_LETTER) != len(KEY_FLAG_LETTERS): # pragma: no cover
-    raise RuntimeError(f'duplicate JKeyFlag letter in KEY_FLAG_LETTERS: {list(KEY_FLAG_LETTERS.values())}')
-
-#: Flags that describe what the stored VALUE is rather than what a caller asked
-#: for. GROUP means the value is a group; LINK means it is another record's name.
-#: Neither is ever taken from a ``key_flags`` argument: GROUP is re-derived from
-#: the row, LINK may only be established by ``set_link()``, which enforces the
-#: no-group / no-nesting invariants.
-DERIVED_FLAG_MASK = int(JKeyFlag.GROUP | JKeyFlag.LINK)
-
-# Bits that survive on disk, e.g. into a DEAD row so delete/undelete round-trips
-# keep them. GROUP is excluded because write_key() re-derives it from the inline
-# 0x10 marker; LINK is included because nothing can re-derive it.
-#
-# NOTE: use these masks instead of ``~JKeyFlag.GROUP``. On an IntFlag ``~``
-# complements within the *defined* flags, so ``~JKeyFlag.GROUP`` is not 0xFFFD --
-# ``x &= ~JKeyFlag.GROUP`` silently wipes every flag added after GROUP.
-USER_FLAG_MASK = KEY_FLAG_MASK & ~int(JKeyFlag.GROUP)
-
-#: Bits a caller is allowed to set through ``key_flags`` or ``set_key_flags()``.
-WRITABLE_FLAG_MASK = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
-
-#: Flags that refuse a destructive rewrite or removal of an existing record.
-WRITE_LOCK_MASK = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
-
-#: Call-scoped flags: meaningful only for the duration of one operation, and
-#: deliberately placed above KEY_FLAG_MASK so that the ordinary 16-bit masking
-#: every write path already performs makes them impossible to persist.
 TRANSIENT_FLAG_MASK = int(JKeyFlag.UNLOCK)
+
+WRITE_LOCK_MASK     = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
+
+DERIVED_FLAG_MASK   = int(JKeyFlag.GROUP | JKeyFlag.LINK | JKeyFlag.EXPIRE)
+
+WRITABLE_FLAG_MASK  = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
+
+USER_FLAG_MASK      = KEY_FLAG_MASK & ~int(JKeyFlag.GROUP)
 
 def conv_to_key_flags(flags:str) -> Tuple[int,int]:
     """Parse a ``chmod``-style flag string into three masks.

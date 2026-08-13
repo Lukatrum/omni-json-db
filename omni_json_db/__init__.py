@@ -8,7 +8,7 @@ from .utils import JError, JKeyError, JValueError, JTypeError, JAttributeError, 
 from .jdb_file import JDiskFiles, JMemFiles, JBytesIO
 from .jdb_net import JNetFiles
 from .jdb_lite import JDbReader, SEP_SYM
-from .jdb_io import JIoVAL_U, JIoKEY_U, \
+from .jdb_io import JIoVAL_U, JIoKEY_U, MAX_TTL_DAYS, \
                     register_user_key_codec, unregister_user_key_codec, \
                     register_user_val_codec, unregister_user_val_codec
 
@@ -22,7 +22,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful KV JSON database with compression/Time-travel/Concurrency. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '2.14.53'
+__version__         = '2.14.54'
 
 __all__ = (
     'GraphDb',
@@ -52,6 +52,7 @@ __all__ = (
     'register_user_val_codec',
     'unregister_user_key_codec',
     'unregister_user_val_codec',
+    'MAX_TTL_DAYS',
 )
 
 loads = JDb.z_loads

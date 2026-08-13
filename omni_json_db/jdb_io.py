@@ -6,7 +6,7 @@ from time import time
 from functools import lru_cache
 from collections import defaultdict, OrderedDict
 from re import findall as re_findall
-from datetime import date as dt_date, datetime, timedelta
+from datetime import date as dt_date, datetime  # timedelta
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
 try:
@@ -18,13 +18,14 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, JKeyFlag, KEY_FLAG_MASK
+from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK
 from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
-        FULL_DAY_MASK
+        NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, \
+        MAX_TTL_DAYS, EXPIRE_FLAG, GROUP_FLAG # EXP_DELTA_MASK, TTL_MASK, TTL_SHIFT
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -106,15 +107,10 @@ NUM_1970_DAYS   = 719163        # date(1970, 1, 2) - date(1,1,1)
 NUM_1996_DAYS   = 728689        # date(1996, 2, 1) - date(1,1,1)
 NUM_2000_DAYS   = 730119        # date(2000, 1, 1) - date(1,1,1)
 DAY_SEC         = 24*60*60
-NEW_DAY_SHIFT   = 26            # 0x400_0000
-OLD_DAY_MASK    = 0x3FF_FFFF    # 9999 years
-NEW_DAY_MASK    = 0x3F_FFFF << NEW_DAY_SHIFT   # modified-created delta, bits 26..47
-CHG_DAY_FLAG    = 1 << (NEW_DAY_SHIFT*2)       # caller-only signal, stripped before storing
 
-if (NEW_DAY_MASK | OLD_DAY_MASK) & ~FULL_DAY_MASK: # pragma: no cover
-    raise RuntimeError(f'days field {hex(NEW_DAY_MASK | OLD_DAY_MASK)} overflows '
-                       f'FULL_DAY_MASK {hex(FULL_DAY_MASK)}; it would collide with JKeyFlag')
-
+# The days layout (created / modified-delta / ttl) and its pack/unpack helpers
+# now live in jdb_codec, next to the JIoKEY codecs that fold and unfold it; the
+# names are re-exported above so `from .jdb_io import ...` keeps working.
 # -1 = DEFAULT_BUFFER_SIZE (8192)
 # 0 = no buffering
 # 65536 > 8192[default] improve loading key table 7.69%
@@ -304,7 +300,7 @@ class KeyTable(KeyTableBase):
         self._set_found_flag(row_id, True)
 
         jio = self.io
-        if flags & JKeyFlag.GROUP and row_id < jio.n_records:
+        if flags & GROUP_FLAG and row_id < jio.n_records:
             jio.groups.setdefault(key, None)
 
         if self.with_cache:
@@ -361,7 +357,7 @@ class KeyTable(KeyTableBase):
             try:
                 key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
                 key_fp.seek(HEADER_SIZE + row_id * index_size)
-                _key, _f, _o, _r, _v, _s, _d, _kflags = KEY_loads(key_fp.read(index_size))
+                _key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kflags = KEY_loads(key_fp.read(index_size))
                 if _key == key:
                     del key_array[s_idx:e_idx]
                     self.size -= 1
@@ -640,7 +636,7 @@ class KeyTable(KeyTableBase):
         try:
             key_fp = self.files_obj.KEY_open('rb') if key_fp is None else key_fp
             row_id = 0
-            for (_key, _f, _o, _r, _v, _s, _d, kflags) in jio.KEY_iter(key_fp, row_id, jio.n_records):
+            for (_key, _f, _o, _r, _v, _s, _cd, _md, _tl, kflags) in jio.KEY_iter(key_fp, row_id, jio.n_records):
                 _val = (row_id  << ROW_ID_SHIFT) | (kflags & KEY_FLAG_MASK)
                 if is_empty or not get_found_flag(row_id):
                     wr_bytes = _msg_dumps((_key, _val)) or b''
@@ -655,7 +651,7 @@ class KeyTable(KeyTableBase):
                     set_found_flag(row_id, True)
                     self.size += 1
 
-                if kflags & JKeyFlag.GROUP:
+                if kflags & GROUP_FLAG:
                     io_groups.setdefault(_key, None)
                 yield _key, _val
                 row_id += 1
@@ -748,7 +744,7 @@ class DictKeyTable(KeyTableBase):
     def set(self, key:str, row_id:int, flags:int=0):
         jio = self.io
         self.table[key] = (row_id << ROW_ID_SHIFT) | int(flags & KEY_FLAG_MASK)
-        if flags & JKeyFlag.GROUP and row_id < jio.n_records:
+        if flags & GROUP_FLAG and row_id < jio.n_records:
             jio.groups.setdefault(key, None)
 
     def pop(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
@@ -1163,30 +1159,6 @@ class JIo(JIoBase):
             return (timestamp - THE_1ST_DATE).days
 
         return NUM_1970_DAYS + max(0, int(timestamp) - THE_1ST_SEC) // DAY_SEC
-
-    @staticmethod
-    def z_conv_date(days:int) -> Tuple[dt_date, dt_date]:
-        """Convert relative day integers back into structured standard timezone-agnostic calendar object dates.
-
-        Args:
-            days (int): Compact relative timeline offset value tracking variable inside index row.
-
-        Returns:
-            Tuple[dt_date, dt_date]: Pair processing baseline baseline dates and updated adaptation tracking timeline pointers.
-        """
-        old_days = days & OLD_DAY_MASK
-        new_days = (days & NEW_DAY_MASK) >> NEW_DAY_SHIFT
-
-        if old_days < NUM_1970_DAYS and old_days+new_days < NUM_1996_DAYS:  # pragma: no cover
-            old_days += NUM_2000_DAYS
-            old_date = THE_1ST_DATE + timedelta(days=old_days)
-            if old_date > dt_date.today():
-                old_date -= timedelta(days=NUM_2000_DAYS)
-        else:
-            old_date = THE_1ST_DATE + timedelta(days=old_days)
-
-        new_date = old_date + timedelta(days=new_days)
-        return old_date, new_date
 
     @staticmethod
     @lru_cache(maxsize=256)
@@ -1800,7 +1772,8 @@ class JIo(JIoBase):
         self.VAL_loads = val_obj.loads
 
         try:
-            test_row = ('1', 2, 3, 4, 5, 6, 7, 8)
+            # ttl=9 > 0 derives JKeyFlag.EXPIRE (0x80)
+            test_row = ('1', 2, 3, 4, 5, 6, 7, 8, 9, 0x80)
             if tuple(self.KEY_loads(self.KEY_dumps(*test_row))) != test_row: # pragma: no cover
                 raise TypeError
         except Exception as e:
@@ -1836,7 +1809,7 @@ class JIo(JIoBase):
                 files_obj = self.files_obj.copy()
                 fp = files_obj.KEY_open('rb')
                 row_id = (stop_row-1) if reverse else start_row
-                for (_key, _f, _o, _r, _v, _s, _d, _kf) in self.KEY_iter(fp, start_row, stop_row, reverse=reverse):
+                for (_key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf) in self.KEY_iter(fp, start_row, stop_row, reverse=reverse):
                     yield _key, row_id
                     row_id = (row_id - 1) if reverse else (row_id + 1)
 
@@ -1959,7 +1932,7 @@ class JIo(JIoBase):
                 yield from self.groups
             else:
                 for key,val in key_table._item_iter(fp):
-                    if val & JKeyFlag.GROUP:
+                    if val & GROUP_FLAG:
                         yield key
         else:
             yield from self.groups
@@ -2000,8 +1973,11 @@ class JIo(JIoBase):
 
         return row_id, file_id, offset, row_size
 
-    def write_key(self, fp:IO, row_id:int, key:str, file_id:int, offset:int, row_size:int, val_size:int=0, ver:Optional[int]=None, days:int=-1, flags:Optional[int]=None) -> int:
+    def write_key(self, fp:IO, row_id:int, key:str, file_id:int, offset:int, row_size:int, val_size:int=0, ver:Optional[int]=None, cdays:int=-1, mdays:int=-1, ttl:int=0, flags:Optional[int]=None) -> int:
         """Write one KEY index row at ``row_id``, growing the index row size if the key does not fit.
+
+        The positional order matches :meth:`read_key`'s return value, so a row
+        can always be copied with ``write_key(fp, dst, *read_key(fp, src))``.
 
         Args:
             fp (IO): The open KEY file pointer.
@@ -2012,7 +1988,13 @@ class JIo(JIoBase):
             row_size (int): The reserved byte length of the value row.
             val_size (int, optional): The actual value byte length. Defaults to 0.
             ver (Optional[int], optional): The version (write-session id); ``None`` uses the current ``sync_id``. Defaults to None.
-            days (int, optional): The stored date in days; ``-1`` keeps the current date. Defaults to -1.
+            cdays (int, optional): Creation day index; ``-1`` means today. Defaults to -1.
+            mdays (int, optional): Last-modified day index; ``-1`` means today,
+                which is how a rewrite touches a record without disturbing its
+                creation date. Values below ``cdays`` are raised to ``cdays``. Defaults to -1.
+            ttl (int, optional): Lifetime in days counted from ``mdays``; ``0``
+                means no TTL. Clamped to :data:`MAX_TTL_DAYS`, and a non-zero
+                value derives :attr:`JKeyFlag.EXPIRE`. Defaults to 0.
             flags (Optional[int], optional): :class:`JKeyFlag` bits for this record.
                 ``None`` (the default) is treated as ``0``; it is used at call sites that deliberately reset the
                 flags, such as moving a row into the DEAD region. Rewrites of a live
@@ -2021,20 +2003,19 @@ class JIo(JIoBase):
         Returns:
             int: The number of bytes written.
         """
-        if days < 0:
-            days = self.days
-        elif days & CHG_DAY_FLAG:
-            days &= OLD_DAY_MASK
-            days |= (max(0, self.days-days) << NEW_DAY_SHIFT) & NEW_DAY_MASK
-        else:
-            days &= (NEW_DAY_MASK | OLD_DAY_MASK)
+        today = self.days
+        cdays = today if cdays < 0 else (cdays & OLD_DAY_MASK)
+        mdays = today if mdays < 0 else mdays
+        mdays = cdays if mdays < cdays else mdays
+        ttl = 0 if ttl <= 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
 
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
         if key and file_id == 0x10 and row_size == 0:
-            flags |= int(JKeyFlag.GROUP) # plain int: marshal/msgpack cannot encode an IntFlag
+            flags |= GROUP_FLAG # plain int: marshal/msgpack cannot encode an IntFlag
 
-        data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days, flags)
+        flags = (flags | EXPIRE_FLAG) if ttl > 0 else (flags & ~EXPIRE_FLAG)
+        data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, cdays, mdays, ttl, flags)
         data_size = len(data)
         index_size = self.index_size
         pad_size = index_size - data_size - 1
@@ -2043,7 +2024,7 @@ class JIo(JIoBase):
                 # strip the key length to match max index size
                 while True:
                     key = key[:pad_size]
-                    data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, days, flags)
+                    data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, cdays, mdays, ttl, flags)
                     data_size = len(data)
                     if data_size+1 <= MAX_INDEX_SIZE and key not in self.key_table or not key:
                         break
@@ -2054,7 +2035,7 @@ class JIo(JIoBase):
 
         if pad_size < 0:
             if row_id+1 >= self.n_lines:
-                _data = self.KEY_dumps('', 0, 0, 0, 0, 0, 0, 0)
+                _data = self.KEY_dumps('', 0, 0, 0, 0, 0, 0, 0, 0, 0)
                 fp.seek(HEADER_SIZE + row_id * index_size)
                 fp.write(_data + b' ' * (index_size - len(_data) - 1) + b'\n')
 
@@ -2071,7 +2052,7 @@ class JIo(JIoBase):
         _KEY_rows = self._KEY_rows
         _KEY_rows.pop(row_id, None)
         if row_id < self.n_records:
-            _KEY_rows[row_id] = (key, file_id, offset, row_size, val_size, ver_i, days, flags)
+            _KEY_rows[row_id] = (key, file_id, offset, row_size, val_size, ver_i, cdays, mdays, ttl, flags)
             while len(_KEY_rows) > TOTAL_KEY_ROWS: # pragma: no cover
                 _KEY_rows.popitem(last=False) # 1st item
 
@@ -2083,7 +2064,7 @@ class JIo(JIoBase):
         wr_size = fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
         return wr_size
 
-    def read_key(self, fp:IO, row_id:int) -> Tuple[str,int,int,int,int,int,int,int]:
+    def read_key(self, fp:IO, row_id:int) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
         """Read and decode one KEY index row.
 
         Args:
@@ -2091,8 +2072,8 @@ class JIo(JIoBase):
             row_id (int): The row to read.
 
         Returns:
-            Tuple[str,int,int,int,int,int,int,int]:
-            ``(key, file_id, offset, row_size, val_size, ver, days, flags)``.
+            Tuple[str,int,int,int,int,int,int,int,int,int]:
+            ``(key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags)``.
         """
         _DEAD_rows = self._DEAD_rows
         _DEAD_rows.pop(row_id, None)
@@ -2557,7 +2538,7 @@ class JIo(JIoBase):
                             key_table.pop(key, 0)
 
                 if records < n_records:
-                    for (key, _file_id, _offset, _row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
+                    for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
                         key_table.set(key, records, flags)
                         records += 1
 
@@ -2596,7 +2577,7 @@ class JIo(JIoBase):
                     else:
                         KEY_loads = self.KEY_loads
                         line = bytearray(index_size)
-                        for (key, _f, _o, _rs, _vs, _v, _d, _kflags) in self.KEY_iter(fp, n_records, min(n_lines, n_records+remv_diff)):
+                        for (key, _f, _o, _rs, _vs, _v, _cd, _md, _tl, _kflags) in self.KEY_iter(fp, n_records, min(n_lines, n_records+remv_diff)):
                             old_row = key_table.pop(key, -1)
                             if n_records > old_row >= 0:
                                 cur_pos = fp.tell()
@@ -2642,7 +2623,7 @@ class JIo(JIoBase):
         if n_records == 0:
             groups.clear()
         else:
-            for (key, _file_id, _offset, _row_size, _val_size, _ver, _days, flags) in self.KEY_iter(fp, records, n_records):
+            for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
                 key_table.set(key, records, flags)
                 records += 1
 
@@ -2744,13 +2725,11 @@ class JIo(JIoBase):
                 break
 
             if min_ver:
-                _key, _file_id, _offset, _row_size, _val_size, _ver, _days, _flags = key_info
-                _ver = max(1, _ver - sync_id + n_lines)
-                _key = '' if dst_row_id >= n_records else _key
-                dst_write_key(fp, dst_row_id, _key, _file_id, _offset, _row_size, _val_size, _ver, _days, _flags)
-            else:
-                dst_write_key(fp, dst_row_id, *key_info)
+                key_info = list(key_info)
+                key_info[0] = '' if dst_row_id >= n_records else key_info[0]
+                key_info[5] = max(1, key_info[5] - sync_id + n_lines)
 
+            dst_write_key(fp, dst_row_id, *key_info)
             dst_row_id += 1
 
         fp.truncate()
@@ -2765,7 +2744,7 @@ class JIo(JIoBase):
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
 
-    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False, n_rows:int=8192) -> Generator[Tuple[str,int,int,int,int,int,int,int], None, None]:
+    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False, n_rows:int=8192) -> Generator[Tuple[str,int,int,int,int,int,int,int,int,int], None, None]:
         """Iterate decoded KEY rows in the half-open row range ``[start, stop)``,
         reading the index file in large blocks for speed.
 
@@ -2787,24 +2766,19 @@ class JIo(JIoBase):
                 Defaults to ``8192``.
 
         Yields:
-            Tuple[str, int, int, int, int, int, int, int]: The decoded row
-            ``(key, file_id, offset, row_size, val_size, ver, days, flags)``.
+            Tuple[str, int, int, int, int, int, int, int, int, int]: The decoded row
+            ``(key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, flags)``.
             Iteration stops silently on a short read or a row decode error.
         """
-        if stop <= start or stop < 0 or start < 0 or self.n_lines < 0: # pragma: no cover
-            return
-
         n_lines = self.n_lines
-        if start >= n_lines: # pragma: no cover
+        stop = n_lines if stop >= n_lines else stop
+        start = n_lines if start >= n_lines else start
+        n_keys = stop - start
+        if n_keys <= 0 or n_rows <= 0 or stop < 0 or start < 0 or n_lines <= 0: # pragma: no cover
             return
 
         index_size = self.index_size
-        stop = n_lines if stop >= n_lines else stop
-        n_keys = stop - start
         n_rows = min(n_rows, (2**22) // index_size, n_keys)
-        if n_rows <= 0:
-            return
-
         KEY_loads = self.KEY_loads
         buf = bytearray(index_size * n_rows)
         mv_buf = memoryview(buf)
