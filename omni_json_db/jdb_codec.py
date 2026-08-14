@@ -915,15 +915,16 @@ class JIoKEY_J(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as a JSON array (v0 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -952,15 +953,16 @@ class JIoKEY_J(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as a JSON array (v1 layout)."""        
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -986,15 +988,16 @@ class JIoKEY_J(JIoKEY):
     def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as a JSON array (v2 layout, 8 stored fields)."""        
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1021,15 +1024,16 @@ class JIoKEY_S(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with msgpack behind a 3-byte length prefix (v0 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -1065,15 +1069,16 @@ class JIoKEY_S(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with msgpack behind a 3-byte length prefix (v1 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -1107,15 +1112,16 @@ class JIoKEY_S(JIoKEY):
     def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with msgpack behind a 3-byte length prefix (v2 layout, 8 stored fields)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) or b''
             info_len = len(info_b)
             return bytes((0xcd, info_len >> 8, info_len & 0xff)) + info_b
@@ -1150,15 +1156,16 @@ class JIoKEY_M(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with marshal (v0 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
             return marshal_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) # tuple smaller than list
 
@@ -1191,15 +1198,16 @@ class JIoKEY_M(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with marshal (v1 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
             return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) # tuple smaller than list
 
@@ -1229,15 +1237,16 @@ class JIoKEY_M(JIoKEY):
     def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row with marshal (v2 layout, 8 stored fields)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
             return marshal_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) # tuple smaller than list
 
@@ -1268,15 +1277,16 @@ class JIoKEY_L(JIoKEY):
     def dumps_v0(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as comma-separated text (v0 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
             return data.encode('utf8')
 
@@ -1329,15 +1339,16 @@ class JIoKEY_L(JIoKEY):
     def dumps_v1(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as comma-separated text (v1 layout)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
             return data.encode('utf8')
 
@@ -1371,15 +1382,16 @@ class JIoKEY_L(JIoKEY):
     def dumps_v2(self, key:str, file_id:int, offset:int, row_size:int, val_size:int, ver:int, cdays:int, mdays:int, ttl:int=0, flags:int=0) -> bytes:
         """Serialize a KEY row as comma-separated text (v2 layout, 8 stored fields)."""
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days},{flags}'
             return data.encode('utf8')
 
@@ -1523,15 +1535,16 @@ class JIoKEY_U(JIoKEY):
             self._missing()
 
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1563,15 +1576,16 @@ class JIoKEY_U(JIoKEY):
         if self._dumps is None: # pragma: no cover
             self._missing()
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover
@@ -1602,15 +1616,16 @@ class JIoKEY_U(JIoKEY):
         if self._dumps_v0 is None: # pragma: no cover
             self._missing()
         try:
+            delta = mdays - cdays
             if ttl <= 0:
-                days = (cdays & OLD_DAY_MASK) | ((mdays - cdays) << NEW_DAY_SHIFT) & NEW_DAY_MASK
+                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
             else:
-                delta = mdays - cdays
+                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
                 if delta > MAX_EXP_DELTA:
                     cdays = (cdays + delta) & OLD_DAY_MASK
-                    delta = 0
-                ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
-                days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
+                    days = cdays | (ttl << TTL_SHIFT)
+                else:
+                    days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError) as e: # pragma: no cover

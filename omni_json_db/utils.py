@@ -222,6 +222,12 @@ WRITE_LOCK_MASK     = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
 
 DERIVED_FLAG_MASK   = int(JKeyFlag.GROUP | JKeyFlag.LINK | JKeyFlag.EXPIRE)
 
+# derived bits JIo.write_key re-derives on its own, from the row layout (GROUP) or the ttl field (EXPIRE)
+REDERIVED_FLAG_MASK = int(JKeyFlag.GROUP | JKeyFlag.EXPIRE)
+
+# derived bits nothing can re-derive, so they must travel with the VALUE they describe
+PAYLOAD_FLAG_MASK   = DERIVED_FLAG_MASK & ~REDERIVED_FLAG_MASK
+
 WRITABLE_FLAG_MASK  = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 
 USER_FLAG_MASK      = KEY_FLAG_MASK & ~int(JKeyFlag.GROUP)

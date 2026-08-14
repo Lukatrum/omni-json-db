@@ -3460,7 +3460,19 @@ class JDbReader(JDbBase):
                 if val is not EXPIRED:
                     yield key, val
 
-    def find_iter(self, keys:Optional[Any]=None, vals:Optional[Dict[str,Any]]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:bool=False, with_date:bool=False, stats:Dict[str,float]=None, reverse:bool=False, with_hidden:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Generator[Tuple[str,Any], None, None]:
+    def find_iter(self, \
+            keys:Optional[Any]=None, \
+            vals:Optional[Dict[str,Any]]=None, \
+            date:Optional[Any]=None, \
+            limit:int=0, \
+            skip:int=0, \
+            with_value:bool=False, \
+            with_date:bool=False, \
+            stats:Dict[str,float]=None, \
+            reverse:bool=False, \
+            with_hidden:bool=True, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            **kwargs) -> Generator[Tuple[str,Any], None, None]:
         """
         Iterate over the database records yielding key-value pairs matching complex query criteria.
 
@@ -3697,7 +3709,8 @@ class JDbReader(JDbBase):
                 cmd_l = cmd[1:].lower() if cmd.startswith('!') else cmd.lower()
                 if cmd_l not in ('$key', '$date'):
                     use_bytes = isinstance(rules, bytes) if cmd_l in ('$eq', '$ne') else \
-                            (isinstance(rules, bytes) or (isinstance(rules, str) and _j_type)) if cmd_l in ('$has', '$nhas', '$ihas') else \
+                            (isinstance(rules, bytes) or (isinstance(rules, str) and _j_type)) \
+                                if cmd_l in ('$has', '$nhas', '$ihas') else \
                             _j_type if cmd_l in ('$re', '$re2', '$regex', '$match') else False
                     _val_conds.append(({cmd:rules}, use_bytes))
 
@@ -3715,30 +3728,25 @@ class JDbReader(JDbBase):
                     continue
 
                 key_fp = fp[-1]
-                _row_id, _kflags = key_table.get_both(key, fp=key_fp)
-                if _kflags & JKeyFlag.EXPIRE:
-                    _k, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kflags = io_read_key(key_fp, row_id)
-                    if ttl > 0 and io_days > (mdays + ttl):
+                _row_id, kflags = key_table.get_both(key, fp=key_fp)
+                if has_flag_rule:
+                    if (kflags & need_flags) != need_flags or (kflags & deny_flags):
                         k_filter += 1
                         continue
 
-                if date or has_flag_rule:
-                    # one read_key serves both filters
-                    _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
-                    if (_kflags & need_flags) != need_flags or (_kflags & deny_flags):
+                mod_id = cdate = mdate = None
+                expire_flag = kflags & JKeyFlag.EXPIRE
+                if expire_flag or date:
+                    _k, _f, _o, _rs, _vs, mod_id, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
+                    if ttl > 0 and expire_flag and io_days > (mdays + ttl):
                         k_filter += 1
                         continue
 
-                    if date:
-                        cdate = THE_1ST_DATE + timedelta(days=_cdays)
-                        mdate = THE_1ST_DATE + timedelta(days=_mdays)
-                        if not match_DATE_rules(cdate, mdate, date):
-                            d_filter += 1
-                            continue
-                    else:
-                        mod_id = cdate = mdate = None
-                else:
-                    mod_id = cdate = mdate = None
+                    cdate = THE_1ST_DATE + timedelta(days=cdays)
+                    mdate = THE_1ST_DATE + timedelta(days=mdays)
+                    if date and not match_DATE_rules(cdate, mdate, date):
+                        d_filter += 1
+                        continue
 
                 if not with_value:
                     m_count += 1
@@ -3748,9 +3756,9 @@ class JDbReader(JDbBase):
 
                     if with_date:
                         if cdate is None:
-                            _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
-                            cdate = THE_1ST_DATE + timedelta(days=_cdays)
-                            mdate = THE_1ST_DATE + timedelta(days=_mdays)
+                            _k, _fi, _of, _rs, _vs, mod_id, cdays, mdays, _ttl, kflags = io_read_key(key_fp, row_id)
+                            cdate = THE_1ST_DATE + timedelta(days=cdays)
+                            mdate = THE_1ST_DATE + timedelta(days=mdays)
                         yield key, (None, cdate, mdate, mod_id)
                     else:
                         yield key, None
@@ -3794,9 +3802,9 @@ class JDbReader(JDbBase):
                     continue
 
                 if cdate is None:
-                    _k, _fi, _of, _rs, _vs, mod_id, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
-                    cdate = THE_1ST_DATE + timedelta(days=_cdays)
-                    mdate = THE_1ST_DATE + timedelta(days=_mdays)
+                    _k, _fi, _of, _rs, _vs, mod_id, cdays, mdays, _ttl, kflags = io_read_key(key_fp, row_id)
+                    cdate = THE_1ST_DATE + timedelta(days=cdays)
+                    mdate = THE_1ST_DATE + timedelta(days=mdays)
 
                 for rules,use_bytes in _val_conds:
                     if use_bytes:
@@ -3837,7 +3845,13 @@ class JDbReader(JDbBase):
             stats.update({'loops': n_loops, 'records':n_records, 'matched':m_count, \
                     'key.filter':k_filter, 'date.filter':d_filter, 'value.filter':v_filter, 'used_s':ed_time-st_time})
 
-    def map(self, map_func:Callable[[str,Any],Any], keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, with_hidden:bool=False, **kwargs) -> List[Any]:
+    def map(self, \
+            map_func:Callable[[str,Any],Any], \
+            keys:Optional[Any]=None, \
+            vals:Optional[Any]=None, \
+            date:Optional[Any]=None, \
+            with_hidden:bool=False, \
+            **kwargs) -> List[Any]:
         """
         Apply a mapping function to the results of a query and return a list.
 
@@ -3869,7 +3883,20 @@ class JDbReader(JDbBase):
 
         return matched_list
 
-    def find(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=0, skip:int=0, with_value:Optional[bool]=None, stats:Dict[str,float]=None, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Dict[str,Any]:
+    def find(self, \
+            keys:Optional[Any]=None, \
+            vals:Optional[Any]=None, \
+            date:Optional[Any]=None, \
+            limit:int=0, \
+            skip:int=0, \
+            with_value:Optional[bool]=None, \
+            stats:Dict[str,float]=None, \
+            sort:Optional[Any]=None, \
+            reverse:Optional[bool]=None, \
+            group_by:Optional[Any]=None, \
+            with_hidden:bool=False, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            **kwargs) -> Dict[str,Any]:
         """
         Find and return a dictionary of records matching complex query criteria.
 
@@ -4011,7 +4038,19 @@ class JDbReader(JDbBase):
 
         return {k:v[0] for k,v in data_rows}
 
-    def show(self, keys:Optional[Any]=None, vals:Optional[Any]=None, date:Optional[Any]=None, limit:int=50, skip:int=0, with_date:bool=False, sort:Optional[Any]=None, reverse:Optional[bool]=None, group_by:Optional[Any]=None, with_hidden:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None, **kwargs) -> Dict[str,Any]:
+    def show(self, \
+            keys:Optional[Any]=None, \
+            vals:Optional[Any]=None, \
+            date:Optional[Any]=None, \
+            limit:int=50, \
+            skip:int=0, \
+            with_date:bool=False, \
+            sort:Optional[Any]=None, \
+            reverse:Optional[bool]=None, \
+            group_by:Optional[Any]=None, \
+            with_hidden:bool=False, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            **kwargs) -> Dict[str,Any]:
         """
         Print the matched records as a formatted console table and return them.
 
@@ -5213,7 +5252,8 @@ class JDbReader(JDbBase):
             engine, the file-pointer table, and the open KEY file pointer.
         """
         if fp_dict is None:
-            fp_dict = self.th_table[get_ident()]['fp']
+            thd = self.th_table.get(get_ident(), None)
+            fp_dict = thd['fp'] if thd is not None else {-1: None}
 
         io = self.io
         key_fp = fp_dict.get(-1, None)

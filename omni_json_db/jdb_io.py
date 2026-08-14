@@ -582,7 +582,7 @@ class KeyTable(KeyTableBase):
         Raises:
             KeyError: If the key does not exist.
         """
-        if self.pop(key, -1) < 0:
+        if self.pop(key, -1) < 0: # pragma: no cover
             raise KeyError(f'{key}')
 
     def __contains__(self, key:str) -> bool:
@@ -811,7 +811,7 @@ class DictKeyTable(KeyTableBase):
         Raises:
             KeyError: If the key does not exist.
         """
-        if self.pop(key, -1) < 0:
+        if self.pop(key, -1) < 0: # pragma: no cover
             raise KeyError(f'{key}')
 
     def __contains__(self, key:str) -> bool:

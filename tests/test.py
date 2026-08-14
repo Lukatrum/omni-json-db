@@ -1097,8 +1097,12 @@ class TestJDb(unittest.TestCase):
             with jdb.open() as _fp:
                 jdb.f_write(_fp, 'x_live', 1, ttl=30)
                 jdb.f_write(_fp, 'x_edge', 2, cdays=_ago(5),  mdays=_ago(5),  ttl=5)
-                jdb.f_write(_fp, 'x_dead', 3, cdays=_ago(10), mdays=_ago(10), ttl=5)
+                jdb.f_write(_fp, 'x_dead', 3, cdays=_ago(10), mdays=_ago(9), ttl=5)
                 jdb.f_write(_fp, 'x_none', 4)
+                jdb.f_write(_fp, 'x_long', 5, cdays=_ago(1000*365), mdays=_ago(15), ttl=10)
+
+            ret = jdb.show(with_date=True, key_flags='+e')
+            self.assertEqual(set(ret), {'x_live', 'x_edge'})
 
             # the metadata view shows it, and says why -- check before any read,
             # since reading an expired record is what queues it for deletion
@@ -1106,6 +1110,16 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(ret['x_dead'][1], 5)
             self.assertTrue(ret['x_dead'][0] & expire)
             self.assertEqual(dict(jdb.keys.item_iter('x_dead', with_expired=False)), {})
+            ret = jdb.keys['x_dead']
+            self.assertEqual(ret[-1], str(_ago(10)))
+            self.assertEqual(ret[-2], str(_ago(9)))
+
+            ret = jdb.get_key_flags('x_long')
+            self.assertEqual(ret['x_long'][1], 10)
+            self.assertTrue(ret['x_long'][0] & expire)
+            ret = jdb.keys['x_long']
+            self.assertEqual(ret[-1], str(_ago(15))) # overflow check
+            self.assertEqual(ret[-2], str(_ago(15)))
 
             # ttl counts days remaining, so a record whose last day is today lives
             self.assertEqual(jdb['x_edge'], 2)
@@ -1117,9 +1131,9 @@ class TestJDb(unittest.TestCase):
 
             # every value view agrees with the single-key read
             self.assertNotIn('x_dead', dict(jdb.items()))
-            self.assertNotIn('x_dead', dict(jdb[:]))
-            self.assertNotIn('x_dead', dict(jdb[lambda k: True]))
-            self.assertNotIn('x_dead', dict(jdb[['x_live', 'x_dead']]))
+            self.assertNotIn('x_dead', jdb[:])
+            self.assertNotIn('x_dead', jdb[lambda k: True])
+            self.assertNotIn('x_dead', jdb['x_live', 'x_dead'])
             self.assertNotIn('x_dead', jdb.find(''))
             self.assertEqual(len(jdb[:dt.date.today() + dt.timedelta(days=1)]), len(dict(jdb.items())))
 
@@ -9796,8 +9810,14 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, expect)
 
             new_expect = {f'key{v}':list(range(test_size*2-v)) for v in range(test_size*2)}
-            with jdb.open(read_only=False) as fp:
-                _io, fp, _key_fp = jdb.f_get_fp(fp)
+            with jdb.open(read_only=True) as fp:
+                _io0, fp0, _key_fp0 = jdb.f_get_fp(None)
+                _io1, fp1, _key_fp, _chg = jdb.f_get_write_fp(None)
+                self.assertFalse(_chg)
+                self.assertTrue(_io0 is _io1)
+                self.assertTrue(fp0 is fp)
+                self.assertTrue(fp1 is fp)
+
                 for key,val in new_expect.items():
                     if key not in jdb.key_table:
                         expect[key] = val
@@ -9853,6 +9873,79 @@ class TestJDb(unittest.TestCase):
 
             jdb['key13', 'key23'] = 'val'
             jdb.unmodify('key13', 'key23')
+            self.assertEqual(jdb, expect)
+
+            # ---------------- derived flags through f_unwrite ----------------
+            # f_unwrite swaps two rows, so the two payloads change places. A
+            # preference (READ_ONLY, HIDDEN, ...) describes the record and stays
+            # put, but LINK describes the VALUE and has to travel with it --
+            # keeping the live row's bit left the record flagged as a link while
+            # holding a plain value, which made it unreadable.
+            jdb['lnk_dst'] = [7, 7]
+            jdb['lnk_src'] = {'plain': 1}
+            self.assertTrue(jdb.set_link('lnk_src', 'lnk_dst'))
+            self.assertEqual(jdb['lnk_src'], [7, 7])
+            self.assertEqual(jdb.keys.get_flags('lnk_src'), {'lnk_src': (int(JKeyFlag.LINK),0)})
+
+            self.assertTrue('lnk_src' in jdb.revert('lnk_src'))
+            self.assertEqual(jdb.keys.get_flags('lnk_src'), {'lnk_src': (0,0)})
+            self.assertEqual(jdb['lnk_src'], {'plain': 1})
+            self.assertEqual(jdb.get_link('lnk_src'), None)
+
+            # ... and travel back up again on the next step
+            self.assertTrue('lnk_src' in jdb.unmodify('lnk_src'))
+            self.assertEqual(jdb.keys.get_flags('lnk_src'), {'lnk_src': (int(JKeyFlag.LINK),0)})
+            self.assertEqual(jdb.get_link('lnk_src'), 'lnk_dst')
+            self.assertEqual(jdb['lnk_src'], [7, 7])
+
+            jdb ^= {'lnk_src'}                        # the third entry point
+            self.assertEqual(jdb.keys.get_flags('lnk_src'), {'lnk_src': (0,0)})
+            self.assertEqual(jdb['lnk_src'], {'plain': 1})
+
+            # a link reverted onto an older link is still a link
+            jdb['lnk_dst2'] = [8, 8]
+            self.assertTrue(jdb.set_link('lnk2', 'lnk_dst'))
+            self.assertTrue(jdb.set_link('lnk2', 'lnk_dst2'))
+            self.assertEqual(jdb['lnk2'], [8, 8])
+            self.assertTrue('lnk2' in jdb.revert('lnk2'))
+            self.assertEqual(jdb.keys.get_flags('lnk2'), {'lnk2': (int(JKeyFlag.LINK),0)})
+            self.assertEqual(jdb.get_link('lnk2'), 'lnk_dst')
+            self.assertEqual(jdb['lnk2'], [7, 7])
+
+            # preferences belong to the record, not to the version
+            jdb['pref'] = 1
+            jdb['pref'] = 2
+            pref_flags = int(JKeyFlag.NO_CACHE | JKeyFlag.USER0)
+            self.assertEqual(jdb.keys.set_flags('pref', no_cache=True, user0=True), {'pref': (pref_flags,0)})
+            self.assertTrue('pref' in jdb.revert('pref'))
+            self.assertEqual(jdb.keys.get_flags('pref'), {'pref': (pref_flags,0)})
+            self.assertEqual(jdb['pref'], 1)
+
+            # GROUP and EXPIRE are re-derived by write_key, so no revert can desync them
+            rv_grp = jdb.add_group('rv_grp')
+            rv_grp['n'] = 1
+            jdb.revert('pref')
+            self.assertEqual(jdb.keys.get_flags('rv_grp'), {'rv_grp': (int(JKeyFlag.GROUP),0)})
+            self.assertEqual(jdb['rv_grp'], {'n': 1})
+
+            jdb['exp'] = 1
+            jdb.keys.set_flags('exp', ttl=5)
+            jdb.set('exp', 2, key_flags='u')
+            jdb.keys.set_flags('exp', ttl=0)
+            jdb.revert('exp')
+            exp_flags, exp_ttl = jdb.keys.get_flags('exp')['exp']
+            self.assertEqual(bool(exp_flags & JKeyFlag.EXPIRE), exp_ttl > 0)
+
+            # the fix must not open a back door on a write-locked record
+            jdb['ro'] = 1
+            jdb['ro'] = 2
+            self.assertEqual(jdb.keys.set_flags('ro', read_only=True), {'ro': (int(JKeyFlag.READ_ONLY),0)})
+            self.assertEqual(jdb.revert('ro'), {})
+            self.assertEqual(jdb['ro'], 2)
+            self.assertEqual(jdb.keys.set_flags('ro', read_only=False), {'ro': (0,0)})
+
+            self.assertTrue(isinstance(jdb.del_group('rv_grp'), JDb))
+            jdb.remove('lnk_src', 'lnk_dst', 'lnk_dst2', 'lnk2', 'pref', 'exp', 'ro')
             self.assertEqual(jdb, expect)
 
             # unrevertable but faster: flags=0
@@ -10092,11 +10185,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(len(jdb[:dt.date(1990,12,12)]), 0)
             self.assertEqual(len(jdb[:dt.datetime(1990,12,12)]), 0)
             self.assertEqual(dict(jdb.keys.item_iter('kk3', with_expired=False)), {})
-            self.assertEqual(set(jdb.find('kk', date='2000-10-10')), {'kk3'})
-            self.assertEqual(set(jdb.find('kk', date={'$between': ('2000-10-01', '2000-10-30')})), {'kk3'})
+            self.assertEqual(set(jdb.find('kk', date='2000-10-10')), set())
+            self.assertEqual(set(jdb.find('kk', date={'$between': ('2000-10-01', '2000-10-30')})), set())
             self.assertEqual(set(jdb.find('kk', date='1990-12-1 1990-12-30')), set())
-            self.assertEqual(set(jdb.find('kk', date=dt.date(2000, 10, 10))), {'kk3'})
-            self.assertEqual(set(jdb.find('kk', date=dt.datetime(1990, 1, 1))), {'kk3'})
+            self.assertEqual(set(jdb.find('kk', date=dt.date(2000, 10, 10))), set())
+            self.assertEqual(set(jdb.find('kk', date=dt.datetime(1990, 1, 1))), set())
 
             jdb.keys['kk3'] = '2000-1-1 1990-10-10'
             info2 = jdb.keys['kk3']
@@ -10240,9 +10333,15 @@ class TestJDb(unittest.TestCase):
 
             with jdb.open() as fp:
                 jdb.f_write(fp, 'new_key100', 'new_value', cdays=str(yesterday))
+                jdb.f_write(fp, 'new_key101', list(range(16)), cdays=jdb.io.z_conv_str_to_days(f'{str(yesterday)} {str(today)}'))
 
             info = jdb.keys['new_key100']
             self.assertEqual(info[-1], str(yesterday))
+            self.assertEqual(info[-2], str(today))
+
+            info = jdb.keys['new_key101']
+            self.assertEqual(info[-1], str(yesterday))
+            self.assertEqual(info[-2], str(today))
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
