@@ -164,6 +164,39 @@ class JKeyFlag(IntFlag):
     #: flags is already a privileged operation.
     UNLOCK = 0x10000
 
+    #: ``'n'`` -- **transient**. Read a :attr:`LINK` row *itself* instead of
+    #: following it: the read yields the stored target path, not the target's
+    #: value. This is ``open(O_NO_FOLLOW)``, not :meth:`JDbReader.get_link` -- a
+    #: record that is not a link reads normally rather than reporting "not a
+    #: link", which is what makes it composable with an ordinary
+    #: :meth:`JDbReader.get`.
+    #:
+    #: The target path is never placed in the LRU cache under the link's key,
+    #: so a NO_FOLLOW read can never be served to a later following read.
+    #: Passed to :meth:`JDb.f_write` it *retargets* the link in place, the
+    #: low-level equivalent of :meth:`JDb.set_link`; the new value must then be
+    #: a ``str``.
+    NO_FOLLOW = 0x20000
+
+    #: ``'w'`` -- **transient**. Refuse the write when the key already exists,
+    #: leaving the stored record untouched. The check is made under the write
+    #: handle and is repeated after a concurrent-writer retry, so it is
+    #: race-free where a test-then-write is not.
+    #:
+    #: This is what :meth:`JDb.setdefault` means, expressed precisely: the
+    #: refusal is silent (``f_write`` returns ``False``), matching how
+    #: :attr:`READ_ONLY` and :attr:`APPEND_ONLY` already refuse.
+    EXCL = 0x40000
+
+    #: ``'y'`` -- **transient**. Keep the record's stored *modified* day instead
+    #: of stamping today. An explicit ``mdays=`` argument still wins, and a new
+    #: record has no old day to keep, so this is a no-op there.
+    #:
+    #: A TTL is counted from ``mdays``, so writing with NO_ATIME deliberately
+    #: does **not** renew an expiring record -- useful for touching a session
+    #: without extending it, and a footgun everywhere else.
+    NO_ATIME = 0x80000
+
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
@@ -198,6 +231,27 @@ class JKeyFlag(IntFlag):
         """
         return ''.join(ch if flag in self else '_' for flag, ch in KEY_FLAG_LETTERS.items())
 
+# Plain-int aliases of every JKeyFlag member. A bitwise op against an IntFlag
+# member goes through enum.Flag.__and__ in pure Python, ~65x slower than the
+# same op against an int, so every hot path uses these instead. The enum stays
+# the public, printable API.
+KF_READ_ONLY   = int(JKeyFlag.READ_ONLY)
+KF_APPEND_ONLY = int(JKeyFlag.APPEND_ONLY)
+KF_GROUP       = int(JKeyFlag.GROUP)
+KF_LINK        = int(JKeyFlag.LINK)
+KF_HIDDEN      = int(JKeyFlag.HIDDEN)
+KF_NO_CACHE    = int(JKeyFlag.NO_CACHE)
+KF_NO_REVERT   = int(JKeyFlag.NO_REVERT)
+KF_EXPIRE      = int(JKeyFlag.EXPIRE)
+KF_USER0       = int(JKeyFlag.USER0)
+KF_USER1       = int(JKeyFlag.USER1)
+KF_USER2       = int(JKeyFlag.USER2)
+KF_USER3       = int(JKeyFlag.USER3)
+KF_UNLOCK      = int(JKeyFlag.UNLOCK)
+KF_NO_FOLLOW   = int(JKeyFlag.NO_FOLLOW)
+KF_EXCL        = int(JKeyFlag.EXCL)
+KF_NO_ATIME    = int(JKeyFlag.NO_ATIME)
+
 KEY_FLAG_LETTERS = {
     JKeyFlag.READ_ONLY:   'r',
     JKeyFlag.GROUP:       'g',
@@ -212,25 +266,29 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.USER2:       '2',
     JKeyFlag.USER3:       '3',
     JKeyFlag.UNLOCK:      'u',
+    JKeyFlag.NO_FOLLOW:   'n',
+    JKeyFlag.EXCL:        'w',
+    JKeyFlag.NO_ATIME:    'y',
 }
 
-KEY_FLAG_BY_LETTER  = {v: k for k, v in KEY_FLAG_LETTERS.items()}
+# int-valued, so every parse below is int arithmetic rather than enum arithmetic
+KEY_FLAG_BY_LETTER  = {v: int(k) for k, v in KEY_FLAG_LETTERS.items()}
 
-TRANSIENT_FLAG_MASK = int(JKeyFlag.UNLOCK)
+TRANSIENT_FLAG_MASK = KF_UNLOCK | KF_NO_FOLLOW | KF_EXCL | KF_NO_ATIME
 
-WRITE_LOCK_MASK     = int(JKeyFlag.READ_ONLY | JKeyFlag.APPEND_ONLY)
+TRANSIENT_FLAG_BY_LETTER = {ch: int(f) for f, ch in KEY_FLAG_LETTERS.items() if int(f) & TRANSIENT_FLAG_MASK}
 
-DERIVED_FLAG_MASK   = int(JKeyFlag.GROUP | JKeyFlag.LINK | JKeyFlag.EXPIRE)
+WRITE_LOCK_MASK     = KF_READ_ONLY | KF_APPEND_ONLY
 
-# derived bits JIo.write_key re-derives on its own, from the row layout (GROUP) or the ttl field (EXPIRE)
-REDERIVED_FLAG_MASK = int(JKeyFlag.GROUP | JKeyFlag.EXPIRE)
+DERIVED_FLAG_MASK   = KF_GROUP | KF_LINK | KF_EXPIRE
 
-# derived bits nothing can re-derive, so they must travel with the VALUE they describe
+REDERIVED_FLAG_MASK = KF_GROUP | KF_EXPIRE
+
 PAYLOAD_FLAG_MASK   = DERIVED_FLAG_MASK & ~REDERIVED_FLAG_MASK
 
 WRITABLE_FLAG_MASK  = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 
-USER_FLAG_MASK      = KEY_FLAG_MASK & ~int(JKeyFlag.GROUP)
+USER_FLAG_MASK      = KEY_FLAG_MASK & ~KF_GROUP
 
 def conv_to_key_flags(flags:str) -> Tuple[int,int]:
     """Parse a ``chmod``-style flag string into three masks.
@@ -273,96 +331,67 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int]:
         (16, 32)
     """
     set_mask = clr_mask = 0
-    if flags and isinstance(flags, str):
+    if flags:
         for flag in re_findall(r'[+\-]?[a-z0-9]', flags.lower()):
             val = KEY_FLAG_BY_LETTER.get(flag[-1:], None)
             if val is not None:
                 if flag[0] == '-':
-                    clr_mask |= int(val)
+                    clr_mask |= val
                 else:
-                    set_mask |= int(val)
+                    set_mask |= val
 
     return set_mask, clr_mask
 
-def pop_unlock_flag(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[bool, Any]:
-    """Split :attr:`JKeyFlag.UNLOCK` out of a caller's ``key_flags`` argument.
+def pop_transient_flags(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[int, Any]:
+    """Split every :data:`TRANSIENT_FLAG_MASK` bit out of a caller's ``key_flags``.
 
-    ``UNLOCK`` is call-scoped, so it must be consumed before the rest of the
-    argument is treated as flags to store. Asking only to force -- ``'u'`` or
-    ``JKeyFlag.UNLOCK`` -- has to leave the record's stored flags alone, which is
-    why the remainder comes back as ``None`` in that case rather than an empty
-    mask: an empty mask given as an ``int`` means "clear everything".
+    Transient flags are call-scoped, so they must be consumed before the rest of
+    the argument is treated as flags to *store*. Asking only for transient
+    behaviour -- ``'w'``, ``'uy'``, ``JKeyFlag.NO_ATIME`` -- has to leave the
+    record's stored flags alone, which is why the remainder comes back as
+    ``None`` in that case rather than an empty mask: an empty mask given as an
+    ``int`` means "clear everything".
+
+    In the string form a transient letter is consumed whichever way it was
+    prefixed, but only a ``'+'``/bare letter turns the bit on -- ``'-w'`` asks
+    for the default, not for a stored flag, so it must not survive into the
+    remainder either.
 
     Args:
         flags (Union[str, int, JKeyFlag, None]): The caller's ``key_flags``.
 
     Returns:
-        Tuple[bool, Any]: ``(force, remaining_flags)``, where ``remaining_flags``
-        is safe to hand to :func:`apply_key_flags`.
+        Tuple[int, Any]: ``(transient_mask, remaining_flags)``, where
+        ``remaining_flags`` is safe to hand to :func:`apply_key_flags`.
 
     Example:
-        >>> pop_unlock_flag('u')
-        (True, None)
-        >>> pop_unlock_flag('+u+r')
-        (True, '+r')
-        >>> pop_unlock_flag(None)
-        (False, None)
+        >>> pop_transient_flags('wy') == (int(JKeyFlag.EXCL | JKeyFlag.NO_ATIME), None)
+        True
+        >>> pop_transient_flags('+u+r') == (int(JKeyFlag.UNLOCK), '+r')
+        True
+        >>> pop_transient_flags(None)
+        (0, None)
     """
     if flags is None:
-        return False, None
+        return 0, None
 
     if isinstance(flags, str):
-        tokens = re_findall(r'[+\-]?[a-z0-9]', flags.lower())
-        unlock = any(t[-1:] == 'u' and t[0] != '-' for t in tokens)
-        rest = ''.join(t for t in tokens if t[-1:] != 'u' and t[-1:] in KEY_FLAG_BY_LETTER)
-        return unlock, (rest or None)
+        trans, rest = 0, []
+        for tok in re_findall(r'[+\-]?[a-z0-9]', flags.lower()):
+            bit = TRANSIENT_FLAG_BY_LETTER.get(tok[-1:], None)
+            if bit is not None:
+                if tok[0] != '-':
+                    trans |= bit
+
+            elif tok[-1:] in KEY_FLAG_BY_LETTER:
+                rest.append(tok)
+
+        return trans, (''.join(rest) or None)
 
     flags = int(flags)
-    rest = flags & ~int(JKeyFlag.UNLOCK)
-    unlock = bool(flags & JKeyFlag.UNLOCK)
-    return unlock, (None if unlock and not rest else rest)
-
-def apply_key_flags(old_flags:int, flags:Union[str,int,'JKeyFlag',None], mask:int=None) -> int:
-    """Resolve a caller's ``flags`` argument against a record's current flags.
-
-    The two accepted forms deliberately mirror ``chmod``:
-
-    * ``str`` -- **relative**. ``'+r'`` sets, ``'-r'`` clears, a bare ``'r'``
-      sets, and every flag not named keeps its current value.
-    * ``int`` / :class:`JKeyFlag` -- **absolute**. The value replaces the
-      record's flags wholesale.
-
-    ``None`` leaves the record's flags untouched.
-
-    Args:
-        old_flags (int): The record's current flags; ``0`` for a new record.
-        flags (Union[str, int, JKeyFlag, None]): The caller's request.
-        mask (int, optional): Bits the caller is allowed to affect.
-            Defaults to :data:`WRITABLE_FLAG_MASK`, which excludes the derived
-            :attr:`JKeyFlag.GROUP` / :attr:`JKeyFlag.LINK` bits.
-
-    Returns:
-        int: The resulting flags, already masked.
-
-    Example:
-        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), '+r')      # relative
-        33
-        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), '-c')
-        0
-        >>> apply_key_flags(int(JKeyFlag.NO_CACHE), JKeyFlag.READ_ONLY)  # absolute
-        1
-    """
-    if mask is None:
-        mask = WRITABLE_FLAG_MASK
-
-    if flags is None:
-        return int(old_flags) & mask
-
-    if isinstance(flags, str):
-        set_mask, clr_mask = conv_to_key_flags(flags)
-        return ((int(old_flags) | set_mask) & ~clr_mask) & mask
-
-    return int(flags) & mask
+    trans = flags & TRANSIENT_FLAG_MASK
+    rest = flags & ~TRANSIENT_FLAG_MASK
+    return trans, (None if trans and not rest else rest)
 
 def is_value_extension(old: Any, new: Any) -> bool:
     """Return ``True`` when *new* only adds to *old*.
@@ -429,11 +458,11 @@ class JFlag(IntFlag):
             _value = 0
             for ch in value.lower():
                 if ch == 'r':
-                    _value |= JFlag.REVERT
+                    _value |= F_REVERT
                 elif ch == 's':
-                    _value |= JFlag.SPLIT
+                    _value |= F_SPLIT
                 elif ch == 'f':
-                    _value |= JFlag.FSYNC
+                    _value |= F_FSYNC
 
             value = _value
 
@@ -456,6 +485,11 @@ class JFlag(IntFlag):
                 ret += '_'
 
         return ret
+
+# Plain-int aliases of every JFlag member; see the KF_* block above.
+F_REVERT = int(JFlag.REVERT)
+F_SPLIT  = int(JFlag.SPLIT)
+F_FSYNC  = int(JFlag.FSYNC)
 
 #-----------------------------------------------------------------------------
 try:

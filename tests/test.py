@@ -354,6 +354,9 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(JKeyFlag('c'), JKeyFlag.NO_CACHE)
             self.assertEqual(JKeyFlag('v'), JKeyFlag.NO_REVERT)
             self.assertEqual(JKeyFlag('l'), JKeyFlag.LINK)
+            self.assertEqual(JKeyFlag('n'), JKeyFlag.NO_FOLLOW)
+            self.assertEqual(JKeyFlag('w'), JKeyFlag.EXCL)
+            self.assertEqual(JKeyFlag('y'), JKeyFlag.NO_ATIME)
             self.assertEqual(JKeyFlag('ac'), JKeyFlag.APPEND_ONLY | JKeyFlag.NO_CACHE)
             self.assertEqual(JKeyFlag('RV'), JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT)
             self.assertEqual(JKeyFlag('?'), JKeyFlag(0))  # unknown letters ignored
@@ -435,16 +438,18 @@ class TestJDb(unittest.TestCase):
             log_key = 'audit'
             jdb[log_key] = [1]
             self.assertEqual(jdb.keys.set_flags(log_key, append_only=True), {log_key: (int(JKeyFlag.APPEND_ONLY),0)})
-
             jdb[log_key] = [1, 2]                     # strict extension -> allowed
             self.assertEqual(jdb[log_key], [1, 2])
             jdb[log_key] = [1]                        # truncation -> refused
+            self.assertEqual(jdb[log_key], [1, 2])
             jdb[log_key] = [9, 2, 3]                  # rewrites history -> refused
+            self.assertEqual(jdb[log_key], [1, 2])
             jdb[log_key] = [1, 2]                     # equal is not growth -> refused
+            self.assertEqual(jdb[log_key], [1, 2])
             jdb[log_key] = 'not a list'               # type change -> refused
+            self.assertEqual(jdb[log_key], [1, 2])
             jdb[log_key] = [1, 2, 3, 4]               # extension -> allowed
             self.assertEqual(jdb[log_key], [1, 2, 3, 4])
-
             del jdb[log_key]                          # append-only forbids removal
             self.assertTrue(log_key in jdb)
             self.assertEqual(jdb.remove(log_key), {})
@@ -900,13 +905,157 @@ class TestJDb(unittest.TestCase):
                 self.assertTrue(jdb.f_write(fp, 'tr2', [1], key_flags='u'))
                 self.assertTrue(jdb.f_append(fp, 'tr3', [1], key_flags='+u+r'))
 
+            # f_append on an EXISTING key forwards to f_write, so key_flags has to
+            # survive that hop in every form it can arrive in -- None and str both
+            # used to reach an `int | key_flags` and raise TypeError
+            jdb['fa'] = [1]
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_append(fp, 'fa', [1, 2]))                    # None
+                self.assertTrue(jdb.f_append(fp, 'fa', [1, 2, 3], key_flags='+0')) # str
+                self.assertTrue(jdb.f_append(fp, 'fa', [1, 2, 3, 4], key_flags=JKeyFlag.USER1))
+
+            self.assertEqual(jdb['fa'], [1, 2, 3, 4])
+            self.assertEqual(jdb.get_key_flags('fa'), {'fa': (int(JKeyFlag.USER1),0)})
+            jdb.set_key_flags('fa', '-0-1')
+            jdb.remove('fa')
+
             self.assertEqual(jdb.get_key_flags('tr2'), {'tr2': (0,0)})
             self.assertEqual(jdb.get_key_flags('tr3'), {'tr3': (int(JKeyFlag.READ_ONLY),0)})
             self.assertEqual(jdb.set_key_flags('tr', 'u'), {})     # nothing to store
             self.assertEqual(jdb.get_key_flags('tr'), {'tr': (0,0)})
-            self.assertEqual(jdb.find(key_flags='+u'), jdb.find())  # not a query predicate
+            for bad in ('+u', '+n', '+w', '+y', JKeyFlag.EXCL):
+                with self.assertRaises(ValueError):
+                    jdb.find(key_flags=bad)
+
             jdb.set_key_flags('tr3', '-r')
             jdb.remove('tr', 'tr2', 'tr3')
+
+            # ---------------- EXCL: create-or-nothing ----------------
+            jdb['ex'] = [1]
+            self.assertIsNone(jdb.set('ex', [2], key_flags='w'))   # refused silently
+            self.assertEqual(jdb['ex'], [1])
+            self.assertIsNone(jdb.set('ex', [1], key_flags='w'))   # even when the value matches
+            self.assertEqual(jdb.set('ex2', [2], key_flags='w'), [2])
+            self.assertEqual(jdb['ex2'], [2])
+
+            # the refusal happens before any flag is applied
+            self.assertIsNone(jdb.set('ex', [3], key_flags='+w+r'))
+            self.assertEqual(jdb.get_key_flags('ex'), {'ex': (0,0)})
+
+            # EXCL is transient: it is consumed, never stored
+            self.assertEqual(int(JKeyFlag.EXCL) & 0xFFFF, 0)
+            self.assertEqual(jdb.set('ex3', [1], key_flags='+w+c'), [1])
+            self.assertEqual(jdb.get_key_flags('ex3'), {'ex3': (int(JKeyFlag.NO_CACHE),0)})
+
+            with jdb.open() as fp:
+                self.assertFalse(jdb.f_write(fp, 'ex', [9], key_flags='w'))
+                self.assertTrue(jdb.f_write(fp, 'ex4', [9], key_flags=JKeyFlag.EXCL))
+
+            self.assertEqual(jdb['ex'], [1])
+            self.assertEqual(jdb.get_key_flags('ex4'), {'ex4': (0,0)})
+
+            # EXCL outranks UNLOCK: sudo waives locks, it does not create twice
+            jdb.set_key_flags('ex', '+r')
+            self.assertIsNone(jdb.set('ex', [5], key_flags='+w+u'))
+            self.assertEqual(jdb['ex'], [1])
+            jdb.set_key_flags('ex', '-r')
+
+            # setdefault is EXCL, and now reports who won
+            self.assertTrue(jdb.setdefault('sd', [1]))
+            self.assertFalse(jdb.setdefault('sd', [2]))
+            self.assertEqual(jdb['sd'], [1])
+            self.assertTrue(jdb.setdefault('sd2', [1], key_flags='+h'))
+            self.assertEqual(jdb.get_key_flags('sd2'), {'sd2': (int(JKeyFlag.HIDDEN),0)})
+            jdb.set_key_flags('sd2', '-h')
+            jdb.remove('ex', 'ex2', 'ex3', 'ex4', 'sd', 'sd2')
+
+            # ---------------- NO_ATIME: write without touching the day ----------------
+            self.assertEqual(int(JKeyFlag.NO_ATIME) & 0xFFFF, 0)
+            old_day = '2026-01-01'
+            old_days = jdb.io.z_conv_str_to_days(old_day)
+            mdays_of = lambda k: jdb.keys[k][7]                    # read_key: 6=cdays, 7=mdays
+            with jdb.open() as fp:
+                # mdays is stored as a delta from cdays, so back-dating needs both
+                self.assertTrue(jdb.f_write(fp, 'na', [1], cdays=old_day, mdays=old_day))
+
+            self.assertEqual(mdays_of('na'), old_days)
+            self.assertEqual(jdb.set('na', [1, 2], key_flags='y'), [1, 2])
+            self.assertEqual(jdb['na'], [1, 2])
+            self.assertEqual(mdays_of('na'), old_days)            # the day did not move
+
+            # without it, the same write stamps today
+            self.assertEqual(jdb.set('na', [1, 2, 3]), [1, 2, 3])
+            self.assertEqual(mdays_of('na'), jdb.io.days)
+
+            # an explicit mdays= still wins, and NO_ATIME stores nothing
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'na', [4], mdays='2026-03-04', key_flags='+y+c'))
+
+            self.assertEqual(mdays_of('na'), jdb.io.z_conv_str_to_days('2026-03-04'))
+            self.assertEqual(jdb.get_key_flags('na'), {'na': (int(JKeyFlag.NO_CACHE),0)})
+
+            # on a new record there is no day to keep, so it is a no-op
+            self.assertEqual(jdb.set('na2', [1], key_flags='y'), [1])
+            self.assertEqual(mdays_of('na2'), jdb.io.days)
+
+            # a TTL counts from mdays, so NO_ATIME deliberately does NOT renew it
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'na3', [1], cdays=old_day, mdays=old_day, ttl=5))
+
+            self.assertEqual(jdb.get_key_flags('na3'), {'na3': (int(JKeyFlag.EXPIRE), 5)})
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'na3', [1, 2], key_flags='y'))
+
+            self.assertEqual(mdays_of('na3'), old_days)
+            self.assertEqual(jdb.get_key_flags('na3'), {'na3': (int(JKeyFlag.EXPIRE), 5)})
+            jdb.remove('na', 'na2', 'na3')
+
+            # ---------------- NO_FOLLOW: the link itself, not its target ----------------
+            self.assertEqual(int(JKeyFlag.NO_FOLLOW) & 0xFFFF, 0)
+            jdb['nf_dst'] = {'rows': 12}
+            self.assertTrue(jdb.set_link('nf', 'nf_dst'))
+            self.assertEqual(jdb.get('nf'), {'rows': 12})           # reads follow
+            self.assertEqual(jdb.get('nf', key_flags='n'), 'nf_dst')
+
+            # a NO_FOLLOW read must never leave the target path in the cache
+            self.assertEqual(jdb.get('nf'), {'rows': 12})
+            self.assertEqual(jdb.get('nf', key_flags='n'), 'nf_dst')
+            self.assertEqual(jdb['nf'], {'rows': 12})
+
+            # unlike get_link, a record that is NOT a link still reads normally
+            self.assertEqual(jdb.get_link('nf_dst', '-'), '-')
+            self.assertEqual(jdb.get('nf_dst', key_flags='n'), {'rows': 12})
+            self.assertEqual(jdb.get('nosuch', -1, key_flags='n'), -1)
+
+            # a dangling link reports its target either way
+            del jdb['nf_dst']
+            self.assertIsNone(jdb.get('nf'))
+            self.assertEqual(jdb.get('nf', key_flags='n'), 'nf_dst')
+            jdb['nf_dst'] = {'rows': 12}
+
+            # on write it retargets the link in place, like set_link
+            jdb['nf_alt'] = {'rows': 99}
+            self.assertEqual(jdb.set('nf', 'nf_alt', key_flags='n'), 'nf_alt')
+            self.assertEqual(jdb.get('nf', key_flags='n'), 'nf_alt')
+            self.assertEqual(jdb['nf'], {'rows': 99})
+            self.assertEqual(jdb['nf_dst'], {'rows': 12})           # old target untouched
+            self.assertEqual(jdb.get_key_flags('nf'), {'nf': (int(JKeyFlag.LINK),0)})
+
+            # ... and a plain write still goes THROUGH the link
+            jdb['nf'] = {'rows': 100}
+            self.assertEqual(jdb['nf_alt'], {'rows': 100})
+            self.assertEqual(jdb.get('nf', key_flags='n'), 'nf_alt')
+
+            # a retarget needs a path, not a value (open() re-raises as plain TypeError)
+            with self.assertRaises(TypeError):
+                jdb.set('nf', {'not': 'a path'}, key_flags='n')
+
+            # writing through a link now carries key_flags to the target
+            self.assertEqual(jdb.set('nf', {'rows': 101}, key_flags='+h'), {'rows': 101})
+            self.assertEqual(jdb.get_key_flags('nf_alt'), {'nf_alt': (int(JKeyFlag.HIDDEN),0)})
+            self.assertEqual(jdb.get_key_flags('nf'), {'nf': (int(JKeyFlag.LINK),0)})
+            jdb.set_key_flags('nf_alt', '-h')
+            jdb.remove('nf', 'nf_dst', 'nf_alt')
 
             # ---------------- key_flags= query filter ----------------
             jdb.set_key_flags(None, '-r-a')          # unlock leftovers

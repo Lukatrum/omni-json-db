@@ -18,7 +18,9 @@ from .jdb_query import QUERY_OPS, Condition, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeError, \
                 JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, EXPIRED, \
-                KEY_FLAG_MASK, conv_to_key_flags
+                KEY_FLAG_MASK, TRANSIENT_FLAG_MASK, conv_to_key_flags, pop_transient_flags, \
+                KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, KF_EXPIRE, KF_UNLOCK, \
+                KF_NO_FOLLOW, F_REVERT, F_FSYNC
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -808,8 +810,8 @@ class JDbKey:
             io_days = io.days
             skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
                 (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
-                (lambda _mdays, _ttl, _kflags: _kflags & JKeyFlag.HIDDEN) if with_expired else \
-                (lambda _mdays, _ttl, _kflags: _kflags & JKeyFlag.HIDDEN or _ttl > 0 and io_days > (_mdays+_ttl))
+                (lambda _mdays, _ttl, _kflags: _kflags & KF_HIDDEN) if with_expired else \
+                (lambda _mdays, _ttl, _kflags: _kflags & KF_HIDDEN or _ttl > 0 and io_days > (_mdays+_ttl))
             if isinstance(key, str):
                 idx = key.find(SEP_SYM)
                 if idx < 0:
@@ -828,14 +830,14 @@ class JDbKey:
                 if not grp_name:
                     for grp_name in io.group_iter(key_fp):
                         _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
-                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                        if kflags >= 0 and (with_hidden or not kflags & KF_HIDDEN):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
                                 for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden, with_expired=with_expired):
                                     yield grp_name+SEP_SYM+_key, _info
                 else:
                     _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
-                    if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                    if kflags >= 0 and (with_hidden or not kflags & KF_HIDDEN):
                         group_jdb = f_get_group(fp, grp_name)
                         if isinstance(group_jdb, JDbReader):
                             for _key,_info in group_jdb.keys.item_iter(jdb_key, with_hidden=with_hidden, with_expired=with_expired):
@@ -1184,7 +1186,7 @@ class JDbReader(JDbBase):
         self._cache_limit = cache_limit
         self.keys:JDbKey = JDbKey(self) if JDbKey_obj is None else JDbKey_obj
         self.write_hook:Callable[[str,Any],bool] = write_hook
-        self.flags:JFlag = JFlag.REVERT if flags is None else JFlag(flags)
+        self.flags:JFlag = F_REVERT if flags is None else JFlag(flags)
         self.max_wsize:int = 4 if max_wsize is None else max_wsize
         self.io:JIo = JIo(
                 files_obj=files_obj,
@@ -1937,9 +1939,9 @@ class JDbReader(JDbBase):
                 row_id = key_table.get(key, -1, fp=key_fp)
                 if row_id >= 0:
                     try:
-                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=JKeyFlag.UNLOCK)
+                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=KF_UNLOCK)
                         if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
-                            jdb.remove_fast(jdb, key_flags=JKeyFlag.UNLOCK)
+                            jdb.remove_fast(jdb, key_flags=KF_UNLOCK)
 
                     except (OSError, KeyError): # pragma: no cover
                         continue
@@ -2010,7 +2012,7 @@ class JDbReader(JDbBase):
                     is_dirty = file_lock.mode == 'w'
                     for fp in fp_dict.values():
                         if fp is not None:
-                            if is_dirty and JFlag.FSYNC & flags: # pragma: no cover
+                            if is_dirty and F_FSYNC & flags: # pragma: no cover
                                 files_obj.fsync(fp.fileno())
                             fp.close()
 
@@ -2203,7 +2205,7 @@ class JDbReader(JDbBase):
                         is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
                         for fp in fp_dict.values():
                             if fp is not None:
-                                if is_dirty and JFlag.FSYNC & flags:
+                                if is_dirty and F_FSYNC & flags:
                                     files_obj.fsync(fp.fileno())
                                 fp.close()
 
@@ -2893,7 +2895,7 @@ class JDbReader(JDbBase):
                 if row_id < 0:
                     return False
 
-                if kflags & JKeyFlag.EXPIRE and n_records > row_id >= 0:
+                if kflags & KF_EXPIRE and n_records > row_id >= 0:
                     _k, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kf = io.read_key(key_fp, row_id)
                     if ttl > 0 and io_days > (mdays+ttl):
                         return False
@@ -3355,7 +3357,7 @@ class JDbReader(JDbBase):
                 if not grp_name:
                     for grp_name in io.group_iter(key_fp):
                         _rid, kflags = key_table.get_both(grp_name, key_fp)
-                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                        if kflags >= 0 and (with_hidden or not kflags & KF_HIDDEN):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
                                 for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
@@ -3364,7 +3366,7 @@ class JDbReader(JDbBase):
                     group_jdb = f_get_group(fp, grp_name)
                     if isinstance(group_jdb, JDbReader):
                         _rid, kflags = key_table.get_both(grp_name, key_fp)
-                        if kflags >= 0 and (with_hidden or not kflags & JKeyFlag.HIDDEN):
+                        if kflags >= 0 and (with_hidden or not kflags & KF_HIDDEN):
                             for _key,_val in group_jdb.item_iter(jdb_key, with_hidden=with_hidden):
                                 yield grp_name+SEP_SYM+_key, _val
 
@@ -3387,7 +3389,7 @@ class JDbReader(JDbBase):
                 if not (sync_id >= io.sync_id or sync_id < 0):
                     row_id = 0
                     for (_key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, _kflags) in io.KEY_iter(key_fp, row_id, io.n_records):
-                        if _ver == sync_id and (with_hidden or not _kflags & JKeyFlag.HIDDEN):
+                        if _ver == sync_id and (with_hidden or not _kflags & KF_HIDDEN):
                             val = self.f_read(fp, _key, EXPIRED, row=row_id, copy=False)
                             if val is not EXPIRED:
                                 yield _key, val
@@ -3412,7 +3414,7 @@ class JDbReader(JDbBase):
                 f_read = self.f_read
                 n_records = io.n_records
                 is_visible = (lambda key,row: True) if with_hidden else \
-                        (lambda key,row: not (n_records > row >= 0 and key_table.get_both(key, fp=key_fp)[1] & JKeyFlag.HIDDEN))
+                        (lambda key,row: not (n_records > row >= 0 and key_table.get_both(key, fp=key_fp)[1] & KF_HIDDEN))
                 if k_arg_cnt == 2:
                     for _key,row_id in key_table.items():
                         if is_visible(_key, row_id):
@@ -3577,17 +3579,14 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name.$has': 'ice'})      # $has as query operator
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
         """
-        # Resolve the flag predicate once, before any branch needs it. Each flag is
-        # in one of three states: required (need_flags), forbidden (deny_flags) or
-        # unconstrained. with_hidden is simply the default state for HIDDEN, so
-        # naming 'h' in key_flags -- as '+h' or '-h'.
-        need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else \
-                    ((int(key_flags) & KEY_FLAG_MASK), 0) if key_flags is not None else (0, 0)
+        need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else (int(key_flags), 0) if key_flags is not None else (0, 0)
+        if (need_flags | deny_flags) & TRANSIENT_FLAG_MASK:
+            raise JValueError('transient key_flags are call-scoped and cannot be queried')
 
         need_flags &= KEY_FLAG_MASK
         deny_flags &= KEY_FLAG_MASK
-        if not with_hidden and not (need_flags | deny_flags) & JKeyFlag.HIDDEN:
-            deny_flags |= int(JKeyFlag.HIDDEN)
+        if not with_hidden and not (need_flags | deny_flags) & KF_HIDDEN:
+            deny_flags |= KF_HIDDEN
 
         has_flag_rule = bool(need_flags or deny_flags)
         st_time = perf_counter()
@@ -3649,7 +3648,7 @@ class JDbReader(JDbBase):
                     f_get_group = self.f_get_group
                     for grp_name in io.group_iter(key_fp):
                         _rid, kflags = key_table.get_both(grp_name, fp=key_fp)
-                        if not (kflags & deny_flags & JKeyFlag.HIDDEN) and not (key_rule and not key_rule.search(grp_name)):
+                        if not (kflags & deny_flags & KF_HIDDEN) and not (key_rule and not key_rule.search(grp_name)):
                             group_jdb = f_get_group(fp, grp_name)
                             if isinstance(group_jdb, JDbReader):
                                 for _key,_val in group_jdb.find_iter(next_keys, vals=vals, date=date, limit=limit, skip=skip, with_value=with_value, with_date=with_date, stats=stats, reverse=reverse, with_hidden=with_hidden, key_flags=key_flags):
@@ -3743,7 +3742,7 @@ class JDbReader(JDbBase):
                         continue
 
                 mod_id = cdate = mdate = None
-                expire_flag = kflags & JKeyFlag.EXPIRE
+                expire_flag = kflags & KF_EXPIRE
                 if expire_flag or date:
                     _k, _f, _o, _rs, _vs, mod_id, cdays, mdays, ttl, kflags = io_read_key(key_fp, row_id)
                     if ttl > 0 and expire_flag and io_days > (mdays + ttl):
@@ -4393,7 +4392,7 @@ class JDbReader(JDbBase):
                 return default_val
 
             _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
-            if _key != key or not kflags & JKeyFlag.LINK:
+            if _key != key or not kflags & KF_LINK:
                 return default_val
 
             return self._f_decode_value(fp, key, file_id, offset, row_size, val_size)
@@ -4438,16 +4437,32 @@ class JDbReader(JDbBase):
 
         return matched_keys
 
-    def get(self, key:str, default_val:Any=None, copy:bool=True) -> Any:
+    def get(self, key:str, default_val:Any=None, copy:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Safely fetch a value for a specific key, returning a default if not found.
 
         Args:
             key (str): The target key.
             default_val (Any, optional): Value to return upon missing key. Defaults to ``None``.
             copy (bool, optional): Retrieve a deep copy to prevent mutation. Defaults to ``True``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.NO_FOLLOW` (``'n'``) is meaningful for a read: a
+                :attr:`JKeyFlag.LINK` record then reads as the target path it
+                stores instead of being followed. Unlike :meth:`get_link`, a
+                record that is *not* a link still reads normally, which is the
+                difference between ``O_NO_FOLLOW`` and ``readlink``. Defaults to None.
 
         Returns:
             Any: The stored value or the default value.
+
+        Example:
+            >>> jdb.set_link('latest', 'report/2026-08')
+            True
+            >>> jdb.get('latest')
+            {'rows': 120}
+            >>> jdb.get('latest', key_flags='n')
+            'report/2026-08'
+            >>> jdb.get('report/2026-08', key_flags='n')
+            {'rows': 120}
         """
         with self.open(read_only=True) as fp:
             io = self.io
@@ -4459,7 +4474,7 @@ class JDbReader(JDbBase):
 
             try:
                 # f_read also answers "missing" for a record whose TTL has run out
-                return self.f_read(fp, key, default_val, copy=copy, row=row)
+                return self.f_read(fp, key, default_val, copy=copy, row=row, key_flags=key_flags)
 
             except KeyError: # pragma: no cover
                 return default_val
@@ -4701,7 +4716,7 @@ class JDbReader(JDbBase):
         row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
             _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
-            if _key == key and kflags & JKeyFlag.GROUP:
+            if _key == key and kflags & KF_GROUP:
                 group = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
                 if isinstance(group, JDbReader):
                     return group
@@ -4747,11 +4762,11 @@ class JDbReader(JDbBase):
             raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
 
         _key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, kflags = row_info = io.read_key(key_fp, row)
-        if kflags & JKeyFlag.LINK:
+        if kflags & KF_LINK:
             # links never nest
             raise JTypeError(f'link[{key}] points at another link[{name}]')
 
-        if kflags & JKeyFlag.GROUP:
+        if kflags & KF_GROUP:
             group_jdb = self.f_get_group(fp_dict, name)
             if not isinstance(group_jdb, JDbReader): # pragma: no cover
                 raise JTypeError(f'link[{key}] target[{name}] is an invalid group')
@@ -4851,7 +4866,7 @@ class JDbReader(JDbBase):
         return self.io.read_value(val_fp, offset, row_size, val_size)
 
     def f_decode_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int, key_flags:int, update_cache:bool=True, copy:bool=False, follow_link:bool=True) -> Any:
-        if (key_flags & JKeyFlag.LINK) and follow_link:
+        if (key_flags & KF_LINK) and follow_link:
             if row_size == 0:
                 target = self._decode_row(file_id, offset, key, val_size)
             else:
@@ -4860,7 +4875,12 @@ class JDbReader(JDbBase):
 
             return self.f_link_read(fp_dict, key, target, copy=copy)
 
-        if key_flags & JKeyFlag.NO_CACHE:
+        # NO_FOLLOW yields the target path, which must never be cached under the link's key
+        if (key_flags & KF_LINK) and not follow_link:
+            self._cache.pop(key, None)
+            key_flags |= KF_NO_CACHE
+
+        if key_flags & KF_NO_CACHE:
             self._cache.pop(key, None)
             with_cache = update_cache = False
         else:
@@ -4870,7 +4890,7 @@ class JDbReader(JDbBase):
         if val is MISSING:
             io = self.io
             try:
-                if key_flags & JKeyFlag.GROUP:
+                if key_flags & KF_GROUP:
                     groups = io.groups
                     group_jdb = groups.get(key, None)
                     if not isinstance(group_jdb, JDbReader):
@@ -5002,7 +5022,7 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, _kflags = io.read_key(key_fp, row)
-        if _kflags & JKeyFlag.GROUP: # pragma: no cover
+        if _kflags & KF_GROUP: # pragma: no cover
             io.groups.setdefault(_key, None)
 
         if row_size == 0:
@@ -5038,11 +5058,11 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
-        if kflags & JKeyFlag.GROUP:
+        if kflags & KF_GROUP:
             group = self.f_get_group(fp_dict, _key)
             return group, None
 
-        if kflags & JKeyFlag.LINK:
+        if kflags & KF_LINK:
             target = self._f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size)
             return self.f_link_read_with_bytes(fp_dict, _key, target)
 
@@ -5063,7 +5083,7 @@ class JDbReader(JDbBase):
         val = io.VAL_loads(val_bytes)
         return val, val_bytes
 
-    def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True) -> Any:
+    def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Low-level read of a single record, preferring the in-memory cache
         over disk (must be called inside :meth:`open`).
 
@@ -5077,6 +5097,12 @@ class JDbReader(JDbBase):
                 key-table lookup. Defaults to ``None``.
             copy (bool, optional): Return a deep copy when the value comes
                 from (or enters) the cache. Defaults to ``True``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.NO_FOLLOW` (``'n'``) is meaningful here: a
+                :attr:`JKeyFlag.LINK` record then reads as its own target path
+                instead of being followed, and neither the path nor the target
+                enters the cache. Every other bit is ignored, since a read
+                stores nothing. Defaults to None.
 
         Returns:
             Any: The deserialized value, or ``default_val``.
@@ -5089,19 +5115,19 @@ class JDbReader(JDbBase):
             writable. On a :class:`JDbReader` the queue is simply discarded.
         """
         key = str(key) if not isinstance(key, str) else key
+        transient, key_flags = pop_transient_flags(key_flags)
+        no_follow = transient & KF_NO_FOLLOW
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
         _cache = self._cache
         _row, kflags = key_table.get_both(key, fp=key_fp) if (_cache or row is None) else (-1, 0)
 
-        # EXPIRE rides in the key table, so a record without a TTL never pays
-        # for a row read here; one that has a TTL skips the cache and lets the
-        # read_key below decide, rather than reading the row twice
-        may_expire = bool(kflags & JKeyFlag.EXPIRE)
+        # EXPIRE rides in the key table
+        may_expire = bool(kflags & KF_EXPIRE)
 
         # Priority: cache > file
-        if _cache and not may_expire:
+        if _cache and not may_expire and not no_follow:
             if row is None or _row == row:
                 val = _cache.get(key, MISSING)
                 if val is not MISSING:
@@ -5135,7 +5161,9 @@ class JDbReader(JDbBase):
 
             raise JKeyError(key)
 
-        return self.f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=copy)
+        # on a record that is not a link NO_FOLLOW is a no-op, cache included
+        can_follow = not (no_follow and kflags & KF_LINK)
+        return self.f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size, kflags, update_cache=can_follow, copy=copy, follow_link=can_follow)
 
     def f_load_keys(self, fp_dict:Dict[int,IO], force:bool=False):
         """Load the key table from the KEY file into memory, opening the file
@@ -5383,7 +5411,7 @@ class JDbReader(JDbBase):
         n_records = io.n_records
         io_read_key = io.read_key
         io_days = io.days
-        HIDDEN_FLAG = int(JKeyFlag.HIDDEN)
+        HIDDEN_FLAG = KF_HIDDEN
         skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
                 (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
                 (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG) if with_expired else \
@@ -5458,7 +5486,7 @@ class JDbReader(JDbBase):
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             io_days = io.days
             f_decode_value = self.f_decode_value
-            HIDDEN_FLAG = int(JKeyFlag.HIDDEN)
+            HIDDEN_FLAG = KF_HIDDEN
             skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
                 (lambda _mdays, _ttl, _kflags: _ttl > 0 and io_days > (_mdays+_ttl)) if with_hidden else \
                 (lambda _mdays, _ttl, _kflags: _kflags & HIDDEN_FLAG) if with_expired else \
@@ -5485,7 +5513,7 @@ class JDbReader(JDbBase):
                 record that is already cached takes effect immediately.
                 Defaults to ``0``.
         """
-        if key_flags & JKeyFlag.NO_CACHE:
+        if key_flags & KF_NO_CACHE:
             self._cache.pop(key, None)
             return
 

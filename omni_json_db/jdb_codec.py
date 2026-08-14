@@ -609,7 +609,7 @@ def _msg_decode(code:int, data:bytes):
 
     raise TypeError(f'code={code} data={data}')
 
-from .utils import JValueError, JKeyFlag, KEY_FLAG_MASK
+from .utils import JValueError, KEY_FLAG_MASK, KF_GROUP, KF_EXPIRE
 
 FULL_DAY_MASK = 0xFFFF_FFFF_FFFF
 KEY_FLAG_SHIFT = 48
@@ -628,11 +628,8 @@ MAX_TTL_DAYS    = TTL_DAY_MASK                      # 511 days
 TTL_MASK        = TTL_DAY_MASK << TTL_SHIFT         # bits 39..47
 EXP_DELTA_MASK  = MAX_EXP_DELTA << NEW_DAY_SHIFT    # bits 26..38
 
-EXPIRE_FLAG     = int(JKeyFlag.EXPIRE)
-GROUP_FLAG      = int(JKeyFlag.GROUP)
-
 if (NEW_DAY_MASK | OLD_DAY_MASK | TTL_MASK) & ~FULL_DAY_MASK: # pragma: no cover
-    raise RuntimeError('collide with JKeyFlag')
+    raise RuntimeError('collide with Key flag')
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -937,9 +934,9 @@ class JIoKEY_J(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -972,9 +969,9 @@ class JIoKEY_J(JIoKEY):
         """Parse a v1 JSON KEY row."""
         try:
             key, file_id, offset, row_size, val_size, ver, days = _json_loads(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1008,7 +1005,7 @@ class JIoKEY_J(JIoKEY):
         try:
             key, file_id, offset, row_size, val_size, ver, days, flags = _json_loads(data)[:8]
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1051,9 +1048,9 @@ class JIoKEY_S(JIoKEY):
                 key, file_id, offset, row_size, ver, days = _msg_loads(data[3:end_idx])
                 val_size = row_size >> 32
                 row_size &= 0X_FFFF_FFFF
-                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
                 cdays = days & OLD_DAY_MASK
-                if flags & EXPIRE_FLAG:
+                if flags & KF_EXPIRE:
                     mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                     ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
@@ -1094,9 +1091,9 @@ class JIoKEY_S(JIoKEY):
                 info_len = (prefix1 << 8)| prefix2
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, val_size, ver, days = _msg_loads(data[3:end_idx])[:7]
-                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+                flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
                 cdays = days & OLD_DAY_MASK
-                if flags & EXPIRE_FLAG:
+                if flags & KF_EXPIRE:
                     mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                     ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
@@ -1138,7 +1135,7 @@ class JIoKEY_S(JIoKEY):
                 end_idx = info_len + 3
                 key, file_id, offset, row_size, val_size, ver, days, flags = _msg_loads(data[3:end_idx])[:8]
                 cdays = days & OLD_DAY_MASK
-                if flags & EXPIRE_FLAG:
+                if flags & KF_EXPIRE:
                     mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                     ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
@@ -1180,9 +1177,9 @@ class JIoKEY_M(JIoKEY):
             key, file_id, offset, row_size, ver, days = args[:6]
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1219,9 +1216,9 @@ class JIoKEY_M(JIoKEY):
         try:
             # nosemgrep
             key, file_id, offset, row_size, val_size, ver, days = marshal_loads(data)[:7] # nosec B302
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1259,7 +1256,7 @@ class JIoKEY_M(JIoKEY):
             # nosemgrep
             key, file_id, offset, row_size, val_size, ver, days, flags = marshal_loads(data)[:8] # nosec B302
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1323,9 +1320,9 @@ class JIoKEY_L(JIoKEY):
 
             val_size = row_size >> 32
             row_size &= 0X_FFFF_FFFF
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1366,9 +1363,9 @@ class JIoKEY_L(JIoKEY):
             n_fields = len(fields)
             key = ','.join(fields[:-6]) if n_fields > 7 else fields[0]
             file_id, offset, row_size, val_size, ver, days = (int(field) for field in fields[-6:])
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1410,7 +1407,7 @@ class JIoKEY_L(JIoKEY):
             key = ','.join(fields[:-7]) if n_fields > 8 else fields[0]
             file_id, offset, row_size, val_size, ver, days, flags = (int(field) for field in fields[-7:])
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1558,7 +1555,7 @@ class JIoKEY_U(JIoKEY):
         try:
             key, file_id, offset, row_size, val_size, ver, days, flags = self._loads(data)[:8]
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1597,9 +1594,9 @@ class JIoKEY_U(JIoKEY):
             self._missing()
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
@@ -1637,9 +1634,9 @@ class JIoKEY_U(JIoKEY):
             self._missing()
         try:
             key, file_id, offset, row_size, val_size, ver, days = self._loads_v0(data)[:7]
-            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (GROUP_FLAG if row_size == 0 and file_id == 0x10 else 0)
+            flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
-            if flags & EXPIRE_FLAG:
+            if flags & KF_EXPIRE:
                 mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
                 ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:

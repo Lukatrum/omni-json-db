@@ -18,14 +18,13 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK
+from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP
 from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
-        NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, \
-        MAX_TTL_DAYS, EXPIRE_FLAG, GROUP_FLAG # EXP_DELTA_MASK, TTL_MASK, TTL_SHIFT
+        NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, MAX_TTL_DAYS
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -308,7 +307,7 @@ class KeyTable(KeyTableBase):
         self._set_found_flag(row_id, True)
 
         jio = self.io
-        if flags & GROUP_FLAG and row_id < jio.n_records:
+        if flags & KF_GROUP and row_id < jio.n_records:
             jio.groups.setdefault(key, None)
 
         if self.with_cache:
@@ -659,7 +658,7 @@ class KeyTable(KeyTableBase):
                     set_found_flag(row_id, True)
                     self.size += 1
 
-                if kflags & GROUP_FLAG:
+                if kflags & KF_GROUP:
                     io_groups.setdefault(_key, None)
                 yield _key, _val
                 row_id += 1
@@ -753,7 +752,7 @@ class DictKeyTable(KeyTableBase):
         """Associate a key with its row id and flags. See :meth:`KeyTable.set`."""
         jio = self.io
         self.table[key] = (row_id << ROW_ID_SHIFT) | int(flags & KEY_FLAG_MASK)
-        if flags & GROUP_FLAG and row_id < jio.n_records:
+        if flags & KF_GROUP and row_id < jio.n_records:
             jio.groups.setdefault(key, None)
 
     def pop(self, key:str, default_row_id:int=-1, fp:IO=None) -> int:
@@ -1955,7 +1954,7 @@ class JIo(JIoBase):
                 yield from self.groups
             else:
                 for key,val in key_table._item_iter(fp):
-                    if val & GROUP_FLAG:
+                    if val & KF_GROUP:
                         yield key
         else:
             yield from self.groups
@@ -2035,9 +2034,9 @@ class JIo(JIoBase):
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
         if key and file_id == 0x10 and row_size == 0:
-            flags |= GROUP_FLAG # plain int: marshal/msgpack cannot encode an IntFlag
+            flags |= KF_GROUP # plain int: marshal/msgpack cannot encode an IntFlag
 
-        flags = (flags | EXPIRE_FLAG) if ttl > 0 else (flags & ~EXPIRE_FLAG)
+        flags = (flags | KF_EXPIRE) if ttl > 0 else (flags & ~KF_EXPIRE)
         data = self.KEY_dumps(key, file_id, offset, row_size, val_size, ver_i, cdays, mdays, ttl, flags)
         data_size = len(data)
         index_size = self.index_size

@@ -2280,7 +2280,7 @@ def _match_PATH(key_parts:List[str], key:str, val: Any, rules:Any, cdate:dt_date
                     child_vals = (_val for ii,_val in enumerate(val) if (ii//10)+1 == _cnt)
 
         return any(_match_PATH(rest_parts, key, child_val, rules, cdate, mdate, level) for child_val in child_vals) if child_vals else False
-    
+
     try:
         if child_key.startswith(('!$', '$')):
             _reverse_it = child_key.startswith('!')
