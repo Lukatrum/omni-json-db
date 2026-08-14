@@ -1384,12 +1384,13 @@ class JDbReader(JDbBase):
                     if jdb.io.n_records != self.io.n_records:
                         return False
 
+                    io, fp, key_fp = self.f_get_fp(fp)
                     f_read = self.f_read
                     jdb_read = jdb.f_read
-                    jdb_key_table = jdb.io.key_table
-                    jdb_key_fp = ref_fp[-1]
-                    for key,row in self.io.sorted_key_table_items():
-                        ref_row = jdb_key_table.get(key, -1, fp=jdb_key_fp)
+                    ref_io, ref_fp, ref_key_fp = jdb.f_get_fp(ref_fp)
+                    jdb_key_table = ref_io.key_table
+                    for key,row in io.sorted_key_table_items(fp=key_fp):
+                        ref_row = jdb_key_table.get(key, -1, fp=ref_key_fp)
                         if ref_row < 0 or f_read(fp, key, row=row, copy=False) != jdb_read(ref_fp, key, row=ref_row, copy=False):
                             return False
 
@@ -1406,21 +1407,23 @@ class JDbReader(JDbBase):
                     return False
 
                 f_read = self.f_read
-                for key,row in self.io.sorted_key_table_items():
+                io, fp, key_fp = self.f_get_fp(fp)
+                for key,row in io.sorted_key_table_items(fp=key_fp):
                     if key not in jdb or f_read(fp, key, row=row, copy=False) != jdb[key]:
                         return False
 
 
         elif isinstance(jdb, set):
-            with self.open(read_only=True):
+            with self.open(read_only=True) as fp:
                 io = self.io
                 if io.n_records != len(jdb):
                     return False
 
+                io, fp, key_fp = self.f_get_fp(fp)
                 key_table = io.key_table
                 for key in jdb:
                     key = str(key) if not isinstance(key, str) else key
-                    if key not in key_table:
+                    if key_table.get(key, -1, fp=key_fp) < 0:
                         return False
 
                 return True
@@ -2502,6 +2505,9 @@ class JDbReader(JDbBase):
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): Target
                 file path, memory buffer, files object, or source database —
                 same forms accepted by :meth:`__init__`.
+            ref (Optional[JDbReader], optional): Records to seed the new instance
+                with. **Ignored here**: a reader cannot write, so only
+                :meth:`JDb.create_jdb` acts on it. Defaults to None.
 
         Returns:
             JDbReader: The new instance.
@@ -3522,8 +3528,9 @@ class JDbReader(JDbBase):
             with_value (bool, optional): Whether to decode and return the actual value, or just None. Defaults to False.
             with_date (bool, optional): Whether to return the actual value + created date + modified date Defaults to False.
             stats (Dict[str,float], optional): statistic: loops, records, matched, key.filter, date.filter, value.filter, used_s
-            **kwargs: Extra filter configurations (e.g., regex flags).
-
+            reverse (bool, optional): Walk rows from the newest to the oldest.
+                This is row order, not a sort: use :meth:`find`'s ``sort`` for
+                ordering by key or value. Defaults to False.
             with_hidden (bool, optional): Include records carrying
                 :attr:`JKeyFlag.HIDDEN`. The raw iterator returns them; it is
                 :meth:`find` and :meth:`show`, which wrap this method, that hide
@@ -3535,6 +3542,7 @@ class JDbReader(JDbBase):
                 So ``'+0-r'`` means "tagged USER0 and not read-only". 
                 An ``int``/:class:`JKeyFlag` requires every bit it names. 
                 ``h`` is the only flag with a non-neutral default. Defaults to None.
+            **kwargs: Extra filter configurations (e.g., regex flags).
 
         Yields:
             (str, Any): Matching key and its associated value (or None if `with_value` is False).
@@ -3717,7 +3725,7 @@ class JDbReader(JDbBase):
             cache = self._cache
             key_table = io.key_table
             io_days = io.days
-            for key,row_id in io.sorted_key_table_items(reverse=reverse):
+            for key,row_id in io.sorted_key_table_items(reverse=reverse, fp=key_fp):
                 n_loops += 1
                 if count >= limit > 0:
                     break
@@ -4390,21 +4398,6 @@ class JDbReader(JDbBase):
 
             return self._f_decode_value(fp, key, file_id, offset, row_size, val_size)
 
-    def set_link(self, key:str, target:str) -> bool:
-        """Not available on a reader: creating a link mutates the KEY index.
-
-        Overridden by :meth:`JDb.set_link` on a writable database.
-
-        Args:
-            key (str): Unused.
-            target (str): Unused.
-
-        Raises:
-            JAttributeError: Always. It subclasses ``AttributeError``, so
-                ``except AttributeError`` still catches it.
-        """
-        raise JAttributeError('read only')
-
     def get_key_flags(self, key:Union[str,Any]=None) -> Dict[str,Tuple[int,int]]:
         """Read the :class:`JKeyFlag` bits stored on every record matching ``key``.
 
@@ -4553,17 +4546,18 @@ class JDbReader(JDbBase):
         """
         data = {}
         with self.open(read_only=True) as fp:
+            io, fp, key_fp = self.f_get_fp(fp)
             f_read = self.f_read
             if cache_only:
                 cache_limit = self._cache_limit
                 _cache = self._cache
-                for key,row in self.io.sorted_key_table_items():
+                for key,row in io.sorted_key_table_items(fp=key_fp):
                     if len(_cache) >= cache_limit >= 0:
                         break
 
                     f_read(fp, key, row=row, copy=False)
             else:
-                for key,row in self.io.sorted_key_table_items():
+                for key,row in io.sorted_key_table_items(fp=key_fp):
                     data[key] = f_read(fp, key, row=row, copy=False)
 
             return data
@@ -5397,7 +5391,7 @@ class JDbReader(JDbBase):
         new_slice, max_ver, min_ver, max_date, min_date, key_rules, chk_date = self.f_slice(fp_dict, slice_obj)
         start, stop, step = new_slice.start, new_slice.stop, new_slice.step
         if key_rules:
-            for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop):
+            for _key,row_id in io.sorted_key_table_items(start_row=start, stop_row=stop, fp=key_fp):
                 if not match_KEY_rules(_key, key_rules):
                     continue
 

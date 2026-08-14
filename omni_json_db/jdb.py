@@ -157,7 +157,7 @@ class JDbKey2(JDbKey):
 
                 elif k_arg_cnt == 1:
                     io_read_key = io.read_key
-                    for _key,row_id in io.sorted_key_table_items():
+                    for _key,row_id in io.sorted_key_table_items(fp=key_fp):
                         if has_SIGINT():
                             break
 
@@ -508,7 +508,8 @@ class JDb(JDbReader):
                 has_SIGINT = self.file_lock.has_SIGINT
                 f_write = self.f_write
                 f_read = self.f_read
-                for _key,row_id in io.sorted_key_table_items():
+                io, fp, key_fp = self.f_get_fp(fp)
+                for _key,row_id in io.sorted_key_table_items(fp=key_fp):
                     if has_SIGINT(): break
                     if k_arg_cnt == 2:
                         old_val = f_read(fp, _key, row=row_id, copy=False)
@@ -699,15 +700,16 @@ class JDb(JDbReader):
                     return
 
             elif k_arg_cnt > 0:
+                io, fp, key_fp = self.f_get_fp(fp)
                 if k_arg_cnt == 2:
                     f_read = self.f_read
-                    for _key,row_id in io.sorted_key_table_items():
+                    for _key,row_id in io.sorted_key_table_items(fp=key_fp):
                         val = f_read(fp, _key, row=row_id, copy=False)
                         if is_matched(_key, val):
                             del_keys.add(_key)
 
                 elif k_arg_cnt == 1:
-                    for _key,row_id in io.sorted_key_table_items():
+                    for _key,row_id in io.sorted_key_table_items(fp=key_fp):
                         if is_matched(_key):
                             del_keys.add(_key)
 
@@ -1112,6 +1114,8 @@ class JDb(JDbReader):
 
         Args:
             KEY_file (Union[str, bytearray, JFilesBase, JDbReader, None]): File path or core buffer source stream.
+            ref (Optional[JDbReader], optional): Records copied into the new
+                instance after it is built. Defaults to None.
 
         Returns:
             JDb: A new JDb instance.
@@ -2767,7 +2771,15 @@ class JDb(JDbReader):
 
                     >>> jdb.set_days('key', date(2000, 1, 1))
                     >>> jdb.set_days('key', datetime(2000, 1, 1))
-                
+
+            mdate (Union[str, dt_date, datetime], optional): The modified date,
+                in the same forms as ``cdate``. Must not fall before it.
+                Defaults to None, leaving the stored value alone.
+            ttl (Optional[int], optional): Days after ``mdate`` before the record
+                expires; ``0`` never expires. This drives :attr:`JKeyFlag.EXPIRE`,
+                which is re-derived from the stored ttl rather than set directly.
+                Defaults to 0.
+
         Returns:
             bool: True if the timestamp was updated, False otherwise.
         """
@@ -3415,7 +3427,8 @@ class JDb(JDbReader):
             else:
                 with jdb.open(read_only=True) as fp1:
                     jdb_read = jdb.f_read
-                    for key,row in jdb.io.sorted_key_table_items():
+                    src_io, fp1, key_fp = jdb.f_get_fp(fp1)
+                    for key,row in src_io.sorted_key_table_items(fp=key_fp):
                         if has_SIGINT():
                             break
 
@@ -3471,12 +3484,13 @@ class JDb(JDbReader):
                     if jio.n_records <= 0:
                         return chg_table
 
+                    jio, src_fp, key_fp_s = jdb.f_get_fp(src_fp)
                     src_read = jdb.f_read
                     dst_write = self.f_write
                     has_SIGINT = self.file_lock.has_SIGINT
                     if insert and replace:
                         # insert + replace = update
-                        for _key,row_id in jio.sorted_key_table_items():
+                        for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
                                 chg_table[_key] = _val
@@ -3484,7 +3498,7 @@ class JDb(JDbReader):
 
                     elif insert:
                         # insert only
-                        for _key,row_id in jio.sorted_key_table_items():
+                        for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             if _key in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
@@ -3493,7 +3507,7 @@ class JDb(JDbReader):
 
                     elif replace:
                         # replace only
-                        for _key,row_id in jio.sorted_key_table_items():
+                        for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             if _key not in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
@@ -4418,6 +4432,10 @@ class JDb(JDbReader):
                 :attr:`JKeyFlag.LINK` are masked out and re-taken from the stored
                 row, so a group or a link can never be turned into an unreadable
                 ordinary record by accident.
+            ttl (Optional[int], optional): Days after the row's modified date
+                before it expires; ``0`` never expires. :attr:`JKeyFlag.EXPIRE`
+                is re-derived from the stored ttl, so it cannot be set through
+                ``new_flags``. Defaults to None, keeping the row's current ttl.
 
         Returns:
             bool: ``True`` if the row was rewritten, ``False`` if there was nothing

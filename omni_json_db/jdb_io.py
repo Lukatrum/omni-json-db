@@ -266,9 +266,17 @@ class KeyTable(KeyTableBase):
     def set(self, key:str, row_id:int, flags:int=0):
         """Associate a key with its row id in the key table.
 
+        The table caches the row's :class:`JKeyFlag` bits alongside the row id,
+        so callers that rewrite a KEY row must re-publish here even when the row
+        id is unchanged -- otherwise the two copies drift and readers that trust
+        the table (the cache fast path, ``find(key_flags=...)``) see stale flags.
+
         Args:
             key (str): The record key.
             row_id (int): The key's row id in the KEY file.
+            flags (int, optional): The :class:`JKeyFlag` bits stored on that row,
+                already normalized the way :meth:`JIo.write_key` would store them.
+                Defaults to 0.
         """
         if self.size < 0: #pragma: no cover
             self.clear()
@@ -742,6 +750,7 @@ class DictKeyTable(KeyTableBase):
         return f'<{type(self).__name__} {type(self.table).__name__} #{self.io.n_records} at {hex(id(self))}>'
 
     def set(self, key:str, row_id:int, flags:int=0):
+        """Associate a key with its row id and flags. See :meth:`KeyTable.set`."""
         jio = self.io
         self.table[key] = (row_id << ROW_ID_SHIFT) | int(flags & KEY_FLAG_MASK)
         if flags & GROUP_FLAG and row_id < jio.n_records:
@@ -1053,7 +1062,13 @@ def unregister_user_key_codec():
     g_KEY_U.unregister()
 
 class JIo(JIoBase):
-    """Core processing engine linking pipeline translation modules and file handles."""
+    """The storage engine: KEY index rows, VAL file layout, and the active codecs.
+
+    One :class:`JIo` backs one database. It owns the header counters, the
+    :class:`KeyTable` mapping keys to row ids and flags, the open ``files_obj``,
+    and the ``KEY_dumps``/``VAL_dumps`` pairs selected by ``data_type`` and
+    ``zip_type``. :class:`JDb` drives it; callers rarely touch it directly.
+    """
 
     # reduce memory usage --> __dict__, but child class cannot have member
     __slots__ = ('days', 'sync_id', 'swap_id', 'remv_id', 'min_days',\
@@ -1786,7 +1801,7 @@ class JIo(JIoBase):
         except Exception as e:
             raise TypeError('invalid VAL_loads/VAL_dumps') from e
 
-    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False) -> Generator[Tuple[str,int], None, None]:
+    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Iterate ``(key, row_id)`` pairs in row order.
 
         Args:
@@ -1797,6 +1812,7 @@ class JIo(JIoBase):
                 the in-memory table, so the caller may modify the database
                 while iterating. Defaults to False.
             reverse (bool, optional): Iterate in descending row order. Defaults to False.
+            fp (IO, optional): The open KEY file pointer. None=use internal
 
         Yields:
             (str, int): Each record's key and its row id.
@@ -1804,25 +1820,27 @@ class JIo(JIoBase):
         stop_row = self.n_records if stop_row < 0 else min(self.n_records, stop_row)
         start_row = max(0, min(start_row, stop_row-1))
         if copy:
-            fp = None
+            key_fp = None if fp is None else fp
             try:
-                files_obj = self.files_obj.copy()
-                fp = files_obj.KEY_open('rb')
+                if key_fp is None:
+                    files_obj = self.files_obj.copy()
+                    key_fp = files_obj.KEY_open('rb')
+
                 row_id = (stop_row-1) if reverse else start_row
-                for (_key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf) in self.KEY_iter(fp, start_row, stop_row, reverse=reverse):
+                for (_key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf) in self.KEY_iter(key_fp, start_row, stop_row, reverse=reverse):
                     yield _key, row_id
                     row_id = (row_id - 1) if reverse else (row_id + 1)
 
             finally:
-                if fp is not None:
-                    fp.close()
+                if key_fp is not None and fp is None:
+                    key_fp.close()
 
             return
 
         lut = {}
         if reverse:
             row = stop_row-1
-            for key,_row in self.key_table.items():
+            for key,_row in self.key_table.items(fp=fp):
                 if _row == row:
                     yield key, row
                     row -= 1
@@ -1837,7 +1855,7 @@ class JIo(JIoBase):
 
         else:
             row = start_row
-            for key,_row in self.key_table.items():
+            for key,_row in self.key_table.items(fp=fp):
                 if _row == row:
                     yield key, row
                     row += 1
@@ -1851,17 +1869,22 @@ class JIo(JIoBase):
                 yield lut.pop(row, ''), row
 
     def zip(self, data:Union[bytes,bytearray], zip_type:Optional[int]=None) -> bytes:
-        """Compress raw binary block sequence elements utilizing active chosen format algorithms drivers factories.
+        """Compress value bytes with the database's configured algorithm.
+
+        The inverse of :meth:`unzip`. Returns *data* untouched when the database
+        was opened with ``zip_type='no'``.
 
         Args:
-            data (bytes): Target binary payload block array string input context.
-            zip_type (Optional[int], optional): Overriding specification targeting alternative compress parameters rules. Defaults to None.
+            data (Union[bytes, bytearray]): The raw bytes to compress.
+            zip_type (Optional[int], optional): Compress with this algorithm
+                instead of the database's own. Defaults to None.
 
         Returns:
-            bytes: Compressed block sequence output data.
+            bytes: The compressed bytes.
 
         Raises:
-            ValueError: If compressor engine throws system level error conditions.
+            JValueError: If the compressor fails. It subclasses ``ValueError``,
+                so ``except ValueError`` still catches it.
         """
         zip_type_i = self._zip_type if zip_type is None else zip_type
         if zip_type_i == NO_ZIP:
@@ -2149,14 +2172,21 @@ class JIo(JIoBase):
         self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
 
     def write_header(self, fp:IO, truncate:bool=False) -> int:
-        """Write the database header (counters and format) to the start of the KEY file. header schemas directly into metadata boundaries fields.
+        """Write the database header -- counters and format -- to the start of the KEY file.
+
+        The header is always rewritten; ``is_chg`` only decides whether the
+        engine's cached counters are refreshed alongside it.
 
         Args:
-            fp (IO): Destination active streaming interface pipeline driver handle context.
-            truncate (bool, optional): Force physical truncation pruning obsolete residual data rows block remnants away. Defaults to False.
+            fp (IO): The open KEY file pointer.
+            truncate (bool, optional): Also truncate the KEY file to its active
+                length, dropping trailing dead rows. Defaults to False.
 
         Returns:
-            int: Calculated total byte storage width capacity logged after header updates execution completes.
+            int: The KEY file's size in bytes after the write.
+
+        Raises:
+            JValueError: If the encoded header would overflow into row 0.
         """
         sync_id = self.sync_id
         n_records = self.n_records
@@ -2264,13 +2294,23 @@ class JIo(JIoBase):
         return self
 
     def pad(self, data:bytes, max_size:int=0, no_zip:bool=False) -> bytes:
-        """Prune out padding byte array trailing margins restoring raw compressed string context array.
+        """Grow a serialized value to its reserved row length by appending pad bytes.
+
+        The slack lets a later, slightly larger value reuse the same VAL row
+        instead of forcing a new allocation. The inverse is :meth:`unpad`.
 
         Args:
-            data (bytes): Aligned padded binary stream data blocks array.
+            data (bytes): The serialized value.
+            max_size (int, optional): Pad to exactly this length. ``0`` derives
+                the length from ``min_value_size`` and ``reserved_rate``.
+                Defaults to 0.
+            no_zip (bool, optional): Pad with the uncompressed-stream pad byte
+                rather than the codec's own, for values stored unzipped.
+                Defaults to False.
 
         Returns:
-            bytes: Clean trimmed binary data payload block.
+            bytes: ``data`` padded to the reserved length, or unchanged when it
+            is already at or over that length.
         """
         data_size = len(data)
         if max_size == 0:
@@ -2290,13 +2330,16 @@ class JIo(JIoBase):
         return data + pad_byte * n_pad
 
     def unpad(self, data:bytes) -> bytes: # pragma: no cover
-        """Prune out padding byte array trailing margins restoring raw compressed string context array.
+        """Strip the trailing pad bytes :meth:`pad` appended.
+
+        One pad byte is kept for codecs whose framing needs it, so this is not a
+        plain ``rstrip``.
 
         Args:
-            data (bytes): Aligned padded binary stream data blocks array.
+            data (bytes): The padded bytes read from a VAL row.
 
         Returns:
-            bytes: Clean trimmed binary data payload block.
+            bytes: The serialized value, ready to decode.
         """
         pad_byte = self.pad_byte
         if pad_byte == b'\n' or pad_byte == b'\xc1':
