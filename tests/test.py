@@ -354,6 +354,8 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(JKeyFlag('c'), JKeyFlag.NO_CACHE)
             self.assertEqual(JKeyFlag('v'), JKeyFlag.NO_REVERT)
             self.assertEqual(JKeyFlag('l'), JKeyFlag.LINK)
+            self.assertEqual(JKeyFlag('p'), JKeyFlag.NO_DELETE)
+            self.assertEqual(JKeyFlag('m'), JKeyFlag.MUST_EXIST)
             self.assertEqual(JKeyFlag('n'), JKeyFlag.NO_FOLLOW)
             self.assertEqual(JKeyFlag('w'), JKeyFlag.EXCL)
             self.assertEqual(JKeyFlag('y'), JKeyFlag.NO_ATIME)
@@ -929,6 +931,70 @@ class TestJDb(unittest.TestCase):
 
             jdb.set_key_flags('tr3', '-r')
             jdb.remove('tr', 'tr2', 'tr3')
+
+            # ---------------- MUST_EXIST: update-or-nothing ----------------
+            self.assertEqual(int(JKeyFlag.MUST_EXIST) & 0xFFFF, 0)
+            self.assertIsNone(jdb.set('me', [1], key_flags='m'))     # refused: no such key
+            self.assertNotIn('me', jdb)
+            jdb['me'] = [1]
+            self.assertEqual(jdb.set('me', [2], key_flags='m'), [2]) # allowed: it exists
+            self.assertEqual(jdb['me'], [2])
+
+            # transient, so it is consumed rather than stored
+            self.assertEqual(jdb.set('me', [3], key_flags='+m+c'), [3])
+            self.assertEqual(jdb.get_key_flags('me'), {'me': (int(JKeyFlag.NO_CACHE),0)})
+            jdb.set_key_flags('me', '-c')
+
+            with jdb.open() as fp:
+                self.assertFalse(jdb.f_write(fp, 'me_gone', [1], key_flags='m'))
+                self.assertTrue(jdb.f_write(fp, 'me', [4], key_flags=JKeyFlag.MUST_EXIST))
+
+            self.assertNotIn('me_gone', jdb)
+            self.assertEqual(jdb['me'], [4])
+
+            # EXCL and MUST_EXIST are mirrors: together they can never both pass
+            for key in ('me', 'me_absent'):
+                self.assertNotEqual(bool(jdb.set(key, [9], key_flags='w')), bool(jdb.set(key, [9], key_flags='m')))
+
+            jdb.remove('me', 'me_absent')
+
+            # ---------------- NO_DELETE: editable but not removable ----------------
+            jdb['nd'] = [1]
+            jdb.set_key_flags('nd', '+p')
+            self.assertEqual(jdb.get_key_flags('nd'), {'nd': (int(JKeyFlag.NO_DELETE),0)})
+
+            # the whole point: writes still go through
+            self.assertEqual(jdb.set('nd', [1, 2]), [1, 2])
+            self.assertEqual(jdb['nd'], [1, 2])
+
+            # ... while every delete path refuses
+            self.assertEqual(jdb.remove('nd'), {})
+            self.assertIn('nd', jdb)
+            jdb.remove_fast('nd')                                  # returns None by design
+            self.assertIn('nd', jdb)
+            del jdb['nd']
+            self.assertIn('nd', jdb)
+            jdb -= jdb
+            self.assertIn('nd', jdb)
+
+            # UNLOCK waives it for one call, exactly like the write locks
+            self.assertEqual(jdb.remove('nd', key_flags='u'), {'nd': [1, 2]})
+            self.assertNotIn('nd', jdb)
+
+            # the keyword form sets the same bit
+            jdb['nd2'] = [1]
+            self.assertEqual(jdb.set_key_flags('nd2', no_delete=True), {'nd2': (int(JKeyFlag.NO_DELETE),0)})
+            self.assertEqual(jdb.remove('nd2'), {})
+            self.assertEqual(jdb.set_key_flags('nd2', no_delete=False), {'nd2': (0,0)})
+            self.assertEqual(jdb.remove('nd2'), {'nd2': [1]})
+
+            # READ_ONLY still blocks both, so NO_DELETE is strictly the weaker lock
+            jdb['ro'] = [1]
+            jdb.set_key_flags('ro', '+r')
+            self.assertIsNone(jdb.set('ro', [2]))
+            self.assertEqual(jdb.remove('ro'), {})
+            jdb.set_key_flags('ro', '-r')
+            jdb.remove('ro')
 
             # ---------------- EXCL: create-or-nothing ----------------
             jdb['ex'] = [1]

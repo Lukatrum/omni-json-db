@@ -132,6 +132,16 @@ class JKeyFlag(IntFlag):
     #: to 13 bits.
     EXPIRE = 0x80
 
+    #: ``'p'`` -- protect the record from deletion while still allowing it to be
+    #: updated. :attr:`READ_ONLY` and :attr:`APPEND_ONLY` both block deletion as
+    #: well as writing, so this is the only way to express "freely editable, but
+    #: never removed" -- the retention guarantee a config or account row wants.
+    #:
+    #: Checked through :data:`DELETE_LOCK_MASK`, so it stops :meth:`JDb.remove`,
+    #: ``del jdb[key]`` and ``jdb -= jdb` alike, and :attr:`UNLOCK` waives it for
+    #: one call the same way it waives the write locks.
+    NO_DELETE = 0x100
+
     #: ``'0'`` -- free for the application. Carries no engine behaviour: it is
     #: stored, round-trips through delete/undelete and defragmentation, and can
     #: be filtered on, but nothing in JDb reads it. Use these instead of
@@ -196,6 +206,13 @@ class JKeyFlag(IntFlag):
     #: without extending it, and a footgun everywhere else.
     NO_ATIME = 0x80000
 
+    #: ``'m'`` -- **transient**. Refuse the write when the key does *not* already
+    #: exist, the exact mirror of :attr:`EXCL`. Together the pair expresses the
+    #: two halves of ``open(O_CREAT|O_EXCL)``: ``'w'`` is create-only, ``'m'`` is
+    #: update-only, and neither is a read-then-write, so both are race-free where
+    #: a test against :meth:`JDbReader.__contains__` is not.
+    MUST_EXIST = 0x100000
+
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
@@ -230,10 +247,6 @@ class JKeyFlag(IntFlag):
         """
         return ''.join(ch if flag in self else '_' for flag, ch in KEY_FLAG_LETTERS.items())
 
-# Plain-int aliases of every JKeyFlag member. A bitwise op against an IntFlag
-# member goes through enum.Flag.__and__ in pure Python, ~65x slower than the
-# same op against an int, so every hot path uses these instead. The enum stays
-# the public, printable API.
 KF_READ_ONLY   = int(JKeyFlag.READ_ONLY)
 KF_APPEND_ONLY = int(JKeyFlag.APPEND_ONLY)
 KF_GROUP       = int(JKeyFlag.GROUP)
@@ -242,6 +255,7 @@ KF_HIDDEN      = int(JKeyFlag.HIDDEN)
 KF_NO_CACHE    = int(JKeyFlag.NO_CACHE)
 KF_NO_REVERT   = int(JKeyFlag.NO_REVERT)
 KF_EXPIRE      = int(JKeyFlag.EXPIRE)
+KF_NO_DELETE   = int(JKeyFlag.NO_DELETE)
 KF_USER0       = int(JKeyFlag.USER0)
 KF_USER1       = int(JKeyFlag.USER1)
 KF_USER2       = int(JKeyFlag.USER2)
@@ -250,6 +264,7 @@ KF_UNLOCK      = int(JKeyFlag.UNLOCK)
 KF_NO_FOLLOW   = int(JKeyFlag.NO_FOLLOW)
 KF_EXCL        = int(JKeyFlag.EXCL)
 KF_NO_ATIME    = int(JKeyFlag.NO_ATIME)
+KF_MUST_EXIST  = int(JKeyFlag.MUST_EXIST)
 
 KEY_FLAG_LETTERS = {
     JKeyFlag.READ_ONLY:   'r',
@@ -260,6 +275,7 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.LINK:        'l',
     JKeyFlag.HIDDEN:      'h',
     JKeyFlag.EXPIRE:      'e',
+    JKeyFlag.NO_DELETE:   'p',
     JKeyFlag.USER0:       '0',
     JKeyFlag.USER1:       '1',
     JKeyFlag.USER2:       '2',
@@ -268,16 +284,18 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.NO_FOLLOW:   'n',
     JKeyFlag.EXCL:        'w',
     JKeyFlag.NO_ATIME:    'y',
+    JKeyFlag.MUST_EXIST:  'm',
 }
 
-# int-valued, so every parse below is int arithmetic rather than enum arithmetic
 KEY_FLAG_BY_LETTER  = {v: int(k) for k, v in KEY_FLAG_LETTERS.items()}
 
-TRANSIENT_FLAG_MASK = KF_UNLOCK | KF_NO_FOLLOW | KF_EXCL | KF_NO_ATIME
+TRANSIENT_FLAG_MASK = KF_UNLOCK | KF_NO_FOLLOW | KF_EXCL | KF_NO_ATIME | KF_MUST_EXIST
 
 TRANSIENT_FLAG_BY_LETTER = {ch: int(f) for f, ch in KEY_FLAG_LETTERS.items() if int(f) & TRANSIENT_FLAG_MASK}
 
 WRITE_LOCK_MASK     = KF_READ_ONLY | KF_APPEND_ONLY
+
+DELETE_LOCK_MASK    = WRITE_LOCK_MASK | KF_NO_DELETE
 
 DERIVED_FLAG_MASK   = KF_GROUP | KF_LINK | KF_EXPIRE
 

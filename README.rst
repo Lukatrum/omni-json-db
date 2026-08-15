@@ -1480,20 +1480,57 @@ file-system-like attributes. Set them with a ``chmod``-style string: a bare
 letter or ``+`` sets a flag, ``-`` clears it, and anything you don't name keeps
 its current value.
 
+Flags come in three kinds. **Stored** flags are properties of the record and
+persist on disk. **Derived** flags are maintained by the engine and cannot be
+set by name. **Transient** flags describe a single call rather than a record —
+they are never written to disk, and passing one leaves the record's stored
+flags untouched.
+
+**Stored — properties of the record**
+
 ======  ===============  =======================================================================================
 Letter  Flag             Effect
 ======  ===============  =======================================================================================
 ``r``   ``READ_ONLY``    Writes and deletes are refused.
 ``a``   ``APPEND_ONLY``  The value may only grow; shrinking, rewriting and deleting are refused.
+``p``   ``NO_DELETE``    Deletes are refused, but updates still go through — editable, never removed.
 ``h``   ``HIDDEN``       Skipped by ``find()`` / ``show()``; every other API still sees it.
 ``c``   ``NO_CACHE``     Never enters the LRU read cache — keeps big blobs from evicting hot records.
 ``v``   ``NO_REVERT``    No previous version is kept, so a hot counter never grows the index.
 ``0``   ``USER0``        Free for your application (``0``–``3``); carries no engine behaviour.
-``e``   ``EXPIRE``       *Derived* — the record has a TTL. Set it with ``ttl=``, never by name.
-``g``   ``GROUP``        *Derived* — the record holds a group. Never settable.
-``l``   ``LINK``         *Derived* — a symbolic link; set it with ``set_link()``.
-``u``   ``UNLOCK``       **Transient** — waives read-only/append-only locks for a single operation. Not stored.
 ======  ===============  =======================================================================================
+
+``READ_ONLY`` and ``APPEND_ONLY`` block deleting as well as writing, so
+``NO_DELETE`` is the only way to say *this record may change, but must never
+disappear* — the retention guarantee a config row or an account record wants.
+
+**Derived — maintained by the engine**
+
+======  ===============  =======================================================================================
+Letter  Flag             Effect
+======  ===============  =======================================================================================
+``e``   ``EXPIRE``       The record has a TTL. Set it with ``ttl=``, never by name.
+``g``   ``GROUP``        The record holds a group. Never settable.
+``l``   ``LINK``         A symbolic link; set it with ``set_link()``.
+======  ===============  =======================================================================================
+
+**Transient — properties of a single call**
+
+======  ===============  =======================================================================================
+Letter  Flag             Effect
+======  ===============  =======================================================================================
+``u``   ``UNLOCK``       Waives the read-only / append-only / no-delete locks for this one call, like ``sudo``.
+``w``   ``EXCL``         Refuse the write if the key already exists — create-only.
+``m``   ``MUST_EXIST``   Refuse the write if the key does *not* exist — update-only. The mirror of ``EXCL``.
+``n``   ``NO_FOLLOW``    Read a ``LINK`` as its own target path instead of following it; on write, retarget it.
+``y``   ``NO_ATIME``     Write without moving the modified date, so an existing TTL is not renewed.
+======  ===============  =======================================================================================
+
+Transient flags are passed to the operation itself, not to ``set_key_flags()``.
+They are consumed rather than stored, so ``jdb.set(k, v, key_flags='w+r')``
+refuses an existing key *and* stores ``READ_ONLY`` on a new one. Naming a
+transient flag in a ``find()`` predicate raises ``JValueError`` rather than
+silently matching every record.
 
 .. code-block:: python
 
@@ -1518,7 +1555,7 @@ Letter  Flag             Effect
    # inspect, then unlock again ('-r' clears only READ_ONLY).
    # every flag API returns {key: (flags, ttl)}
    flags, ttl = jdb.get_key_flags('audit/2026-08')['audit/2026-08']
-   print(str(JKeyFlag(flags)), ttl)        # Output: __a_v________ 0
+   print(str(JKeyFlag(flags)), ttl)        # Output: __a_v_____________ 0
    jdb.set_key_flags('config', '-r')
    jdb['config'] = {'theme': 'light'}
    print(jdb['config'])                    # Output: {'theme': 'light'}
@@ -1534,6 +1571,31 @@ Letter  Flag             Effect
    jdb.set_key_flags('config', '+0')       # USER0
    jdb.keys.set_flags('config', '+c-0')    # add NO_CACHE, drop USER0
 
+   # no-delete: the record stays editable, but nothing can remove it
+   jdb['account/42'] = {'plan': 'pro'}
+   jdb.set_key_flags('account/42', '+p')
+   jdb['account/42'] = {'plan': 'team'}    # update -> allowed
+   print(jdb['account/42'])                # Output: {'plan': 'team'}
+   print(jdb.remove('account/42'))         # Output: {}
+   print(jdb.remove('account/42', key_flags='u'))
+                                           # Output: {'account/42': {'plan': 'team'}}
+
+   # create-only ('w') and update-only ('m'), decided under the write handle
+   # rather than by a test-then-write, so neither races another writer
+   print(jdb.set('config', {'theme': 'dark'}, key_flags='w'))   # exists -> refused
+                                           # Output: None
+   print(jdb.set('session/abc', ['new'], key_flags='w'))
+                                           # Output: ['new']
+   print(jdb.set('session/xyz', ['nope'], key_flags='m'))       # absent -> refused
+                                           # Output: None
+   print(jdb.set('session/abc', ['touched'], key_flags='m'))
+                                           # Output: ['touched']
+
+   # no-follow: read the link itself instead of what it points at
+   jdb.set_link('latest', 'config')
+   print(jdb['latest'])                    # Output: {'theme': 'light'}
+   print(jdb.get('latest', key_flags='n')) # Output: config
+
 Expiring Records (TTL)
 ^^^^^^^^^^^^^^^^^^^^^^
 A record can be given a lifetime in days with ``ttl=``, counted from the day it
@@ -1543,6 +1605,10 @@ with ``ttl=1`` is still readable today and gone tomorrow. The maximum is
 
 ``EXPIRE`` is **derived**: it is set whenever the record has a TTL and cleared
 when it does not. Naming ``'e'`` yourself does nothing — use ``ttl=``.
+
+Because the countdown runs from the modified date, an ordinary write renews it.
+Pass ``key_flags='y'`` (``NO_ATIME``) to update a record *without* extending its
+life — the difference between touching a session and prolonging it.
 
 .. code-block:: python
 
@@ -1555,7 +1621,7 @@ when it does not. Naming ``'e'`` yourself does nothing — use ``ttl=``.
    print(jdb.set_key_flags('session/abc', ttl=7))
                                            # Output: {'session/abc': (128, 7)}
    flags, ttl = jdb.get_key_flags('session/abc')['session/abc']
-   print(str(JKeyFlag(flags)), ttl)        # Output: _______e_____ 7
+   print(str(JKeyFlag(flags)), ttl)        # Output: _______e__________ 7
 
    # a TTL combines with the other flags, and survives a rewrite
    print(jdb.set_key_flags('session/abc', '+r'))
@@ -1599,6 +1665,18 @@ target alone.
    print(jdb.get_link('latest'))           # Output: reports:::2026-08
    del jdb['latest']                       # removes the link only
    print(reports['2026-08'])               # Output: {'rows': 13}
+
+   # 'n' (NO_FOLLOW) reads or rewrites the link itself instead of its target
+   jdb.set_link('newest', 'reports:::2026-08')
+   print(jdb.get('newest', key_flags='n')) # Output: reports:::2026-08
+
+   reports['2026-09'] = {'rows': 20}
+   jdb.set('newest', 'reports:::2026-09', key_flags='n')   # retarget in place
+   print(jdb['newest'])                    # Output: {'rows': 20}
+
+``NO_FOLLOW`` is ``open(O_NOFOLLOW)`` rather than ``readlink()``: a record that
+is *not* a link still reads normally, where ``get_link()`` reports that it is
+not a link.
 
 .. note::
 
@@ -1982,3 +2060,4 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
+

@@ -658,6 +658,7 @@ class JDbKey:
                         append_only:Optional[bool]=None,\
                         no_cache:Optional[bool]=None,\
                         no_revert:Optional[bool]=None,\
+                        no_delete:Optional[bool]=None,\
                         hidden:Optional[bool]=None,\
                         user0:Optional[bool]=None,\
                         user1:Optional[bool]=None,\
@@ -684,6 +685,8 @@ class JDbKey:
                 :attr:`JKeyFlag.NO_CACHE`. Defaults to None.
             no_revert (Optional[bool], optional): Toggle
                 :attr:`JKeyFlag.NO_REVERT`. Defaults to None.
+            no_delete (Optional[bool], optional): Toggle :attr:`JKeyFlag.NO_DELETE`,
+                which blocks deletion while still allowing updates.
             hidden (Optional[bool], optional): Toggle :attr:`JKeyFlag.HIDDEN`.
                 Passing this makes the selector match hidden records too, so a
                 record can always be un-hidden again. Defaults to None.
@@ -705,7 +708,9 @@ class JDbKey:
             >>> jdb.keys.set_flags('audit/2026-08', append_only=True, no_revert=True)
             {'audit/2026-08': (20,0)}
         """
-        return self.jdb.set_key_flags(key, flags, read_only, append_only, no_cache, no_revert, hidden, user0, user1, user2, user3, ttl)
+        return self.jdb.set_key_flags(key, flags, read_only=read_only, append_only=append_only,
+                        no_cache=no_cache, no_revert=no_revert, no_delete=no_delete, hidden=hidden,
+                        user0=user0, user1=user1, user2=user2, user3=user3, ttl=ttl)
 
     def item_iter(self, key:Optional[Any]=None, with_hidden:bool=True, with_expired:bool=True) -> Generator[Tuple[str,tuple], None, None]:
         """

@@ -9,20 +9,20 @@ from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, IO
 from random import randint, randrange
 from collections import OrderedDict
 #-----------------------------------------------------------------------------
+from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
         VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, NEW_DAY_SHIFT, \
         API_LATEST, NEW_DAY_MASK, OLD_DAY_MASK, THE_1ST_DATE, MAX_TTL_DAYS, \
         g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
-from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
-from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
-        JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
-        PAYLOAD_FLAG_MASK, WRITE_LOCK_MASK, is_value_extension, LOCKED, MISSING, \
-        conv_to_key_flags, pop_transient_flags, \
-        KF_READ_ONLY, KF_APPEND_ONLY, KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, \
-        KF_NO_REVERT, KF_EXPIRE, KF_USER0, KF_USER1, KF_USER2, KF_USER3, \
-        KF_UNLOCK, KF_NO_FOLLOW, KF_EXCL, KF_NO_ATIME, F_REVERT, F_SPLIT
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
+from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
+        JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
+        PAYLOAD_FLAG_MASK, WRITE_LOCK_MASK, DELETE_LOCK_MASK, LOCKED, MISSING, \
+        KF_READ_ONLY, KF_APPEND_ONLY, KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, \
+        KF_NO_REVERT, KF_EXPIRE, KF_USER0, KF_USER1, KF_USER2, KF_USER3, \
+        KF_UNLOCK, KF_NO_FOLLOW, KF_EXCL, KF_NO_ATIME, KF_NO_DELETE, KF_MUST_EXIST, \
+        F_REVERT, F_SPLIT, is_value_extension, conv_to_key_flags, pop_transient_flags
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
 
@@ -665,7 +665,7 @@ class JDb(JDbReader):
                 if row_id < 0:
                     raise JKeyError(key)
 
-                if not kflags & WRITE_LOCK_MASK:
+                if not kflags & DELETE_LOCK_MASK:
                     group = self.f_delete(fp, key, read_value=False, row=row_id)
                     if isinstance(group, JDb) and self.files_obj.is_group(group.files_obj, key):
                         group.remove_fast(group) # pragma: no cover | NEVER
@@ -741,7 +741,7 @@ class JDb(JDbReader):
                 if row_id < 0:
                     raise JKeyError(key)
 
-                if kflags & WRITE_LOCK_MASK:
+                if kflags & DELETE_LOCK_MASK:
                     return
 
                 del_keys = [(row_id, kflags, key)]
@@ -758,7 +758,7 @@ class JDb(JDbReader):
                 if has_SIGINT():
                     break
 
-                if not kflags & WRITE_LOCK_MASK:
+                if not kflags & DELETE_LOCK_MASK:
                     if row_id < 0:
                         if _key.find(SEP_SYM) >= 0: # pylint: disable=R
                             del self[_key]
@@ -852,7 +852,7 @@ class JDb(JDbReader):
                         if has_SIGINT() or row_id < 0:
                             break
 
-                        if not kflags & WRITE_LOCK_MASK:
+                        if not kflags & DELETE_LOCK_MASK:
                             group_jdb = f_delete(fp, key=_key, row=row_id, read_value=False)
                             if isinstance(group_jdb, JDb) and files_obj.is_group(group_jdb.files_obj, _key):
                                 group_jdb.remove_fast(group_jdb)
@@ -2405,6 +2405,7 @@ class JDb(JDbReader):
                         append_only:Optional[bool]=None,\
                         no_cache:Optional[bool]=None,\
                         no_revert:Optional[bool]=None,\
+                        no_delete:Optional[bool]=None,\
                         hidden:Optional[bool]=None,\
                         user0:Optional[bool]=None,\
                         user1:Optional[bool]=None,\
@@ -2449,6 +2450,8 @@ class JDb(JDbReader):
                 :attr:`JKeyFlag.NO_CACHE`. Defaults to None.
             no_revert (Optional[bool], optional): Toggle
                 :attr:`JKeyFlag.NO_REVERT`. Defaults to None.
+            no_delete (Optional[bool], optional): Toggle :attr:`JKeyFlag.NO_DELETE`,
+                which blocks deletion while still allowing updates.
             hidden (Optional[bool], optional): Toggle :attr:`JKeyFlag.HIDDEN`.
                 Passing this makes the selector match hidden records too, so a
                 record can always be un-hidden again. Defaults to None.
@@ -2481,8 +2484,8 @@ class JDb(JDbReader):
             set_mask = WRITABLE_FLAG_MASK & int(flags)
             clr_mask = WRITABLE_FLAG_MASK & ~set_mask
 
-        for _want, _bit in zip((read_only, append_only, no_cache, no_revert, hidden, user0, user1, user2, user3, ttl),
-                (KF_READ_ONLY, KF_APPEND_ONLY, KF_NO_CACHE, KF_NO_REVERT, KF_HIDDEN, KF_USER0, KF_USER1, KF_USER2, KF_USER3, KF_EXPIRE)):
+        for _want, _bit in zip((read_only, append_only, no_cache, no_revert, no_delete, hidden, user0, user1, user2, user3, ttl),
+                (KF_READ_ONLY, KF_APPEND_ONLY, KF_NO_CACHE, KF_NO_REVERT, KF_NO_DELETE, KF_HIDDEN, KF_USER0, KF_USER1, KF_USER2, KF_USER3, KF_EXPIRE)):
 
             if _want is not None:
                 if _want:
@@ -4577,11 +4580,11 @@ class JDb(JDbReader):
         key_table = io.key_table
         key_fp = fp_dict[-1] if fp_dict else None
         row, old_kflags = key_table.get_both(key, fp=key_fp)
+        transient, key_flags = pop_transient_flags(key_flags)
         while True:
             if row >= 0:
                 # (Exist + Value|Header)
-                # EXCL: refuse before anything else, and again after a sync_chg retry
-                transient, key_flags = pop_transient_flags(key_flags)
+                # EXCL refuses before anything else, and again after a sync_chg retry
                 if transient & KF_EXCL or old_kflags & KF_READ_ONLY and not transient & KF_UNLOCK:
                     return False
 
@@ -4862,6 +4865,9 @@ class JDb(JDbReader):
             break
 
         # (Not Exist)
+        if transient & KF_MUST_EXIST:
+            return False
+
         new_ttl = 0 if ttl < 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
         if isinstance(key_flags, str):
             set_mask, clr_mask = conv_to_key_flags(key_flags)
@@ -5080,7 +5086,7 @@ class JDb(JDbReader):
 
         transient, key_flags = pop_transient_flags(key_flags)
         _key, file_id, offset, row_size, val_size, _ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row)
-        if kflags & WRITE_LOCK_MASK and not transient & KF_UNLOCK:
+        if kflags & DELETE_LOCK_MASK and not transient & KF_UNLOCK:
             return LOCKED
 
         if not key:
