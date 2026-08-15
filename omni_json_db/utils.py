@@ -3,7 +3,6 @@ from __future__ import annotations
 from enum import IntFlag
 from collections import defaultdict
 from contextlib import contextmanager
-from abc import ABCMeta
 from re import findall as re_findall
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
@@ -576,13 +575,17 @@ except ImportError: # pragma: no cover
 
 #-----------------------------------------------------------------------------
 
-class JDbBase(metaclass=ABCMeta): # pragma: no cover
+# These three are marker bases: no abstract methods and no virtual-subclass
+# registration, so ABCMeta enforced nothing while making every isinstance()
+# against them (or any subclass) go through ABCMeta.__instancecheck__ -- about
+# 3x the cost of a plain type check, on paths that run once per record.
+class JDbBase: # pragma: no cover
     pass
 
-class JIoBase(metaclass=ABCMeta): # pragma: no cover
+class JIoBase: # pragma: no cover
     pass
 
-class KeyTableBase(metaclass=ABCMeta): # pragma: no cover
+class KeyTableBase: # pragma: no cover
     def get_mode(self) -> int:
         """Get the current classification mode configuration.
 

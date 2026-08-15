@@ -443,8 +443,8 @@ class KeyTable(KeyTableBase):
                 while len(cache) >= jio._key_limit:
                     cache.popitem(last=False)
 
+                # key was absent above, so the insert is already the newest entry
                 cache[key] = val
-                cache.move_to_end(key, last=True)
 
             return val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK
 
@@ -457,7 +457,6 @@ class KeyTable(KeyTableBase):
                             cache.popitem(last=False)
 
                         cache[key] = val
-                        cache.move_to_end(key, last=True)
 
                     return val >> ROW_ID_SHIFT, val & KEY_FLAG_MASK
 

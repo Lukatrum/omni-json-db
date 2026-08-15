@@ -4939,7 +4939,11 @@ class JDb(JDbReader):
         return True
 
     def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, ttl:int=-1, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
-        """Internal: insert a new record (used by :meth:`f_write` when the key doesn't exist).
+        """Internal: append ``val`` to a record, adding a new row at the tail if needed.
+
+        An existing key is forwarded to :meth:`f_write` with ``overwrite=True``;
+        a missing one is written as a brand-new row without going through the
+        dead-row search, which is what makes this the cheap path for bulk loads.
 
         Args:
             fp_dict (Dict[int, IO]): Open file handles.
@@ -5001,7 +5005,7 @@ class JDb(JDbReader):
             set_mask, clr_mask = conv_to_key_flags(key_flags)
             new_kflags = set_mask & ~clr_mask
         else:
-            new_kflags = int(key_flags) if key_flags else  0
+            new_kflags = int(key_flags) if key_flags else 0
 
         new_ttl = 0 if ttl < 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
         new_kflags = new_kflags & WRITABLE_FLAG_MASK | (KF_EXPIRE if new_ttl > 0 else 0)
@@ -5012,7 +5016,7 @@ class JDb(JDbReader):
         if _type_id >= 0:
             # [Not Exist, ADD + Header] -> new row
             # new key -> DEAD[h] (=REC[t+1])
-            io.write_key(key_fp, n_records, key, _type_id, data, 0, _type_size, flags=new_kflags)
+            io.write_key(key_fp, n_records, key, _type_id, data, 0, _type_size, flags=new_kflags, ttl=new_ttl)
         else:
             # [Not Exist, ADD + Value] -> new row
             new_val_size = len(data)
