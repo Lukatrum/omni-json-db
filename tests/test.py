@@ -6333,6 +6333,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(val, 4)
             self.assertEqual(jdb['value1'], val)
 
+            _sync_id = jdb.io.sync_id
+            jdb['value1'] = lambda key,old_val: old_val
+            self.assertEqual(jdb['value1'], val)
+            self.assertEqual(jdb.sync_id, _sync_id)
+
             jdb['value1'] = lambda key,val: val//2
             self.assertEqual(jdb['value1'], 2)
 

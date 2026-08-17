@@ -1927,9 +1927,6 @@ class JDbReader(JDbBase):
             fp_dict (Dict[int, IO]): The thread's open file-pointer table.
             expired_keys (List[Tuple[int, str]]): The queued ``(row_id, key)`` pairs.
         """
-        if not expired_keys:
-            return
-
         if hasattr(self, 'f_delete'):
             has_SIGINT = self.file_lock.has_SIGINT
             files_obj = self.files_obj
@@ -1978,7 +1975,10 @@ class JDbReader(JDbBase):
                 return
 
             try:
-                self.f_drop_expired(fp_dict, thd['expired'])
+                expired_keys = thd['expired']
+                if expired_keys:
+                    self.f_drop_expired(fp_dict, expired_keys)
+
                 io = self.io
                 if not io.is_updated():
                     if file_lock.mode == 'w':
@@ -2181,7 +2181,10 @@ class JDbReader(JDbBase):
 
             finally:
                 try:
-                    self.f_drop_expired(fp_dict, thd['expired'])
+                    expired_keys = thd['expired']
+                    if expired_keys:
+                        self.f_drop_expired(fp_dict, expired_keys)
+
                     io = self.io
                     if not io.is_updated():
                         if file_lock.mode == 'w':
@@ -4473,13 +4476,20 @@ class JDbReader(JDbBase):
             io = self.io
             key_table = io.key_table
             key_fp = fp[-1]
-            row = key_table.get(key, -1, fp=key_fp)
+            row, kflags = key_table.get_both(key, fp=key_fp)
             if row < 0:
                 return default_val
 
             try:
+                transient, _key_flags = pop_transient_flags(key_flags)
+                _cache = self._cache
+                val = _cache.get(key, MISSING)
+                if val is not MISSING and not kflags & KF_EXPIRE and not transient & KF_NO_FOLLOW:
+                    _cache.move_to_end(key, last=True)
+                    return deepcopy(val) if copy else val
+
                 # f_read also answers "missing" for a record whose TTL has run out
-                return self.f_read(fp, key, default_val, copy=copy, row=row, key_flags=key_flags)
+                return self.f_read(fp, key, default_val, copy=copy, row=row, key_flags=transient)
 
             except KeyError: # pragma: no cover
                 return default_val
@@ -4712,14 +4722,16 @@ class JDbReader(JDbBase):
             Optional[JDbReader]: The group database, or ``None`` if ``key`` is
             not a group.
         """
-        group = self.io.groups.get(key, None)
+        io = self.io
+        group = io.groups.get(key, None)
         if isinstance(group, JDbReader):
             return group
 
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        key_fp = fp_dict[-1] if fp_dict is not None else None
         key_table = io.key_table
         row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
+            io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
             if _key == key and kflags & KF_GROUP:
                 group = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
@@ -4758,14 +4770,16 @@ class JDbReader(JDbBase):
         if not isinstance(target, str):
             raise JTypeError(f'link[{key}] does not store a target name')
 
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        io = self.io
+        key_fp = fp_dict[-1] if fp_dict is not None else None
+        key_table = io.key_table
         idx = target.find(SEP_SYM)
         name = target if idx < 0 else target[:idx]
-        key_table = io.key_table
         row = key_table.get(name, -1, fp=key_fp)
         if not io.n_records > row >= 0:
             raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
 
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, kflags = row_info = io.read_key(key_fp, row)
         if kflags & KF_LINK:
             # links never nest
@@ -5120,31 +5134,24 @@ class JDbReader(JDbBase):
             writable. On a :class:`JDbReader` the queue is simply discarded.
         """
         key = str(key) if not isinstance(key, str) else key
-        transient, key_flags = pop_transient_flags(key_flags)
-        no_follow = transient & KF_NO_FOLLOW
-
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        transient, _key_flags = pop_transient_flags(key_flags)
+        io = self.io
         key_table = io.key_table
+        key_fp = fp_dict[-1] if fp_dict is not None else None
         _cache = self._cache
         _row, kflags = key_table.get_both(key, fp=key_fp) if (_cache or row is None) else (-1, 0)
-
-        # EXPIRE rides in the key table
-        may_expire = bool(kflags & KF_EXPIRE)
-
         # Priority: cache > file
-        if _cache and not may_expire and not no_follow:
+        val = _cache.get(key, MISSING)
+        if val is not MISSING and not kflags & KF_EXPIRE and not transient & KF_NO_FOLLOW:
             if row is None or _row == row:
-                val = _cache.get(key, MISSING)
-                if val is not MISSING:
-                    _cache.move_to_end(key, last=True)
-                    return deepcopy(val) if copy else val
+                _cache.move_to_end(key, last=True)
+                return deepcopy(val) if copy else val
 
         if row is None:
             row = _row
             if row < 0:
                 if default_val is not MISSING:
                     return default_val
-
                 raise JKeyError(key)
 
         if row >= io.n_records: # pragma: no cover
@@ -5154,6 +5161,7 @@ class JDbReader(JDbBase):
 
             raise JKeyError(key)
 
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _cdays, mdays, ttl, kflags = io.read_key(key_fp, row)
         if ttl > 0 and io.days > (mdays + ttl):
             thd = self.th_table.get(get_ident(), None) # absent only outside open()
@@ -5167,7 +5175,7 @@ class JDbReader(JDbBase):
             raise JKeyError(key)
 
         # on a record that is not a link NO_FOLLOW is a no-op, cache included
-        can_follow = not (no_follow and kflags & KF_LINK)
+        can_follow = not (transient & KF_NO_FOLLOW and kflags & KF_LINK)
         return self.f_decode_value(fp_dict, _key, file_id, offset, row_size, val_size, kflags, update_cache=can_follow, copy=copy, follow_link=can_follow)
 
     def f_load_keys(self, fp_dict:Dict[int,IO], force:bool=False):

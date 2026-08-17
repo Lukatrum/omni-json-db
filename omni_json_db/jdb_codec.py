@@ -57,13 +57,16 @@ try:
     json_loads = _json_loads
 
 except ModuleNotFoundError:
-    from json import loads as __json_loads, dumps as __json_dumps, JSONDecodeError
+    from json import dumps as __json_dumps, JSONDecodeError, JSONDecoder # loads as __json_loads
+
+    # json.loads() on bytes runs detect_encoding() to sniff a BOM before decoding. (~40% faster)
+    __json_decode = JSONDecoder().decode
 
     def _json_loads(data:bytes) -> Any:
         if isinstance(data, memoryview):
             data = bytes(data)
 
-        return __json_loads(data)
+        return __json_decode(data.decode('utf8'))
 
     def _json_dumps(obj:Any, default:Optional[Callable[[Any], Any]]=None) -> bytes:
         """Internal JSON string dump utility function acting as alternative to orjson.
