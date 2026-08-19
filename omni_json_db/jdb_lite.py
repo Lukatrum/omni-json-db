@@ -1810,6 +1810,48 @@ class JDbReader(JDbBase):
 
         return slice(_start, _stop, _step), max_ver, min_ver, max_days, min_days, key_rules, chk_new_date
 
+    def f_drop_expired(self, fp_dict:Dict[int,IO], expired_keys:List[Tuple[int,str]]) -> None:
+        """Delete the records queued as expired by :meth:`f_read`, then clear the queue.
+
+        Reads cannot delete anything themselves -- they may hold only a
+        read-only handle -- so they record the row and leave it to whichever
+        exit path runs next. Both :meth:`open` and :meth:`f_close` call this, so
+        a record expires exactly once no matter which API opened the database.
+
+        The queued row id is only a hint: it is re-resolved through the key
+        table, because a delete earlier in the same batch may have moved the
+        row. A record that has already gone is skipped.
+
+        On a :class:`JDbReader` there is nothing to delete with, so the queue is
+        simply dropped.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            expired_keys (List[Tuple[int, str]]): The queued ``(row_id, key)`` pairs.
+        """
+        if hasattr(self, 'f_delete'):
+            has_SIGINT = self.file_lock.has_SIGINT
+            files_obj = self.files_obj
+            io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
+            expired_keys.sort(reverse=True)
+            f_delete = self.f_delete
+            key_table = io.key_table
+            for _row_id, key in expired_keys:
+                if has_SIGINT():
+                    break
+
+                row_id = key_table.get(key, -1, fp=key_fp)
+                if row_id >= 0:
+                    try:
+                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=KF_UNLOCK)
+                        if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
+                            jdb.remove_fast(jdb, key_flags=KF_UNLOCK)
+
+                    except (OSError, KeyError): # pragma: no cover
+                        continue
+
+        expired_keys.clear()
+
     def f_open(self, read_only:bool=True) -> Dict[int,IO]:
         """Manually acquire the file lock and open the KEY file for the current thread.
 
@@ -1907,48 +1949,6 @@ class JDbReader(JDbBase):
                 raise
 
         return None
-
-    def f_drop_expired(self, fp_dict:Dict[int,IO], expired_keys:List[Tuple[int,str]]) -> None:
-        """Delete the records queued as expired by :meth:`f_read`, then clear the queue.
-
-        Reads cannot delete anything themselves -- they may hold only a
-        read-only handle -- so they record the row and leave it to whichever
-        exit path runs next. Both :meth:`open` and :meth:`f_close` call this, so
-        a record expires exactly once no matter which API opened the database.
-
-        The queued row id is only a hint: it is re-resolved through the key
-        table, because a delete earlier in the same batch may have moved the
-        row. A record that has already gone is skipped.
-
-        On a :class:`JDbReader` there is nothing to delete with, so the queue is
-        simply dropped.
-
-        Args:
-            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
-            expired_keys (List[Tuple[int, str]]): The queued ``(row_id, key)`` pairs.
-        """
-        if hasattr(self, 'f_delete'):
-            has_SIGINT = self.file_lock.has_SIGINT
-            files_obj = self.files_obj
-            io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
-            expired_keys.sort(reverse=True)
-            f_delete = self.f_delete
-            key_table = io.key_table
-            for _row_id, key in expired_keys:
-                if has_SIGINT():
-                    break
-
-                row_id = key_table.get(key, -1, fp=key_fp)
-                if row_id >= 0:
-                    try:
-                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=KF_UNLOCK)
-                        if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
-                            jdb.remove_fast(jdb, key_flags=KF_UNLOCK)
-
-                    except (OSError, KeyError): # pragma: no cover
-                        continue
-
-        expired_keys.clear()
 
     def f_close(self):
         """Release one :meth:`f_open` acquisition for the current thread.
@@ -4727,11 +4727,10 @@ class JDbReader(JDbBase):
         if isinstance(group, JDbReader):
             return group
 
-        key_fp = fp_dict[-1] if fp_dict is not None else None
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
         row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
-            io, fp_dict, key_fp = self.f_get_fp(fp_dict)
             _key, file_id, offset, row_size, val_size, _ver, _cdays, _mdays, _ttl, kflags = io.read_key(key_fp, row)
             if _key == key and kflags & KF_GROUP:
                 group = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=False, copy=False)
@@ -4770,8 +4769,7 @@ class JDbReader(JDbBase):
         if not isinstance(target, str):
             raise JTypeError(f'link[{key}] does not store a target name')
 
-        io = self.io
-        key_fp = fp_dict[-1] if fp_dict is not None else None
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         key_table = io.key_table
         idx = target.find(SEP_SYM)
         name = target if idx < 0 else target[:idx]
@@ -4779,7 +4777,6 @@ class JDbReader(JDbBase):
         if not io.n_records > row >= 0:
             raise JKeyError(f'link[{key}] is dangling: target[{target}] does not exist')
 
-        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, _file_id, _offset, _size, _vsize, _ver, _cdays, _mdays, _ttl, kflags = row_info = io.read_key(key_fp, row)
         if kflags & KF_LINK:
             # links never nest

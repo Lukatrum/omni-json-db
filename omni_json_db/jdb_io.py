@@ -113,8 +113,9 @@ DAY_SEC         = 24*60*60
 # -1 = DEFAULT_BUFFER_SIZE (8192)
 # 0 = no buffering
 # 65536 > 8192[default] improve loading key table 7.69%
-KEY_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE * 8
+KEY_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE * 2
 VAL_FILE_BUF_SIZE = DEFAULT_BUFFER_SIZE
+KEY_ROW_WINDOW = DEFAULT_BUFFER_SIZE * 8
 
 DEF_TYPE = 0  # default data type
 L_J_TYPE = 1  # split+Json                  | readable
@@ -1360,7 +1361,7 @@ class JIo(JIoBase):
         self.VAL_unzip0     = UNZIP_lut0[0]
         self.pad_byte       = b'\x00'
         self.pad0_byte      = b'\x00'
-        self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
+        self.window_size = max(1, int(KEY_ROW_WINDOW / index_size))
         self.row_bytes = index_size - min_value_size * (1 + reserved_rate)
 
         self.update_days()
@@ -2167,7 +2168,7 @@ class JIo(JIoBase):
         self._DEAD_rows.clear()
         self.update_days()
         self.row_bytes = self.index_size - self.min_value_size * (1 + self.reserved_rate)
-        self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
+        self.window_size = max(1, int(KEY_ROW_WINDOW / self.index_size))
 
     def write_header(self, fp:IO, truncate:bool=False) -> int:
         """Write the database header -- counters and format -- to the start of the KEY file.
@@ -2281,7 +2282,7 @@ class JIo(JIoBase):
             if api_ver != self.api_ver: # pragma: no cover
                 self.change_APIs(api_ver, data_type, zip_type)
 
-        self.window_size = max(1, int(KEY_FILE_BUF_SIZE / self.index_size))
+        self.window_size = max(1, int(KEY_ROW_WINDOW / self.index_size))
         self.row_bytes   = self.index_size - self.min_value_size * (1 + self.reserved_rate)
         self.sync_id     = sync_id
         self.swap_id     = swap_id
@@ -2782,7 +2783,7 @@ class JIo(JIoBase):
         self.index_size = index_size
         self._n_lines = 0
         self.write_header(fp)
-        self.window_size = max(1, int(KEY_FILE_BUF_SIZE / index_size))
+        self.window_size = max(1, int(KEY_ROW_WINDOW / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
 
     def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False, n_rows:int=8192) -> Generator[Tuple[str,int,int,int,int,int,int,int,int,int], None, None]:

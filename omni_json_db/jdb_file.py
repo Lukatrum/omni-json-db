@@ -11,6 +11,16 @@ from datetime import datetime
 from threading import Lock, Condition
 from re import match as re_match
 #-----------------------------------------------------------------------------
+try:
+    import resource
+
+    MAX_FILD_ID = 4096
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft < MAX_FILD_ID <= hard:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (MAX_FILD_ID, hard))
+except (ImportError, ValueError, OSError): # pragma: no cover
+    pass
+
 OPEN_FLAGS = O_APPEND | O_CREAT
 try:
     from fcntl import LOCK_SH, LOCK_NB, LOCK_EX, LOCK_UN, flock
@@ -1355,11 +1365,10 @@ class JDiskFiles(JFilesBase):
             int: The size in bytes, or ``-1`` if the file does not exist.
         """
         path = self.VAL_file.format(file_id=file_id)
-        if path_exists(path):
-            file_stat = os_stat(path)
-            return int(file_stat.st_size)
-
-        return -1
+        try:
+            return int(os_stat(path).st_size)
+        except OSError:
+            return -1
 
     def KEY_open(self, mode:str='rb', buffering:int=-1, encoding:Optional[str]=None, **kwargs) -> IO:
         """Acquire persistent transactional stream pointers connected to the core index file.
@@ -1390,11 +1399,10 @@ class JDiskFiles(JFilesBase):
         Returns:
             int: The file size in bytes, or 0 if the file doesn't exist.
         """
-        if path_exists(self.KEY_file):
-            file_stat = os_stat(self.KEY_file)
-            return int(file_stat.st_size)
-
-        return 0
+        try:
+            return int(os_stat(self.KEY_file).st_size)
+        except OSError:
+            return 0
 
     def KEY_date(self) -> int:
         """Get the UNIX timestamp (ctime) of the KEY index file.
@@ -1402,11 +1410,10 @@ class JDiskFiles(JFilesBase):
         Returns:
             int: The timestamp, or 0 if the file doesn't exist.
         """
-        if path_exists(self.KEY_file):
-            file_stat = os_stat(self.KEY_file)
-            return int(file_stat.st_ctime)
-
-        return 0
+        try:
+            return int(os_stat(self.KEY_file).st_ctime)
+        except OSError:
+            return 0
 
     def LCK_rlock(self, block:bool=False):
         """Secure a platform-safe shared reader lock blocking writers but enabling read parallelism.
