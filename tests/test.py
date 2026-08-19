@@ -172,7 +172,13 @@ class DcRow:
 @dataclass
 class DcBlob:
     id: str = ''
-    meta: Any = None # unannotated: must not alias the record cache
+    meta: Any = None                          # unannotated: must not alias the record cache
+    loose: List = field(default_factory=list) # no type arg: same risk
+
+@dataclass
+class DcRaw:
+    id: str = ''
+    raw: bytearray = field(default_factory=bytearray) # needs a binary-capable value codec
 
 def make_dc_user(uid, **kwargs):
     """Build a fully-populated DcUser, overriding any field via kwargs."""
@@ -6985,14 +6991,36 @@ class TestJDb(unittest.TestCase):
             with self.assertRaises(ValueError): # id=0 is fine, id=None is not
                 jdb.set_dc(DcRow(id=None))
             # -------------------------------------------- reads must not alias the cache
-            jdb += DcBlob('b1', {'k': [1]})
+            jdb += DcBlob('b1', {'k': [1]}, [[1]])
             blob = DcBlob()
             self.assertTrue(jdb.get_dc('b1', blob))
-            blob.meta['k'].append(999) # mutating an Any field must not reach the cache
+            blob.meta['k'].append(999) # mutating an untyped field must not reach the cache
+            blob.loose[0].append(999)
             blob2 = DcBlob()
             self.assertTrue(jdb.get_dc('b1', blob2))
             self.assertEqual(blob2.meta, {'k': [1]})
+            self.assertEqual(blob2.loose, [[1]])
             del jdb['b1']
+            # -------------------------------------------- bytearray needs a binary value codec
+            jdb['probe'] = {'b': b'ab'} # a dataclass field is always nested, so probe nested
+            binary_ok = jdb['probe']['b'] == b'ab'
+            del jdb['probe']
+
+            jdb += DcRaw('r1', bytearray(b'ab'))
+            raw = DcRaw()
+            if binary_ok:
+                self.assertTrue(jdb.get_dc('r1', raw))
+                self.assertTrue(isinstance(raw.raw, bytearray)) # not decayed to a list of ints
+                self.assertEqual(bytes(raw.raw), b'ab')
+                raw.raw.extend(b'ZZ')
+                raw2 = DcRaw()
+                self.assertTrue(jdb.get_dc('r1', raw2))
+                self.assertEqual(bytes(raw2.raw), b'ab') # the cache is untouched
+            else:
+                with self.assertRaises(ValueError): # loud, like a bytes field on the same codec
+                    jdb.get_dc('r1', raw)
+
+            del jdb['r1']
             # -------------------------------------------- ttl / key_flags pass through
             if api_ver >= 2:
                 self.assertTrue(jdb.set_dc(make_dc_user('u8'), ttl=30, key_flags='h'))

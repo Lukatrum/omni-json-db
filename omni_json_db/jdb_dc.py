@@ -1,11 +1,10 @@
-# pylint: disable=broad-except
+# pylint: disable=broad-except,ungrouped-imports
 """Dataclass <-> record conversion (used by :meth:`JDb.f_write_dc` / :meth:`JDbReader.f_read_dc`).
 
 A dataclass is stored as a plain ``dict`` -- its ``id`` field lifted out to
 become the record key -- so values stay queryable by :class:`Query` and readable
 under every data_type, unlike pickle's opaque Python-only blob.
 """
-from copy import deepcopy
 from typing import Any, Union, Optional, Tuple, Dict, get_type_hints
 from datetime import date as dt_date, datetime, time as dt_time
 from dataclasses import MISSING as DC_MISSING, fields as dc_fields, is_dataclass
@@ -29,8 +28,8 @@ except ImportError: # pragma: no cover
     def get_args(tp:Any) -> tuple:
         """py3.7 fallback: ``Dict[str, int]`` -> ``(str, int)``."""
         return getattr(tp, '__args__', ()) or ()
-
-from .utils import JValueError, JTypeError
+#---------------------------------------------------------------------
+from .utils import JValueError, JTypeError, deepcopy
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -71,7 +70,7 @@ def _encode(val:Any) -> Any:
     if isinstance(val, Enum): # must precede the primitive check: str/IntEnum are subclasses
         return _encode(val.value)
 
-    if is_dc(val):
+    if is_dataclass(val) and not isinstance(val, type):
         return {f.name: _encode(getattr(val, f.name)) for f in dc_fields(val)}
 
     if isinstance(val, dict):
@@ -89,10 +88,11 @@ def _encode(val:Any) -> Any:
     if isinstance(val, (Decimal, UUID, PurePath)):
         return str(val)
 
-    if isinstance(val, (bytearray, memoryview)):
+    if isinstance(val, (bytearray, memoryview)): # pragma: no cover
         return bytes(val)
 
-    for base in (str, bytes, float, int): # narrow a str/int subclass back to its base
+    for base in (str, bytes, float, int):  # pragma: no cover
+        # narrow a str/int subclass back to its base
         if isinstance(val, base):
             return base(val)
 
@@ -106,7 +106,10 @@ def _detach(val:Any) -> Any:
     forward ref) would otherwise alias the record cache -- mutating it through
     the dataclass would silently corrupt the database.
     """
-    return deepcopy(val) if isinstance(val, (dict, list, set, bytearray)) else val
+    if isinstance(val, bytearray): # deepcopy() would turn this into a list of ints
+        return bytearray(val)
+
+    return deepcopy(val) if isinstance(val, (dict, list, set)) else val
 
 def _decode(val:Any, hint:Any) -> Any:
     """Rebuild ``val`` into the Python type described by the annotation ``hint``."""
@@ -123,26 +126,27 @@ def _decode(val:Any, hint:Any) -> Any:
             try:
                 return _decode(val, arg)
 
-            except (TypeError, ValueError, KeyError):
+            except (TypeError, ValueError, KeyError): # pragma: no cover
                 continue
 
         return _detach(val)
 
-    if origin is list:
-        return [_decode(v, args[0]) for v in val] if args else list(val)
+    if origin is list: # a missing arg -> hint None -> _detach(): a shallow copy would alias
+        return [_decode(v, args[0] if args else None) for v in val]
 
     if origin is tuple:
-        if len(args) == 2 and args[1] is Ellipsis:
+        if len(args) == 2 and args[1] is Ellipsis: # pragma: no cover
             return tuple(_decode(v, args[0]) for v in val)
 
-        return tuple(_decode(v, a) for v,a in zip(val, args)) if args else tuple(val)
+        return tuple(_decode(v, a) for v,a in zip(val, args)) if args else tuple(_decode(v, None) for v in val)
 
     if origin in (set, frozenset):
-        items = (_decode(v, args[0]) for v in val) if args else iter(val)
+        items = (_decode(v, args[0] if args else None) for v in val)
         return frozenset(items) if origin is frozenset else set(items)
 
     if origin is dict:
-        return {_decode(k, args[0]): _decode(v, args[1]) for k,v in val.items()} if len(args) == 2 else dict(val)
+        k_hint, v_hint = args if len(args) == 2 else (None, None)
+        return {_decode(k, k_hint): _decode(v, v_hint) for k,v in val.items()}
 
     if not isinstance(hint, type):
         return _detach(val)
@@ -171,12 +175,18 @@ def _decode(val:Any, hint:Any) -> Any:
     if issubclass(hint, PurePath):
         return val if isinstance(val, PurePath) else Path(val)
 
+    if issubclass(hint, bytearray): # _encode() stores it as bytes, so mirror the bytes rule below
+        if not isinstance(val, (bytes, bytearray, memoryview)):
+            raise JValueError(f'expected bytearray, got {type(val).__name__}')
+
+        return bytearray(val)
+
     if issubclass(hint, (int, float)) and not isinstance(val, bool):
         try: # also covers 'id', which always comes back as the str record key
             return hint(val)
 
         except (TypeError, ValueError):
-            return val
+            return _detach(val)
 
     if issubclass(hint, (str, bytes)) and not isinstance(val, hint):
         raise JValueError(f'expected {hint.__name__}, got {type(val).__name__}')
@@ -191,7 +201,7 @@ def _build(cls:type, doc:Any) -> Any:
     hints = _dc_meta(cls)[0]
     init_kw, post = {}, {}
     for f in dc_fields(cls):
-        if f.name not in doc:
+        if f.name not in doc: # pragma: no cover
             if f.default is DC_MISSING and f.default_factory is DC_MISSING: # type: ignore[misc]
                 raise JValueError(f'{cls.__name__}: missing required field "{f.name}"')
 
@@ -202,7 +212,7 @@ def _build(cls:type, doc:Any) -> Any:
 
     obj = cls(**init_kw)
     for name,value in post.items(): # init=False fields, frozen-safe
-        object.__setattr__(obj, name, value)
+        object.__setattr__(obj, name, value) # pragma: no cover
 
     return obj
 
@@ -221,14 +231,14 @@ def dc_key(obj:Any) -> str:
         JTypeError: If ``obj`` is not a dataclass instance.
         JValueError: If the class has no ``id`` field, or ``id`` is None/empty.
     """
-    if not is_dc(obj):
+    if not is_dataclass(obj) or isinstance(obj, type):
         raise JTypeError(f'expected a dataclass instance, got {type(obj).__name__}')
 
     if not _dc_meta(type(obj))[2]:
         raise JValueError(f'{type(obj).__name__} has no "{DC_ID}" field (required as the record key)')
 
     key = getattr(obj, DC_ID)
-    key = key if isinstance(key, str) else ('' if key is None else str(key))
+    key = '' if key is None else str(key)
     if not key:
         raise JValueError(f'{type(obj).__name__}.{DC_ID} must not be empty')
 
@@ -249,7 +259,7 @@ def dc_to_dict(obj:Any, with_id:bool=False) -> dict:
         JTypeError: If ``obj`` is not a dataclass instance, or holds an unencodable value.
         JValueError: If ``with_id`` is set but the class has no ``id`` field.
     """
-    if not is_dc(obj):
+    if not is_dataclass(obj) or isinstance(obj, type):
         raise JTypeError(f'expected a dataclass instance, got {type(obj).__name__}')
 
     _, names, has_id = _dc_meta(type(obj))
@@ -281,11 +291,11 @@ def dc_value(obj:Any, key:Any=None) -> dict:
     Raises:
         JTypeError: If ``obj`` is not a dataclass instance, or holds an unencodable value.
     """
-    if not is_dc(obj):
+    if not is_dataclass(obj) or isinstance(obj, type):
         raise JTypeError(f'expected a dataclass instance, got {type(obj).__name__}')
 
     obj_id = getattr(obj, DC_ID, None) if _dc_meta(type(obj))[2] else None
-    obj_id = '' if obj_id is None else (obj_id if isinstance(obj_id, str) else str(obj_id))
+    obj_id = '' if obj_id is None else str(obj_id) # keep '0': only None/'' count as unset
     return dc_to_dict(obj, with_id=bool(obj_id) and obj_id != key)
 
 def dc_fill(obj:Any, doc:dict, key:Optional[str]=None, strict:bool=False) -> Any:
@@ -311,14 +321,14 @@ def dc_fill(obj:Any, doc:dict, key:Optional[str]=None, strict:bool=False) -> Any
         JValueError: If ``doc`` is not a dict, if ``key`` is given but the class
             has no ``id`` field, or (with ``strict``) ``doc`` carries unknown fields.
     """
-    if not is_dc(obj):
+    if not is_dataclass(obj) or isinstance(obj, type):
         raise JTypeError(f'expected a dataclass instance, got {type(obj).__name__}')
 
     if not isinstance(doc, dict):
         raise JValueError(f'{type(obj).__name__}: expected a dict record, got {type(doc).__name__}')
 
     hints, names, has_id = _dc_meta(type(obj))
-    if strict:
+    if strict: # pragma: no cover
         extra = set(doc) - set(names) - {DC_ID}
         if extra:
             raise JValueError(f'{type(obj).__name__}: unknown field(s) {sorted(extra)}')
@@ -331,7 +341,7 @@ def dc_fill(obj:Any, doc:dict, key:Optional[str]=None, strict:bool=False) -> Any
         raise JValueError(f'{type(obj).__name__} has no "{DC_ID}" field')
 
     if has_id and (DC_ID in doc or key is not None): # a stored id wins: see dc_value()
-        object.__setattr__(obj, DC_ID, _decode(doc[DC_ID] if DC_ID in doc else key, hints.get(DC_ID)))
+        object.__setattr__(obj, DC_ID, _decode(doc.get(DC_ID, key), hints.get(DC_ID)))
 
     return obj
 
@@ -345,10 +355,10 @@ def dc_records(objs:Any, with_id:bool=False) -> Optional[Dict[str,dict]]:
     Returns:
         Optional[Dict[str, dict]]: The records, or None if ``objs`` holds no dataclass.
     """
-    if is_dc(objs):
+    if is_dataclass(objs) and not isinstance(objs, type):
         return {dc_key(objs): dc_to_dict(objs, with_id)}
 
-    if isinstance(objs, (tuple, list, set, frozenset)) and objs and all(is_dc(o) for o in objs):
+    if objs and isinstance(objs, (tuple, list, set, frozenset)) and all(is_dataclass(o) for o in objs):
         return {dc_key(o): dc_to_dict(o, with_id) for o in objs}
 
     return None
@@ -363,10 +373,10 @@ def dc_keys(objs:Any) -> Optional[Union[str, set]]:
         Optional[Union[str, set]]: A ``str`` for one instance, a ``set`` for many,
         or None if ``objs`` holds no dataclass.
     """
-    if is_dc(objs):
+    if is_dataclass(objs) and not isinstance(objs, type):
         return dc_key(objs)
 
-    if isinstance(objs, (tuple, list, set, frozenset)) and objs and all(is_dc(o) for o in objs):
+    if objs and isinstance(objs, (tuple, list, set, frozenset)) and all(is_dataclass(o) for o in objs):
         return {dc_key(o) for o in objs}
 
     return None

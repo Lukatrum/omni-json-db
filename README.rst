@@ -309,7 +309,7 @@ For explicit control over the file pointer, ``f_write_dc`` / ``f_read_dc`` are t
 
    buf = User(id='', name='')
    with jdb.open() as fp:
-      for key in jdb:
+      for key in jdb.key_table:
          jdb.f_read_dc(fp, key, buf) # filled in place: no allocation per record
 
 Supported field types: nested dataclasses, ``Optional`` / ``Union``, ``Enum``, ``date`` / ``time`` / ``datetime``, ``Decimal``, ``UUID``, ``Path``, ``List`` / ``Dict`` / ``Set`` / ``Tuple``, ``frozen=True``, and ``init=False`` fields. Values are rebuilt from the annotations, so a ``Set[str]`` comes back as a ``set`` even under a ``data_type`` whose codec has no native set type.
