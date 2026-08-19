@@ -2,6 +2,10 @@
 import unittest, time, random, threading, inspect, re, os, io
 from marshal import loads as marshal_loads, dumps as marshal_dumps
 import datetime as dt
+from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set
 import sqlite3
 import networkx as nx
 from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
@@ -123,6 +127,60 @@ def xor_dumps(data):
 
 def xor_loads(data):
     return marshal_loads(bytes(b ^ 0x5A for b in data))
+
+#-----------------------------------------------------------------------------
+# dataclass fixtures for test_dataclass (module level so annotations resolve)
+#-----------------------------------------------------------------------------
+class DcRole(str, Enum):
+    ADMIN = 'admin'
+    USER = 'user'
+
+@dataclass
+class DcAddress:
+    city: str
+    zipcode: str = ''
+
+@dataclass
+class DcUser:
+    id: str
+    name: str
+    age: int = 0
+    role: DcRole = DcRole.USER
+    tags: List[str] = field(default_factory=list)
+    address: Optional[DcAddress] = None
+    joined: Optional[dt.date] = None
+    balance: Decimal = Decimal('0')
+    scores: Dict[str, int] = field(default_factory=dict)
+    labels: Set[str] = field(default_factory=set)
+    version: int = field(default=1, init=False)
+
+@dataclass(frozen=True)
+class DcPoint:
+    id: str
+    x: int = 0
+    y: int = 0
+
+@dataclass
+class DcNoId:
+    name: str = ''
+
+@dataclass
+class DcRow:
+    id: int = 0
+    v: str = ''
+
+@dataclass
+class DcBlob:
+    id: str = ''
+    meta: Any = None # unannotated: must not alias the record cache
+
+def make_dc_user(uid, **kwargs):
+    """Build a fully-populated DcUser, overriding any field via kwargs."""
+    fields = {'id':uid, 'name':'Alice', 'age':30, 'role':DcRole.ADMIN, 'tags':['db', 'py'],
+              'address':DcAddress('Taipei', '110'), 'joined':dt.date(2024, 5, 1),
+              'balance':Decimal('12.50'), 'scores':{'math':90}, 'labels':{'a', 'b'}}
+    fields.update(kwargs)
+    return DcUser(**fields)
 
 class TestJDb(unittest.TestCase):
     def setUp(self):
@@ -6723,6 +6781,247 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
+            # --------------------------------------------
+            if last_jdb is not None:
+                self.assertEqual(last_jdb - jdb, set())
+                self.assertEqual(last_jdb, jdb)
+
+            last_jdb = jdb
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
+    def test_dataclass(self):
+        last_jdb = None
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            api_ver = config['api_ver']
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            self.assertEqual(len(jdb), 0)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{jdb.cache_limit}', yellow=1))
+            # -------------------------------------------- f_write_dc / f_read_dc
+            jdb1 = JDb(jdb)
+            user = make_dc_user('u1')
+            with jdb.open(read_only=False) as fp:
+                self.assertTrue(jdb.f_write_dc(fp, user))
+
+            # id is lifted out to become the key, never duplicated in the value
+            self.assertTrue('u1' in jdb)
+            self.assertTrue(isinstance(jdb['u1'], dict))
+            self.assertTrue('id' not in jdb['u1'])
+            self.assertEqual(jdb['u1']['name'], 'Alice')
+            self.assertEqual(jdb['u1']['role'], 'admin')
+            self.assertEqual(jdb['u1']['joined'], '2024-05-01')
+            self.assertEqual(jdb['u1']['balance'], '12.50')
+
+            out = DcUser(id='', name='')
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_read_dc(fp, 'u1', out))
+                self.assertFalse(jdb.f_read_dc(fp, 'no_such_key', out))
+
+            self.assertEqual(out, user)
+            self.assertEqual(out.role, DcRole.ADMIN)
+            self.assertEqual(out.joined, dt.date(2024, 5, 1))
+            self.assertEqual(out.balance, Decimal('12.50'))
+            self.assertEqual(out.address, DcAddress('Taipei', '110'))
+            self.assertEqual(out.labels, {'a', 'b'})
+            # -------------------------------------------- set_dc / get_dc
+            self.assertTrue(jdb.set_dc(make_dc_user('u2', name='Bob', age=41)))
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb.get_dc('u2', out))
+            self.assertEqual((out.id, out.name, out.age), ('u2', 'Bob', 41))
+            self.assertFalse(jdb.get_dc('no_such_key', out))
+            self.assertTrue(jdb.get_dc(out, out)) # refresh in place from its own id
+            self.assertEqual(out.name, 'Bob')
+            # -------------------------------------------- frozen + init=False
+            self.assertTrue(jdb.set_dc(DcPoint(id='p1', x=3, y=4)))
+            point = DcPoint(id='')
+            self.assertTrue(jdb.get_dc('p1', point))
+            self.assertEqual((point.id, point.x, point.y), ('p1', 3, 4))
+
+            versioned = make_dc_user('u3')
+            object.__setattr__(versioned, 'version', 7)
+            self.assertTrue(jdb.set_dc(versioned))
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb.get_dc('u3', out))
+            self.assertEqual(out.version, 7)
+            # -------------------------------------------- one buffer, many reads
+            del jdb[:]
+            self.assertEqual(len(jdb), 0)
+            users = [make_dc_user(f'u{i}', name=f'N{i}', age=20+i) for i in range(6)]
+            jdb += users
+            self.assertEqual(len(jdb), len(users))
+
+            buf = DcUser(id='', name='')
+            got = []
+            with jdb.open() as fp:
+                for key in sorted(jdb):
+                    self.assertTrue(jdb.f_read_dc(fp, key, buf))
+                    got.append((buf.id, buf.name, buf.age))
+
+            self.assertEqual(got, [(f'u{i}', f'N{i}', 20+i) for i in range(6)])
+            # -------------------------------------------- stored values stay queryable
+            res = jdb.find(vals={'age.$gte': 24})
+            self.assertEqual(set(res), {'u4', 'u5'})
+            res = jdb.find(vals={'tags.$has': 'db'})
+            self.assertEqual(len(res), 6)
+            res = jdb.find(vals={'address.city': 'Taipei'})
+            self.assertEqual(len(res), 6)
+            self.assertEqual(jdb.update_if({'age.$lt': 22}, {'name': 'Young'}), 2)
+            self.assertEqual(len(jdb.find(vals={'name': 'Young'})), 2)
+            # -------------------------------------------- jdb += dataclass
+            del jdb[:]
+            jdb += make_dc_user('u1', name='Alice')
+            self.assertEqual(jdb['u1']['name'], 'Alice')
+            jdb += make_dc_user('u1', name='Bob') # += overwrites
+            self.assertEqual(jdb['u1']['name'], 'Bob')
+            jdb += [make_dc_user('u2'), make_dc_user('u3')]
+            self.assertEqual(set(jdb), {'u1', 'u2', 'u3'})
+            # -------------------------------------------- jdb['key'] = dataclass
+            del jdb[:]
+            jdb['u1'] = make_dc_user('u1', name='Alice') # key matches id
+            jdb += make_dc_user('u2', name='Alice')
+            self.assertEqual(set(jdb['u1']), set(jdb['u2'])) # same bytes as '+='
+            self.assertTrue('id' not in jdb['u1'])
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb.get_dc('u1', out))
+            self.assertEqual(out, make_dc_user('u1', name='Alice'))
+
+            jdb['alias'] = make_dc_user('u1', name='Alice') # key differs from id
+            self.assertEqual(jdb['alias']['id'], 'u1') # id kept, or it would be lost
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb.get_dc('alias', out))
+            self.assertEqual(out.id, 'u1') # the stored id wins over the alias key
+
+            jdb['u3'] = DcUser(id='', name='NoId') # empty id -> the key supplies it
+            self.assertTrue('id' not in jdb['u3'])
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb.get_dc('u3', out))
+            self.assertEqual((out.id, out.name), ('u3', 'NoId'))
+
+            jdb['p1'] = DcPoint(id='p1', x=3, y=4) # frozen dataclass
+            point = DcPoint(id='')
+            self.assertTrue(jdb.get_dc('p1', point))
+            self.assertEqual(point, DcPoint(id='p1', x=3, y=4))
+
+            jdb[('m1', 'm2')] = make_dc_user('u1') # one object over many keys
+            self.assertEqual(jdb['m1'], jdb['m2'])
+            self.assertEqual(jdb['m1']['id'], 'u1')
+
+            with self.assertRaises(TypeError): # the class itself is not an instance
+                jdb['u4'] = DcUser
+
+            del jdb[:] # restore the state the '|=' section below expects
+            jdb += [make_dc_user('u1', name='Bob'), make_dc_user('u2'), make_dc_user('u3')]
+            # -------------------------------------------- jdb |= dataclass (insert only)
+            jdb |= make_dc_user('u1', name='Ignored')
+            self.assertEqual(jdb['u1']['name'], 'Bob')
+            jdb |= [make_dc_user('u4'), make_dc_user('u5')]
+            self.assertEqual(set(jdb), {'u1', 'u2', 'u3', 'u4', 'u5'})
+            # -------------------------------------------- jdb &= dataclass (replace only)
+            jdb &= make_dc_user('ghost')
+            self.assertTrue('ghost' not in jdb)
+            jdb &= make_dc_user('u1', name='Carol', age=99)
+            self.assertEqual(jdb['u1']['name'], 'Carol')
+            self.assertEqual(jdb['u1']['age'], 99)
+            jdb &= [make_dc_user('u2', age=77), make_dc_user('u3', age=88)]
+            self.assertEqual(jdb['u2']['age'], 77)
+            self.assertEqual(jdb['u3']['age'], 88)
+            # -------------------------------------------- jdb -= / del jdb[..]
+            jdb -= make_dc_user('u1')
+            self.assertTrue('u1' not in jdb)
+            jdb -= [make_dc_user('u2'), make_dc_user('u3')]
+            self.assertTrue('u2' not in jdb and 'u3' not in jdb)
+            del jdb[make_dc_user('u4')]
+            self.assertTrue('u4' not in jdb)
+            del jdb[make_dc_user('u5')]
+            self.assertEqual(len(jdb), 0)
+
+            jdb += [make_dc_user('u6'), make_dc_user('u7')]
+            del jdb[make_dc_user('u6'), make_dc_user('u7')]
+            self.assertEqual(len(jdb), 0)
+
+            with self.assertRaises(KeyError):
+                del jdb[make_dc_user('no_such_key')]
+            # -------------------------------------------- plain records are untouched
+            jdb['plain'] = 12345678
+            jdb += make_dc_user('u1')
+            jdb |= {'plain2': 'string'}
+            jdb -= {'plain'}
+            self.assertEqual(set(jdb), {'plain2', 'u1'})
+            with self.assertRaises(ValueError): # a non-dict record is not a dataclass
+                jdb.get_dc('plain2', DcUser(id='', name=''))
+
+            del jdb['plain2']
+            # -------------------------------------------- error cases
+            with self.assertRaises(ValueError): # no 'id' field
+                jdb.set_dc(DcNoId('x'))
+
+            with self.assertRaises(TypeError): # not a dataclass instance
+                jdb.set_dc({'id': 'u9', 'name': 'x'})
+
+            with self.assertRaises(TypeError):
+                jdb.get_dc('u1', {'id': 'u1'})
+
+            with self.assertRaises(TypeError): # the class itself is not an instance
+                jdb.set_dc(DcUser)
+
+            with self.assertRaises(TypeError):
+                jdb.get_dc('u1', DcUser)
+            # -------------------------------------------- non-str id round-trips
+            jdb += DcRow(id=7, v='seven')
+            self.assertTrue('7' in jdb) # the key is always the stringified id
+            row = DcRow()
+            self.assertTrue(jdb.get_dc(7, row))
+            self.assertEqual((row.id, row.v), (7, 'seven'))
+            self.assertTrue(isinstance(row.id, int)) # coerced back via the annotation
+            del jdb[DcRow(id=7)]
+            self.assertTrue('7' not in jdb)
+
+            with self.assertRaises(ValueError): # id=0 is fine, id=None is not
+                jdb.set_dc(DcRow(id=None))
+            # -------------------------------------------- reads must not alias the cache
+            jdb += DcBlob('b1', {'k': [1]})
+            blob = DcBlob()
+            self.assertTrue(jdb.get_dc('b1', blob))
+            blob.meta['k'].append(999) # mutating an Any field must not reach the cache
+            blob2 = DcBlob()
+            self.assertTrue(jdb.get_dc('b1', blob2))
+            self.assertEqual(blob2.meta, {'k': [1]})
+            del jdb['b1']
+            # -------------------------------------------- ttl / key_flags pass through
+            if api_ver >= 2:
+                self.assertTrue(jdb.set_dc(make_dc_user('u8'), ttl=30, key_flags='h'))
+                self.assertTrue(jdb.get_key_flags('u8')['u8'][0] & int(JKeyFlag.HIDDEN))
+                self.assertEqual(len(jdb.find(vals={'name': 'Alice'})), 1) # hidden is skipped
+                self.assertEqual(len(jdb.find(vals={'name': 'Alice'}, with_hidden=True)), 2)
+                out = DcUser(id='', name='')
+                self.assertTrue(jdb.get_dc('u8', out))
+                self.assertEqual(out.id, 'u8')
+                del jdb['u8']
+            # -------------------------------------------- shared handles stay in sync
+            self.assertEqual(jdb, jdb1)
+            out = DcUser(id='', name='')
+            self.assertTrue(jdb1.get_dc('u1', out))
+            self.assertEqual(out, make_dc_user('u1'))
+            self.assertEqual(jdb.sync_id, jdb1.sync_id)
+
+            error = jdb.check_error()
+            self.assertTrue(not error, Style(f'{filename}:{jdb} {error}', red=1))
+            # -------------------------------------------- codec-neutral end state
+            # a stored set survives msgpack but degrades to a list under JSON/YAML,
+            # so the cross-config comparison below uses a set-free record. The
+            # dataclass round-trip itself stays codec-independent (asserted above,
+            # where DcUser.labels comes back as a set under every data_type).
+            del jdb[:]
+            jdb += DcPoint(id='p1', x=3, y=4)
+            point = DcPoint(id='')
+            self.assertTrue(jdb.get_dc('p1', point))
+            self.assertEqual(point, DcPoint(id='p1', x=3, y=4))
             # --------------------------------------------
             if last_jdb is not None:
                 self.assertEqual(last_jdb - jdb, set())

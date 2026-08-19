@@ -13,6 +13,7 @@ from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Gener
 from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE, THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
+from .jdb_dc import dc_fill, is_dc
 from .jdb_query import QUERY_OPS, Condition, \
             sorted_by_rules, parse_group_by, grouped_by_rules, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
@@ -5098,6 +5099,77 @@ class JDbReader(JDbBase):
         val_bytes = io.unzip(val_bytes, zip_type=zip_type)
         val = io.VAL_loads(val_bytes)
         return val, val_bytes
+
+    def f_read_dc(self, fp_dict:Dict[int,IO], key:str, data:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+        """Read one record and populate every member of an existing dataclass instance.
+
+        The stored value is a plain ``dict`` (as written by :meth:`JDb.f_write_dc`);
+        each field is rebuilt according to the dataclass' type annotations, and
+        ``key`` is written back to the ``id`` field. ``data`` is filled *in place*
+        via ``object.__setattr__``, so ``frozen=True`` dataclasses work and one
+        instance can be reused as a read buffer across a loop -- no allocation
+        per record.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (str): The record key (the value of the dataclass' ``id`` field).
+            data (Any): The dataclass instance to fill.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Passed
+                through to :meth:`f_read`; only :attr:`JKeyFlag.NO_FOLLOW` is
+                meaningful. Defaults to None.
+
+        Returns:
+            bool: True if the record existed and ``data`` was filled; False if the
+            key is missing or expired.
+
+        Raises:
+            JTypeError: If ``data`` is not a dataclass instance.
+            JValueError: If the stored record is not a ``dict``, or a field cannot
+                be coerced into its annotated type.
+
+        Example:
+            >>> user = User(id='', name='')
+            >>> with jdb.open() as fp:
+            ...     jdb.f_read_dc(fp, 'u1', user)
+            True
+        """
+        if not is_dc(data):
+            raise JTypeError(f'expected a dataclass instance, got {type(data).__name__}')
+
+        doc = self.f_read(fp_dict, key, default_val=None, copy=False, key_flags=key_flags)
+        if doc is None:
+            return False
+
+        dc_fill(data, doc, key=key)
+        return True
+
+    def get_dc(self, key:Any, data:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+        """Public wrapper around :meth:`f_read_dc` that opens the database itself.
+
+        Args:
+            key (Any): The record key, or a dataclass instance whose ``id`` is used.
+            data (Any): The dataclass instance to fill.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Passed to
+                :meth:`f_read_dc`. Defaults to None.
+
+        Returns:
+            bool: True if the record existed and ``data`` was filled.
+
+        Example:
+            >>> user = User(id='', name='')
+            >>> jdb.get_dc('u1', user)
+            True
+            >>> jdb.get_dc(user, user) # refresh in place from its own id
+            True
+        """
+        if not is_dc(data):
+            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
+
+        if is_dc(key):
+            key = str(getattr(key, 'id'))
+
+        with self.open(read_only=True) as fp:
+            return self.f_read_dc(fp, key if isinstance(key, str) else str(key), data, key_flags=key_flags)
 
     def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Low-level read of a single record, preferring the in-memory cache

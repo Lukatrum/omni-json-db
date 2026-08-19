@@ -16,6 +16,7 @@ from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
         g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
+from .jdb_dc import  dc_key, dc_to_dict, dc_value, dc_records, dc_keys, is_dc
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
         PAYLOAD_FLAG_MASK, WRITE_LOCK_MASK, DELETE_LOCK_MASK, LOCKED, MISSING, \
@@ -401,6 +402,11 @@ class JDb(JDbReader):
                     
                     >>> jdb['name'] = val
             
+                - dataclass instance (flattened to a dict; the key on the left wins)
+                    
+                    >>> jdb['u1'] = user0 # same bytes as: jdb += user0
+                    >>> jdb['alias'] = user0 # keeps user0.id inside the value
+            
                 - function(k,v)
                     
                     >>> jdb['name'] = lambda k,v : v+1
@@ -415,11 +421,14 @@ class JDb(JDbReader):
             >>> jdb[lambda k,v: v == 10] = 11
             >>> jdb[1:10:2] = "updated"
         """
+        if is_dc(val): # before callable(): a dataclass may define __call__
+            val = dc_value(val, key)
+
         if callable(val):
             func = val
-            arg_cnt = func.__code__.co_argcount
-            if arg_cnt != 2:
-                raise TypeError
+            code = getattr(func, '__code__', None) # a class or builtin has none
+            if code is None or code.co_argcount != 2:
+                raise TypeError(f'invalid value: expected a func(k,v), got {type(val).__name__}')
         else:
             func = None
 
@@ -622,6 +631,12 @@ class JDb(JDbReader):
                     
                     >>> del jdb[re.compile(r'key[0-9]')]
             
+                - dataclass instance(s) (deleted by their ``id`` field)
+
+                    >>> del jdb[user0]
+                    >>> del jdb[user0, user1]
+                    >>> del jdb[[user0, user1]]
+
                 - tuple | set | list | dict
                     
                     >>> del jdb['a', 'b', 'c', 'd']
@@ -638,6 +653,10 @@ class JDb(JDbReader):
             >>> del jdb['name']
             >>> del jdb[lambda k,v: k.startswith('temp_')]
         """
+        dc_sel = dc_keys(key)
+        if dc_sel is not None: # dataclass instance(s) -> their id(s)
+            key = dc_sel
+
         if isinstance(key, str):
             with self.open(read_only=True) as fp:
                 io, fp, key_fp = self.f_get_fp(fp)
@@ -896,7 +915,11 @@ class JDb(JDbReader):
             >>> jdb['key1', 'key2', 'key3'] = 1
             >>> jdb += {'new_key': 99}
         """
-        if isinstance(records, (JDbReader, dict)):
+        dc_table = dc_records(records)
+        if dc_table is not None:
+            self.update(dc_table)
+
+        elif isinstance(records, (JDbReader, dict)):
             self.update(records)
 
         elif isinstance(records, (tuple, list, set, frozenset)): # pragma: no cover
@@ -940,7 +963,11 @@ class JDb(JDbReader):
             >>> jdb['key1', 'key2', 'key3'] = 1
             >>> jdb |= {'new_key': 99}
         """
-        if isinstance(records, (JDbReader, dict)):
+        dc_table = dc_records(records)
+        if dc_table is not None:
+            self.insert(dc_table)
+
+        elif isinstance(records, (JDbReader, dict)):
             self.insert(records)
 
         elif isinstance(records, (tuple, list, set, frozenset)): # pragma: no cover
@@ -986,7 +1013,11 @@ class JDb(JDbReader):
             >>> jdb['key1']
             99
         """
-        if isinstance(records, (JDbReader, dict)):
+        dc_table = dc_records(records)
+        if dc_table is not None:
+            self.replace(dc_table)
+
+        elif isinstance(records, (JDbReader, dict)):
             self.replace(records)
 
         elif isinstance(records, (tuple, list, set, frozenset)): # pragma: no cover
@@ -4490,6 +4521,69 @@ class JDb(JDbReader):
                 return True
 
         return False
+
+    def f_write_dc(self, fp_dict:Dict[int,IO], data:Any, cdays:int=-1, mdays:int=-1, ttl:int=-1,\
+                   flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False,\
+                   key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+        """Write one dataclass instance as a record, using its ``id`` field as the key.
+
+        The instance is flattened into a plain ``dict`` -- ``id`` is lifted out to
+        become the record key and is *not* duplicated inside the value -- then
+        handed to :meth:`f_write`. Because the stored value is an ordinary dict,
+        the record stays queryable by :class:`Query`, exportable by
+        :meth:`to_csv`, and readable under every data_type.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            data (Any): The dataclass instance to store. Its class must declare an
+                ``id`` field, and that field must be non-empty.
+            cdays (int, optional): Creation day index; see :meth:`f_write`. Defaults to -1.
+            mdays (int, optional): Last-modified day index; see :meth:`f_write`. Defaults to -1.
+            ttl (int, optional): Lifetime in days; see :meth:`f_write`. Defaults to -1.
+            flags (Optional[JFlag], optional): Behavioral modifiers. Defaults to None.
+            max_wsize (Optional[int], optional): Max dead rows to scan when reusing space. Defaults to None.
+            overwrite (bool, optional): Overwrite in place instead of parking the
+                old version in a dead row. Defaults to False.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional):
+                :class:`JKeyFlag` bits for the record's KEY row. Defaults to None.
+
+        Returns:
+            bool: True if the record was written, False if the write was refused
+            (e.g. a :attr:`JKeyFlag.READ_ONLY` record).
+
+        Raises:
+            JTypeError: If ``data`` is not a dataclass instance, or holds a field
+                type no codec can encode.
+            JValueError: If the class has no ``id`` field, or ``id`` is empty.
+
+        Example:
+            >>> with jdb.open(read_only=False) as fp:
+            ...     jdb.f_write_dc(fp, User(id='u1', name='Alice'), ttl=30)
+            True
+        """
+        return self.f_write(fp_dict, dc_key(data), dc_to_dict(data), cdays=cdays, mdays=mdays,\
+                            ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite,\
+                            key_flags=key_flags)
+
+    def set_dc(self, data:Any, **kwargs) -> bool:
+        """Public wrapper around :meth:`f_write_dc` that opens the database itself.
+
+        Args:
+            data (Any): The dataclass instance to store.
+            **kwargs: Forwarded to :meth:`f_write_dc` (``ttl``, ``key_flags``, ...).
+
+        Returns:
+            bool: True if the record was written.
+
+        Example:
+            >>> jdb.set_dc(User(id='u1', name='Alice'))
+            True
+        """
+        if not is_dc(data):
+            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
+
+        with self.open(read_only=True) as fp:
+            return self.f_write_dc(fp, data, **kwargs)
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, cdays:int=-1, mdays:int=-1, ttl:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Internal: serialize and write a value to the database (used by :meth:`set`, :meth:`add`, etc.).

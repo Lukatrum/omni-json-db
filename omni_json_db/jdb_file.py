@@ -16,7 +16,7 @@ try:
 
     MAX_FILD_ID = 4096
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    if soft < MAX_FILD_ID <= hard:
+    if soft < MAX_FILD_ID <= hard: # pragma: no cover
         resource.setrlimit(resource.RLIMIT_NOFILE, (MAX_FILD_ID, hard))
 except (ImportError, ValueError, OSError): # pragma: no cover
     pass
