@@ -6,7 +6,6 @@ from datetime import date as dt_date, datetime, timedelta
 from re import compile as re_compile, match as re_match, Pattern
 from threading import RLock, get_ident
 from struct import Struct
-from unicodedata import east_asian_width
 from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
@@ -21,7 +20,7 @@ from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeEr
                 JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, EXPIRED, \
                 KEY_FLAG_MASK, TRANSIENT_FLAG_MASK, conv_to_key_flags, pop_transient_flags, \
                 KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, KF_EXPIRE, KF_UNLOCK, \
-                KF_NO_FOLLOW, F_REVERT, F_FSYNC
+                KF_NO_FOLLOW, F_REVERT, F_FSYNC, get_display_width, print_table
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -4180,8 +4179,6 @@ class JDbReader(JDbBase):
                         if kk not in fields:
                             fields.insert(ii+offset, kk)
 
-        clean_re = re_compile(r'\x1b\[\d\d?m')
-
         def _format_cell(val:Any) -> str:
             """Render one value as display text (colored scalars, short lists,
             or an underlined ``<type:len>`` placeholder)."""
@@ -4208,59 +4205,36 @@ class JDbReader(JDbBase):
                 # with underscore
                 return f"\x1b[4m'<{type(val).__name__}>\x1b[0m"
 
-        def _get_display_width(s_str:str) -> int:
-            width = 0
-            s_str_ = clean_re.sub('', s_str) if s_str.find('\x1b[') >= 0 else s_str
-            for ch in s_str_:
-                width += (2 if east_asian_width(ch) in ('W', 'F', 'A') else 1)
-            return width
-
-        col_widths = {field: _get_display_width(field) for field in fields}
+        col_widths = {field: get_display_width(field) for field in fields}
         matrix = []
         for key,(val,cdate,mdate,_mod_id) in data_rows:
             row_data = {field:'' for field in fields}
             if with_date:
                 row_data['_date'] = _date = f'{cdate} {mdate}'
-                col_widths['_date'] = max(col_widths['_date'], _get_display_width(_date))
+                col_widths['_date'] = max(col_widths['_date'], get_display_width(_date))
 
             row_data['_id'] = key_s = key if isinstance(key, str) else str(key)
-            col_widths['_id'] = max(col_widths['_id'], _get_display_width(key_s))
+            col_widths['_id'] = max(col_widths['_id'], get_display_width(key_s))
             if isinstance(val, dict):
                 for field,vv in val.items():
                     if grouped and field == '_id':
                         field = '_ids' # keep the group value in the _id column
                     row_data[field] = vv_s = _format_cell(vv)
-                    col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+                    col_widths[field] = max(col_widths[field], get_display_width(vv_s))
 
             elif isinstance(val, (str, bytes, bytearray, int, float, bool)) or val is None:
                 field = '__1__'
                 row_data[field] = vv_s = _format_cell(val)
-                col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+                col_widths[field] = max(col_widths[field], get_display_width(vv_s))
 
             elif hasattr(val, '__iter__'):
                 for ii, vv in enumerate(val):
                     field = f'__V{ii+1}__'
                     row_data[field] = vv_s = _format_cell(vv)
-                    col_widths[field] = max(col_widths[field], _get_display_width(vv_s))
+                    col_widths[field] = max(col_widths[field], get_display_width(vv_s))
 
             matrix.append(row_data)
 
-        def _pad_string(s_str, target_width):
-            """Right-pad a string to the target display width."""
-            return s_str + " " * (target_width - _get_display_width(s_str))
-
-        sep = "┼".join("─" * (col_widths[field] + 2) for field in fields)
-        top = "╔" + "╤".join("═" * (col_widths[field] + 2) for field in fields) + "╗"
-        mid = "╟" + sep + "╢"
-        bot = "╚" + "╧".join("═" * (col_widths[field] + 2) for field in fields) + "╝"
-        print()
-        print(top)
-        # with bold+cyan color
-        print("║" + "│".join(" \x1b[96m\x1b[1m" + _pad_string(field, col_widths[field]) + "\x1b[0m " for field in fields) + "║")
-        print(mid)
-        for row_data in matrix:
-            print("║" + "│".join(" " + _pad_string(row_data[field], col_widths[field]) + " " for field in fields) + "║")
-        print(bot)
         _used_s = stats.get('used_s', 0.)
         n_loops = stats.get('loops', 0)
         n_records = stats.get('records', 0)
@@ -4271,7 +4245,7 @@ class JDbReader(JDbBase):
         used_s, unit = (_used_s, 's') if _used_s * 10 > 1. else \
                         (_used_s * 1_000, 'ms') if _used_s * 10_000 > 1. else \
                         (_used_s * 1_000_000, 'us')
-        print(f"\x1b[2mUsed:{used_s:.3f}{unit} | {ops:.3f}{o_unit}/s | {n_loops:,}/{n_records:,}({progress:.2f}%) -> #{len(data_rows):,}\x1b[0m")
+        print_table(fields, matrix, f"\x1b[2mUsed:{used_s:.3f}{unit} | {ops:.3f}{o_unit}/s | {n_loops:,}/{n_records:,}({progress:.2f}%) -> #{len(data_rows):,}\x1b[0m")
         return {k:v[0] for k,v in data_rows}
 
     def sync(self, force:bool=False, with_group:bool=False) -> JDbReader:
@@ -4593,6 +4567,34 @@ class JDbReader(JDbBase):
 
             return data
 
+    def get_dc(self, key:Any, data:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+        """Public wrapper around :meth:`f_read_dc` that opens the database itself.
+
+        Args:
+            key (Any): The record key, or a dataclass instance whose ``id`` is used.
+            data (Any): The dataclass instance to fill.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Passed to
+                :meth:`f_read_dc`. Defaults to None.
+
+        Returns:
+            bool: True if the record existed and ``data`` was filled.
+
+        Example:
+            >>> user = User(id='', name='')
+            >>> jdb.get_dc('u1', user)
+            True
+            >>> jdb.get_dc(user, user) # refresh in place from its own id
+            True
+        """
+        if not is_dc(data):
+            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
+
+        if is_dc(key):
+            key = str(getattr(key, 'id'))
+
+        with self.open(read_only=True) as fp:
+            return self.f_read_dc(fp, key if isinstance(key, str) else str(key), data, key_flags=key_flags)
+
     def check_version(self, version:int, max_version:Optional[int]=None, with_value:bool=False) -> dict:
         """Return the rows whose version (write-session id) falls within
         ``version <= ver <= max_version``, including dead/history rows.
@@ -4628,6 +4630,122 @@ class JDbReader(JDbBase):
         """
         with self.open(read_only=True) as fp:
             return self.f_read_row(fp, row_id, with_value)
+
+    def history(self, key:str, limit:int=0, with_value:bool=False, show:bool=False) -> List[dict]:
+        """Return every stored version of ``key``, newest first.
+
+        The live record comes first (when the key still exists), followed by
+        each superseded version still parked in the index's dead region. A
+        version survives only while :attr:`JFlag.REVERT` is active and the row
+        has not been reclaimed by :meth:`JDb.recycle` or by a later write
+        needing its space, so this is a *best-effort* audit trail, not a
+        write-ahead log: treat a missing version as expected, never as
+        corruption.
+
+        Args:
+            key (str): The record key. Non-``str`` keys are stringified, as
+                everywhere else in the API.
+            limit (int, optional): Keep only the ``limit`` newest versions.
+                ``0`` (the default) returns all of them.
+            with_value (bool, optional): Also decode each version's stored
+                value into the ``'value'`` field. The read bypasses the LRU
+                cache -- a history row must never be served the current value
+                -- and never follows a :attr:`JKeyFlag.LINK`, so a link's
+                history shows the target paths it pointed at. A row that can no
+                longer be decoded yields the :data:`MISSING` sentinel instead of
+                raising. Defaults to ``False``.
+            show (bool, optional): Also print the versions as a console table.
+                The columns are ``ver``, ``row``, ``live``, ``created``,
+                ``modified``, ``flags``, ``TTL`` and ``size`` -- plus ``value``
+                (truncated to 32 characters) when ``with_value`` is set.
+                ``created``/``modified`` are rendered from ``cdays``/``mdays``,
+                and ``size`` shows ``file_id@offset+val_size/row_size`` for a
+                VAL-file row, or just ``val_size`` for one packed inline.
+                Defaults to ``False``.
+
+        Returns:
+            List[dict]: One dict per version, newest first, each holding
+            ``row``, ``key``, ``file_id``, ``offset``, ``row_size``,
+            ``val_size``, ``ver``, ``cdays``, ``mdays``, ``ttl``,
+            ``key_flags`` and ``live`` -- plus ``value`` when ``with_value``
+            is set. An unknown or empty key returns ``[]``.
+
+            ``ver`` is what :meth:`JDb.revert`, :meth:`JDb.unmodify` and
+            :meth:`JDb.unremove` accept as ``version=``, so a row listed here
+            can be restored by name.
+
+            ``live`` is True for the record ``jdb[key]`` reads today and False
+            for every parked version. A deleted key therefore has *no* live
+            entry: its newest version is the value it held when it was removed,
+            but nothing in the index marks that row as the deletion, so a key
+            that was deleted and later written again reports the old deletion
+            row like any other past version.
+
+        Example:
+            >>> jdb = JDb('fruit.jdb') # JFlag.REVERT is what parks the old row
+            >>> jdb['apple'] = 'red'
+            >>> jdb['apple'] = 'green'
+            >>> jdb['apple'] = 'blue'
+            >>> versions = jdb.history('apple', with_value=True, show=True)
+                history[apple]
+                ╔═════╤═════╤══════╤════════════╤════════════╤═══════╤═════╤══════╤═══════╗
+                ║ ver │ row │ live │ created    │ modified   │ flags │ TTL │ size │ value ║
+                ╟─────┼─────┼──────┼────────────┼────────────┼───────┼─────┼──────┼───────╢
+                ║ 2   │ 0   │ YES  │ 2026-08-20 │ 2026-08-20 │       │     │ 5    │ blue  ║
+                ║ 2   │ 1   │ NO   │ 2026-08-20 │ 2026-08-20 │       │     │ 6    │ green ║
+                ╚═════╧═════╧══════╧════════════╧════════════╧═══════╧═════╧══════╧═══════╝
+            >>> [(v['live'], v['value']) for v in versions]
+            [(True, 'blue'), (False, 'green')]
+
+            Only two versions come back: ``'red'``'s row was already reclaimed
+            to make room for a later write, which is the best-effort rule above
+            in action rather than a fault.
+        """
+        key = key if isinstance(key, str) else str(key)
+        with self.open(read_only=True) as fp:
+            rows = self.f_history(fp, key, limit=limit, with_value=with_value)
+
+        if show:
+            fields = ['ver', 'row', 'live', 'created', 'modified', 'flags', 'TTL', 'size']
+            if with_value:
+                fields.append('value')
+
+            max_width = 32
+            matrix = []
+            for item in rows:
+                is_live = item['live']
+                ttl = item['ttl']
+                row_size = item["row_size"]
+                val_size = item["val_size"]
+                key_flags = item['key_flags']
+                row_data = {
+                    'ver':      f'\x1b[93m{item["ver"]}\x1b[0m',
+                    'row':      f'\x1b[93m{item["row"]}\x1b[0m',
+                    'live':    '\x1b[92mYES\x1b[0m' if is_live else '\x1b[91mNO\x1b[0m',
+                    'created':  str(THE_1ST_DATE + timedelta(days=item['cdays'])),
+                    'modified': str(THE_1ST_DATE + timedelta(days=item['mdays'])),
+                    'flags':    str(JKeyFlag(item['key_flags'])) if key_flags > 0 else '',
+                    'TTL':      '' if ttl <= 0 else f'\x1b[93m{ttl}\x1b[0m',
+                    'size':     f'{item["file_id"]}@{item["offset"]:,}+{val_size:,}/{row_size:,}' if row_size > 0 else f'{val_size:,}'
+                }
+
+                if with_value:
+                    val = item['value']
+                    if val is MISSING:
+                        text = '\x1b[91m<unreadable>\x1b[0m'
+                    elif isinstance(val, JDbBase): # a group: never render the child database inline
+                        text = f'\x1b[4m<{type(val).__name__}:{len(val)}>\x1b[0m'
+                    else:
+                        text = val if isinstance(val, str) else repr(val)
+                        text = text.replace('\n', ' ').replace('\r', ' ')
+                        text = text if len(text) <= max_width else f'{text[:max_width-3]}...'
+                    row_data['value'] = text
+                matrix.append(row_data)
+
+            title = f'\x1b[1m\x1b[96mhistory[{key}]\x1b[0m'
+            print_table(fields, matrix, f'\x1b[2m-> #{len(rows):,} version(s)\x1b[0m', title=title)
+
+        return rows
 
     def get_bytes(self, key:str) -> bytes:
         """Return a value's serialized (and, when compression is enabled,
@@ -4969,11 +5087,14 @@ class JDbReader(JDbBase):
         if io.n_lines > row_id >= 0:
             # [Case B] -------------------------------------
             key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row_id)
+            is_active = row_id < io.n_records
             if with_value:
-                val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False)
-                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < io.n_records, val
+                # a dead row holds an OLD value
+                val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False) \
+                        if is_active else self.f_row_value(fp_dict, key, file_id, offset, row_size, val_size)
+                return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, is_active, val
 
-            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < io.n_records
+            return key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, is_active
 
         # [Case C] -------------------------------------
         return None
@@ -5001,19 +5122,120 @@ class JDbReader(JDbBase):
         version = max(version, 0)
         matched_list = {}
         f_decode_value = self.f_decode_value
+        f_row_value = self.f_row_value
         n_records = io.n_records
         row_id = 0
         for (key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags) in io.KEY_iter(key_fp, row_id, io.n_lines):
             if max_version >= ver >= version:
-                data = [key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, row_id < n_records]
+                is_active = row_id < n_records
+                data = [key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags, is_active]
                 if with_value:
-                    val = f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False)
+                    # see f_read_row(): only the live row may go through the cache
+                    val = f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, kflags, update_cache=True, copy=False) \
+                            if is_active else f_row_value(fp_dict, key, file_id, offset, row_size, val_size)
                     data.append(val)
 
                 matched_list[row_id] = data
             row_id += 1
 
         return matched_list
+
+    def f_row_value(self, fp_dict:Dict[int,IO], key:str, file_id:int, offset:int, row_size:int, val_size:int) -> Any:
+        """Decode one KEY row's stored value straight from the index/VAL bytes.
+
+        Unlike :meth:`f_decode_value` this never consults or fills the LRU
+        cache and never follows a :attr:`JKeyFlag.LINK`. Both matter for a
+        history row: the cache is keyed by ``key``, so a cached *current*
+        value would otherwise be handed back in place of the older one.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (str): The record key (only used to resolve an inline group row).
+            file_id (int): The VAL file id, or the inline type id when ``row_size`` is 0.
+            offset (int): The value's offset in the VAL file, or the inline payload.
+            row_size (int): The reserved byte length; ``0`` means the value is
+                packed inside the KEY row.
+            val_size (int): The value's serialized byte length.
+
+        Returns:
+            Any: The decoded value, or the :data:`MISSING` sentinel when the
+            row can no longer be decoded (a reclaimed or truncated history row).
+        """
+        try:
+            if row_size == 0:
+                return self._decode_row(file_id, offset, key, val_size)
+
+            val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
+            return self.io.read_value(val_fp, offset, row_size, val_size)
+
+        except Exception: # pylint: disable=broad-except # pragma: no cover
+            return MISSING
+
+    def f_history(self, fp_dict:Dict[int,IO], key:str, limit:int=0, with_value:bool=False) -> List[dict]:
+        """Internal :meth:`history` — collect every stored version of ``key``, newest first.
+
+        The live row is fetched through the key table in O(1); the parked
+        versions cost one scan of the dead region ``[n_records, n_lines)``.
+        Rows are ordered by ``ver`` descending, with the live row winning the
+        tie it shares with the version it just superseded.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            key (str): The record key.
+            limit (int, optional): Keep only the ``limit`` newest versions.
+                ``0`` means all. Defaults to ``0``.
+            with_value (bool, optional): Also decode each version's value via
+                :meth:`f_row_value`. Defaults to ``False``.
+
+        Returns:
+            List[dict]: The version records — see :meth:`history` for the
+            field list. An unknown or empty key returns ``[]``.
+        """
+        key = key if isinstance(key, str) else str(key)
+        if not key:
+            return []
+
+        io, fp_dict, key_fp = self.f_get_fp(fp_dict)
+        n_records = io.n_records
+        live_row = io.key_table.get(key, -1, fp=key_fp)
+        live_row = live_row if n_records > live_row >= 0 else -1
+        rows = [(live_row, io.read_key(key_fp, live_row))] if live_row >= 0 else []
+        row_id = n_records
+        for info in io.KEY_iter(key_fp, n_records, io.n_lines):
+            if info[0] == key:
+                rows.append((row_id, info))
+
+            row_id += 1
+
+        rows.sort(key=lambda item: (live_row != item[0], -item[1][5], item[0]))
+        if rows and limit > 0:
+            del rows[limit:]
+
+        history = []
+        f_row_value = self.f_row_value
+        for _idx,(row_id, info) in enumerate(rows):
+            _key, file_id, offset, row_size, val_size, ver, cdays, mdays, ttl, kflags = info
+            is_live = row_id == live_row
+            item = {
+                'row':       row_id,
+                'key':       key,
+                'file_id':   file_id,
+                'offset':    offset,
+                'row_size':  row_size,
+                'val_size':  val_size,
+                'ver':       ver,
+                'cdays':     cdays,
+                'mdays':     mdays,
+                'ttl':       ttl,
+                'key_flags': kflags,
+                'live':      is_live,
+            }
+            if with_value:
+                item['value'] = f_row_value(fp_dict, key, file_id, offset, row_size, val_size)
+
+            history.append(item)
+
+        return history
 
     def f_read_bytes(self, fp_dict:Dict[int,IO], key:str) -> bytes:
         """Internal :meth:`get_bytes` — return a value's serialized (and, when
@@ -5142,34 +5364,6 @@ class JDbReader(JDbBase):
 
         dc_fill(data, doc, key=key)
         return True
-
-    def get_dc(self, key:Any, data:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
-        """Public wrapper around :meth:`f_read_dc` that opens the database itself.
-
-        Args:
-            key (Any): The record key, or a dataclass instance whose ``id`` is used.
-            data (Any): The dataclass instance to fill.
-            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Passed to
-                :meth:`f_read_dc`. Defaults to None.
-
-        Returns:
-            bool: True if the record existed and ``data`` was filled.
-
-        Example:
-            >>> user = User(id='', name='')
-            >>> jdb.get_dc('u1', user)
-            True
-            >>> jdb.get_dc(user, user) # refresh in place from its own id
-            True
-        """
-        if not is_dc(data):
-            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
-
-        if is_dc(key):
-            key = str(getattr(key, 'id'))
-
-        with self.open(read_only=True) as fp:
-            return self.f_read_dc(fp, key if isinstance(key, str) else str(key), data, key_flags=key_flags)
 
     def f_read(self, fp_dict:Dict[int,IO], key:Optional[str], default_val:Optional[Any]=None, row:Optional[int]=None, copy:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Low-level read of a single record, preferring the in-memory cache

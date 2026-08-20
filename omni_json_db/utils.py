@@ -3,10 +3,11 @@ from __future__ import annotations
 from enum import IntFlag
 from collections import defaultdict
 from contextlib import contextmanager
-from re import findall as re_findall
+from re import findall as re_findall, compile as re_compile
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
-from typing import Callable, Any, Union, Tuple
+from typing import Callable, Any, Union, Tuple, List, Dict
+from unicodedata import east_asian_width
 #-----------------------------------------------------------------------------
 try:
     import ipdb
@@ -1333,5 +1334,81 @@ class FileLock:
 
         finally:
             self._lock.release()
+
+
+_ANSI_RE = re_compile(r'\x1b\[[\d;]*m') # strip SGR colour codes before measuring a cell
+
+def get_display_width(s_str:str) -> int:
+    """Return the terminal column width of ``s_str``.
+
+    ANSI colour codes are stripped first and East-Asian wide/fullwidth glyphs
+    count as two columns, so a table built from mixed CJK/ASCII text still
+    lines up.
+
+    Args:
+        s_str (str): The already-rendered cell text.
+
+    Returns:
+        int: The number of terminal columns the text occupies.
+    """
+    if s_str.find('\x1b[') >= 0:
+        s_str = _ANSI_RE.sub('', s_str)
+
+    width = 0
+    for ch in s_str:
+        width += (2 if east_asian_width(ch) in ('W', 'F', 'A') else 1)
+
+    return width
+
+def pad_string(s_str:str, target_width:int) -> str:
+    """Right-pad ``s_str`` with spaces to ``target_width`` display columns.
+
+    Args:
+        s_str (str): The already-rendered cell text.
+        target_width (int): The column width to fill.
+
+    Returns:
+        str: The padded text; unchanged when it is already that wide or wider.
+    """
+    return s_str + ' ' * (target_width - get_display_width(s_str))
+
+def print_table(fields:List[str], matrix:List[Dict[str,str]], footer:str='', title:str='') -> None:
+    """Print a box-drawn console table shared by :meth:`JDbReader.show` and :meth:`JDbReader.history`.
+
+    Args:
+        fields (List[str]): Column names, in display order; also the lookup
+            keys into every row of ``matrix``.
+        matrix (List[Dict[str, str]]): One dict per row, mapping a field name
+            to its already-rendered text. A missing field renders empty.
+        footer (str, optional): A dim summary line printed under the table.
+            Defaults to ``''`` (no footer).
+        title (str, optional): A heading printed above the table. Defaults to
+            ``''`` (no heading).
+    """
+    col_widths = {field: get_display_width(field) for field in fields}
+    for row_data in matrix:
+        for field in fields:
+            cell = row_data.get(field, '')
+            width = get_display_width(cell)
+            if width > col_widths[field]:
+                col_widths[field] = width
+
+    top = '╔' + '╤'.join('═' * (col_widths[f] + 2) for f in fields) + '╗'
+    mid = '╟' + '┼'.join('─' * (col_widths[f] + 2) for f in fields) + '╢'
+    bot = '╚' + '╧'.join('═' * (col_widths[f] + 2) for f in fields) + '╝'
+    print()
+    if title:
+        print(title)
+
+    print(top)
+    # with bold+cyan color
+    print('║' + '│'.join(' \x1b[96m\x1b[1m' + pad_string(f, col_widths[f]) + '\x1b[0m ' for f in fields) + '║')
+    print(mid)
+    for row_data in matrix:
+        print('║' + '│'.join(' ' + pad_string(row_data.get(f, ''), col_widths[f]) + ' ' for f in fields) + '║')
+
+    print(bot)
+    if footer:
+        print(footer)
 
 #

@@ -10306,10 +10306,39 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(jdb[key], old_val)
             self.assertEqual(jdb[key], new_val)
 
+            # history() reads the same parked rows revert() walks
+            self.assertEqual(jdb.history('no_such_key'), [])
+            self.assertEqual(jdb.history(''), [])
+            hist = jdb.history(key, with_value=True)
+            self.assertTrue(len(hist) >= 2)
+            self.assertEqual({h['key'] for h in hist}, {key})
+            self.assertEqual([h['live'] for h in hist], [True] + [False] * (len(hist)-1))
+            self.assertEqual([h['ver'] for h in hist], sorted((h['ver'] for h in hist), reverse=True))
+            # newest first, and the parked row is never served the live value out of the LRU cache
+            self.assertEqual(hist[0]['value'], new_val)
+            self.assertEqual(hist[1]['value'], old_val)
+            self.assertTrue(hist[0]['row'] < jdb.n_records <= hist[1]['row'])
+            self.assertEqual(jdb.history(key, with_value=True, limit=1), hist[:1])
+            self.assertNotIn('value', jdb.history(key, limit=1)[0])
+            self.assertEqual(jdb.history(key, with_value=True, show=True), hist) # show must not alter the result
+            for item in hist: # every version agrees with check_row()
+                row = jdb.check_row(item['row'], with_value=True)
+                self.assertEqual(row[0], key)
+                self.assertEqual(row[5], item['ver'])
+                self.assertEqual(row[10], item['live'])
+                self.assertEqual(row[11], item['value'])
+
             ret = jdb.revert(key)
             self.assertTrue(key in ret)
             self.assertEqual(jdb[key], old_val)
             self.assertEqual(jdb1[key], old_val)
+
+            # revert() swapped the two rows: history() must report the swap, not a stale order
+            hist = jdb.history(key, with_value=True)
+            self.assertTrue(len(hist) >= 2)
+            self.assertEqual(hist[0]['value'], old_val)
+            self.assertEqual(hist[1]['value'], new_val)
+            self.assertEqual([h['live'] for h in hist], [True] + [False] * (len(hist)-1))
 
             ret = jdb.revert(key)
             self.assertTrue(key in ret)
@@ -10327,6 +10356,13 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(key not in jdb)
             self.assertEqual(jdb, jdb1)
             self.assertNotEqual(jdb, expect)
+
+            # a deleted key keeps its history, headed by the value it was deleted with
+            hist = jdb.history(key, with_value=True)
+            self.assertTrue(hist)
+            self.assertFalse(any(h['live'] for h in hist))
+            self.assertEqual(hist[0]['value'], old_val)
+            self.assertEqual([h['ver'] for h in hist], sorted((h['ver'] for h in hist), reverse=True))
 
             ret = jdb.revert(key)
             self.assertTrue(key in ret)
@@ -10493,6 +10529,46 @@ class TestJDb(unittest.TestCase):
 
             self.assertTrue(isinstance(jdb.del_group('rv_grp'), JDb))
             jdb.remove('lnk_src', 'lnk_dst', 'lnk_dst2', 'lnk2', 'pref', 'exp', 'ro')
+            self.assertEqual(jdb, expect)
+
+            # revert(version=) targets one parked row instead of the newest
+            vkey = 'rv_ver'
+            vvals = [f'{ii}' + ''.join(chr(33 + (ii * 7 + jj * 13) % 90) for jj in range(64 + ii * 24)) for ii in range(4)]
+            for vval in vvals:
+                jdb[vkey] = vval
+
+            vhist = jdb.history(vkey, with_value=True)
+            self.assertTrue(len(vhist) >= 2)
+            self.assertEqual(vhist[0]['value'], vvals[-1])
+            for item in vhist[1:]: # every parked version must be reachable by name
+                ret = jdb.revert(vkey, version=item['ver'])
+                self.assertEqual(set(ret), {vkey})
+                self.assertEqual(ret[vkey][0], 'CHG')
+                self.assertEqual(jdb[vkey], item['value'])
+
+            # an unmatched version restores nothing and leaves the record alone
+            v_now = jdb[vkey]
+            self.assertEqual(jdb.revert(vkey, version=0x7FF_FFFF_FFFF), {})
+            self.assertEqual(jdb.unmodify(vkey, version=0x7FF_FFFF_FFFF), {})
+            self.assertEqual(jdb[vkey], v_now)
+
+            # ... and it reaches an older *deleted* version too, skipping the newer rows
+            del jdb[vkey]
+            self.assertNotIn(vkey, jdb)
+            vhist = jdb.history(vkey, with_value=True)
+            self.assertFalse(any(vv['live'] for vv in vhist))
+            self.assertEqual(jdb.unremove(vkey, version=0x7FF_FFFF_FFFF), {})
+            self.assertNotIn(vkey, jdb)
+            ret = jdb.revert(vkey, version=vhist[-1]['ver'])
+            self.assertEqual(set(ret), {vkey})
+            self.assertEqual(ret[vkey][0], 'ADD')
+            self.assertEqual(jdb[vkey], vhist[-1]['value'])
+
+            for _meth in (jdb.revert, jdb.unmodify, jdb.unremove): # version= is validated
+                self.assertRaises(ValueError, _meth, vkey, version='1')
+                self.assertRaises(ValueError, _meth, vkey, version=1.5)
+
+            jdb.remove(vkey)
             self.assertEqual(jdb, expect)
 
             # unrevertable but faster: flags=0

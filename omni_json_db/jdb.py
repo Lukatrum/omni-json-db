@@ -1225,19 +1225,30 @@ class JDb(JDbReader):
             except KeyError: # pragma: no cover
                 return default_val
 
-    def unmodify(self, *records:str) -> Dict[str,Any]:
-        """Undo modifications to records (revert to version before last write).
-        
+    def unmodify(self, *records:str, version:Optional[int]=None) -> Dict[str,Any]:
+        """Undo modifications to records (revert to the version before the last write).
+
         Returns a dict of the records restored. Calls :meth:`f_unwrite`.
+        Deleted keys are ignored here -- use :meth:`unremove` for those, or
+        :meth:`revert` for both at once.
 
         Args:
             *records (str): Variadic sequence choosing target keys or groups tracking indicators strings to restore.
+            version (Optional[int], optional): Restore the parked row whose
+                ``ver`` equals this, instead of the most recent one. ``ver`` is
+                the write-session id reported by :meth:`JDbReader.history`, so
+                ``jdb.history(key)[i]['ver']`` names exactly the version this
+                will bring back. A key with no parked row at that version is
+                left untouched and simply absent from the result, the same way
+                a key with no history at all is. ``None`` (the default) takes
+                the newest parked row. Defaults to ``None``.
 
         Returns:
             Dict[str, Any]: Mapping dictionary summarizing all successfully restored entities linked along previous positions data.
-        
+
         Example:
-            >>> recovered_info = jdb.unremove('accidental_delete_key')
+            >>> recovered_info = jdb.unmodify('over_written_key')
+            >>> older = jdb.unmodify('over_written_key', version=7) # a specific history()['ver']
         """
         keys = set()
         results = {}
@@ -1249,6 +1260,9 @@ class JDb(JDbReader):
             else:
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
+
+        if version is not None and not isinstance(version, int):
+            raise JValueError(f'version must be the int "ver" reported by history(), got {type(version).__name__}')
 
         if not keys:
             return results
@@ -1269,8 +1283,9 @@ class JDb(JDbReader):
                 if has_SIGINT():
                     break
 
-                _key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
-                if _key in keys:
+                _key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
+                # a version miss must not consume the key: keep scanning for its other rows
+                if _key in keys and (version is None or _ver == version):
                     keys.remove(_key)
                     chg_row = unwrite(fp, _key, row=row_id)
                     if chg_row:
@@ -1280,16 +1295,29 @@ class JDb(JDbReader):
 
             return results
 
-    def unremove(self, *records:str) -> Dict[str,Any]:
+    def unremove(self, *records:str, version:Optional[int]=None) -> Dict[str,Any]:
         """Undo deletions (bring deleted records back).
 
         Returns a dict of the records restored. Calls :meth:`f_undelete`.
+        Keys that still exist are ignored here -- use :meth:`unmodify` for
+        those, or :meth:`revert` for both at once.
 
         Args:
             *records (str): Keys of the deleted records to restore.
+            version (Optional[int], optional): Restore the parked row whose
+                ``ver`` equals this, instead of the most recent one. ``ver`` is
+                the write-session id reported by :meth:`JDbReader.history`, so
+                ``jdb.history(key)[i]['ver']`` names exactly the version this
+                will bring back. A key with no parked row at that version is
+                left untouched and simply absent from the result, the same way
+                a key with no history at all is. ``None`` (the default) takes
+                the newest parked row. Defaults to ``None``.
 
         Returns:
             Dict[str, Any]: Mapping of restored key to its value.
+
+        Example:
+            >>> recovered_info = jdb.unremove('accidental_delete_key')
         """
         keys = set()
         results = {}
@@ -1301,6 +1329,9 @@ class JDb(JDbReader):
             else:
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
+
+        if version is not None and not isinstance(version, int):
+            raise JValueError(f'version must be the int "ver" reported by history(), got {type(version).__name__}')
 
         if not keys:
             return results
@@ -1321,8 +1352,9 @@ class JDb(JDbReader):
                 if has_SIGINT():
                     break
 
-                _key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
-                if _key in keys:
+                _key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
+                # a version miss must not consume the key: keep scanning for its other rows
+                if _key in keys and (version is None or _ver == version):
                     keys.remove(_key)
                     add_row = undelete(fp, _key, row=row_id)
                     if add_row:
@@ -1334,19 +1366,56 @@ class JDb(JDbReader):
 
             return results
 
-    def revert(self, *records:str) -> Dict[str,Any]:
-        """Revert records to their original values (undo all changes since creation).
+    def revert(self, *records:str, version:Optional[int]=None) -> Dict[str,Any]:
+        """Undo the last change to each record, whatever that change was.
 
-        Returns a dict of the records reverted. Calls :meth:`f_unwrite` repeatedly.
+        The union of :meth:`unmodify` and :meth:`unremove`: a key that still
+        exists is rolled back one write (:meth:`f_unwrite`), a key that was
+        deleted is brought back (:meth:`f_undelete`). By default it restores
+        the *most recent* parked version, so calling it twice on the same key
+        toggles between two values rather than walking further back -- pass
+        ``version`` to reach an older one directly.
+
+        Reverting is a **swap**, not a rewind: the value it displaces is parked
+        in the row the restored one vacated, and both rows are re-stamped with
+        the current ``sync_id``. Version numbers therefore shift after every
+        call, so read :meth:`JDbReader.history` again rather than reusing a
+        ``ver`` from before the revert.
 
         Args:
-            *records (str): Target text identifiers tracking variables contexts fields.
+            *records (str): Target keys; a str, anything hashable (stringified),
+                or an iterable of either.
+            version (Optional[int], optional): Restore the parked row whose
+                ``ver`` equals this, instead of the most recent one. ``ver`` is
+                the write-session id reported by :meth:`JDbReader.history`, so
+                ``jdb.history(key)[i]['ver']`` names exactly the version this
+                will bring back. A key with no parked row at that version is
+                left untouched and simply absent from the result, the same way
+                a key with no history at all is. ``None`` (the default) takes
+                the newest parked row. Defaults to ``None``.
 
         Returns:
-            Dict[str, Any]: Collection mapping keys fields onto recovery structural outcomes status codes.
-            
+            Dict[str, Any]: ``{key: (what, row, file_id, offset, row_size,
+            val_size)}`` for each key actually restored, where ``what`` is
+            ``'ADD'`` for an undeleted record and ``'CHG'`` for a rolled-back
+            one. Keys that had nothing to restore are absent.
+
+        Raises:
+            JValueError: If ``version`` is neither ``None`` nor an ``int``.
+
         Example:
-            >>> status = jdb.revert('target_key_1', 'target_key_2')
+            >>> jdb['apple'] = 'red'
+            >>> jdb['apple'] = 'green'
+            >>> jdb['apple'] = 'blue'
+            >>> [(v['ver'], v['value']) for v in jdb.history('apple', with_value=True)]
+            [(2, 'blue'), (2, 'green'), (1, 'red')]
+            >>> jdb.revert('apple') and jdb['apple'] # newest parked version
+            'green'
+            >>> jdb['apple'] = 'blue'
+            >>> jdb.revert('apple', version=1) and jdb['apple'] # straight back to 'red'
+            'red'
+            >>> jdb.revert('apple', version=999) # no such version -> nothing restored
+            {}
         """
         results = {}
         keys = set()
@@ -1358,6 +1427,9 @@ class JDb(JDbReader):
             else:
                 for kk in key:
                     keys.add(kk if isinstance(kk, str) else str(kk))
+
+        if version is not None and not isinstance(version, int):
+            raise JValueError(f'version must be the int "ver" reported by history(), got {type(version).__name__}')
 
         if not keys:
             return results
@@ -1382,8 +1454,9 @@ class JDb(JDbReader):
                     if has_SIGINT():
                         break
 
-                    _key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
-                    if _key in add_keys:
+                    _key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
+                    # a version miss must not consume the key: keep scanning for its other rows
+                    if _key in add_keys and (version is None or _ver == version):
                         add_keys.remove(_key)
                         add_row = undelete(fp, _key, row=row_id)
                         if add_row:
@@ -1399,8 +1472,9 @@ class JDb(JDbReader):
                     if has_SIGINT():
                         break
 
-                    _key, _f, _o, _r, _v, _s, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
-                    if _key in chg_keys:
+                    _key, _f, _o, _r, _v, _ver, _cd, _md, _tl, _kf = io_read_key(key_fp, row_id)
+                    # a version miss must not consume the key: keep scanning for its other rows
+                    if _key in chg_keys and (version is None or _ver == version):
                         chg_keys.remove(_key)
                         chg_row = unwrite(fp, _key, row=row_id)
                         if chg_row:
@@ -2806,6 +2880,26 @@ class JDb(JDbReader):
             TypeError: If ``records`` is not a valid mapping.
         """
         return self.add(records, default_val=default_val, replace=replace, insert=insert, is_list=False, **kwargs)
+
+    def set_dc(self, data:Any, **kwargs) -> bool:
+        """Public wrapper around :meth:`f_write_dc` that opens the database itself.
+
+        Args:
+            data (Any): The dataclass instance to store.
+            **kwargs: Forwarded to :meth:`f_write_dc` (``ttl``, ``key_flags``, ...).
+
+        Returns:
+            bool: True if the record was written.
+
+        Example:
+            >>> jdb.set_dc(User(id='u1', name='Alice'))
+            True
+        """
+        if not is_dc(data):
+            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
+
+        with self.open(read_only=True) as fp:
+            return self.f_write_dc(fp, data, **kwargs)
 
     def set_date(self, key:str, cdate:Union[str,dt_date,datetime]=None, mdate:Union[str,dt_date,datetime]=None, ttl:Optional[int]=0) -> bool:
         """Set the timestamp (``days``) of a single record.
@@ -4288,57 +4382,6 @@ class JDb(JDbReader):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
             return group
 
-    def f_change_days(self, fp_dict:Dict[int,IO], key:str, days:Union[int,float,str,dt_date,datetime]=-1) -> bool:
-        """
-        Modify the timestamp of a specific Key at the low level without changing the data content.
-
-        Args:
-            fp_dict (Dict[int, IO]): The file descriptor set for the current thread.
-            key (str): The name of the target key.
-            days (Union[int, float, str, dt_date, datetime], optional): The number of days, time object, or string representation of the date to be written. Defaults to -1.
-
-        Returns:
-            bool: Returns True if the write is successful; returns False if it fails or the Key is not found.
-
-        """
-        key = str(key) if not isinstance(key, str) else key
-        try:
-            days = JIo.z_conv_str_to_days(days) if isinstance(days, str) else \
-                   JIo.z_conv_days(days) if not isinstance(days, int)  else days
-        except ValueError: # pragma: no cover
-            return False
-
-        try:
-            io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
-            key_table = io.key_table
-            row = key_table.get(key, -1, fp=key_fp)
-            if not io.n_records > row >= 0:
-                return False
-
-            _key, file_id, offset, row_size, val_size, _ver, old_cdays, old_mdays, old_ttl, kflags = io.read_key(key_fp, row)
-            if days < 0:
-                new_cdays = new_mdays = io.days # today
-
-            elif not days & OLD_DAY_MASK and days & NEW_DAY_MASK:
-                # mdate only form (jdb.keys[key] = date): keep the cdate unless the new date precedes it
-                _delta = (days & NEW_DAY_MASK) >> NEW_DAY_SHIFT
-                new_cdays = old_cdays if _delta >= old_cdays else _delta
-                new_mdays = _delta
-            else:
-                new_cdays = days & OLD_DAY_MASK
-                new_mdays = new_cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
-
-            if new_cdays != old_cdays or new_mdays != old_mdays:
-                io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, cdays=new_cdays, mdays=new_mdays, ttl=old_ttl, flags=kflags)
-                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-
-            return True
-
-        except KeyError: # pragma: no cover
-            return False
-
-        return False
-
     def _get_dead_row(self, key_fp, key:str, req_size:int, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> Tuple[int,int,str,int,int,int]:
         """Internal: find a reusable "dead" row in the index to reuse for a new write.
 
@@ -4564,26 +4607,6 @@ class JDb(JDbReader):
         return self.f_write(fp_dict, dc_key(data), dc_to_dict(data), cdays=cdays, mdays=mdays,\
                             ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite,\
                             key_flags=key_flags)
-
-    def set_dc(self, data:Any, **kwargs) -> bool:
-        """Public wrapper around :meth:`f_write_dc` that opens the database itself.
-
-        Args:
-            data (Any): The dataclass instance to store.
-            **kwargs: Forwarded to :meth:`f_write_dc` (``ttl``, ``key_flags``, ...).
-
-        Returns:
-            bool: True if the record was written.
-
-        Example:
-            >>> jdb.set_dc(User(id='u1', name='Alice'))
-            True
-        """
-        if not is_dc(data):
-            raise TypeError(f'expected a dataclass instance, got {type(data).__name__}')
-
-        with self.open(read_only=True) as fp:
-            return self.f_write_dc(fp, data, **kwargs)
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, cdays:int=-1, mdays:int=-1, ttl:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Internal: serialize and write a value to the database (used by :meth:`set`, :meth:`add`, etc.).
@@ -5517,6 +5540,57 @@ class JDb(JDbReader):
 
         self.safe_line = io.n_records
         return io, fp_dict, key_fp, sync_id != io.sync_id
+
+    def f_change_days(self, fp_dict:Dict[int,IO], key:str, days:Union[int,float,str,dt_date,datetime]=-1) -> bool:
+        """
+        Modify the timestamp of a specific Key at the low level without changing the data content.
+
+        Args:
+            fp_dict (Dict[int, IO]): The file descriptor set for the current thread.
+            key (str): The name of the target key.
+            days (Union[int, float, str, dt_date, datetime], optional): The number of days, time object, or string representation of the date to be written. Defaults to -1.
+
+        Returns:
+            bool: Returns True if the write is successful; returns False if it fails or the Key is not found.
+
+        """
+        key = str(key) if not isinstance(key, str) else key
+        try:
+            days = JIo.z_conv_str_to_days(days) if isinstance(days, str) else \
+                   JIo.z_conv_days(days) if not isinstance(days, int)  else days
+        except ValueError: # pragma: no cover
+            return False
+
+        try:
+            io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
+            key_table = io.key_table
+            row = key_table.get(key, -1, fp=key_fp)
+            if not io.n_records > row >= 0:
+                return False
+
+            _key, file_id, offset, row_size, val_size, _ver, old_cdays, old_mdays, old_ttl, kflags = io.read_key(key_fp, row)
+            if days < 0:
+                new_cdays = new_mdays = io.days # today
+
+            elif not days & OLD_DAY_MASK and days & NEW_DAY_MASK:
+                # mdate only form (jdb.keys[key] = date): keep the cdate unless the new date precedes it
+                _delta = (days & NEW_DAY_MASK) >> NEW_DAY_SHIFT
+                new_cdays = old_cdays if _delta >= old_cdays else _delta
+                new_mdays = _delta
+            else:
+                new_cdays = days & OLD_DAY_MASK
+                new_mdays = new_cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
+
+            if new_cdays != old_cdays or new_mdays != old_mdays:
+                io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, cdays=new_cdays, mdays=new_mdays, ttl=old_ttl, flags=kflags)
+                io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+
+            return True
+
+        except KeyError: # pragma: no cover
+            return False
+
+        return False
 
     @staticmethod
     def z_upgrade_API(KEY_path:Union[str,JDb]) -> JDb: # pragma: no cover
