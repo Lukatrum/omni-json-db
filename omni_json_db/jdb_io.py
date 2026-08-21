@@ -6,7 +6,7 @@ from time import time
 from functools import lru_cache
 from collections import defaultdict, OrderedDict
 from re import findall as re_findall
-from datetime import date as dt_date, datetime  # timedelta
+from datetime import date as dt_date, datetime, timezone  # timedelta
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
 try:
@@ -24,7 +24,8 @@ from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
-        NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, MAX_TTL_DAYS
+        NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, MAX_TTL_DAYS, \
+        SUB_DAY_MASK, MIN_OF_DAY, MIN_SEC, DAY_SEC
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -101,11 +102,10 @@ MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ve
 MIN_KEY_STRUCT_V2 = 8 + 8 * 7  # n_pad, (file_id, offset, row_size, val_size, ver, date, flags)
 
 THE_1ST_DATE    = dt_date(1, 1, 1)
-THE_1ST_SEC     = 59400         # 1970-1-2
-NUM_1970_DAYS   = 719163        # date(1970, 1, 2) - date(1,1,1)
+THE_1ST_SEC     = 0             # 1970-1-1 00:00 UTC: the day number rolls over at UTC midnight
+NUM_1970_DAYS   = 719162        # date(1970, 1, 1) - date(1,1,1)
 NUM_1996_DAYS   = 728689        # date(1996, 2, 1) - date(1,1,1)
 NUM_2000_DAYS   = 730119        # date(2000, 1, 1) - date(1,1,1)
-DAY_SEC         = 24*60*60
 
 # The days layout (created / modified-delta / ttl) and its pack/unpack helpers
 # now live in jdb_codec, next to the JIoKEY codecs that fold and unfold it; the
@@ -1079,7 +1079,7 @@ class JIo(JIoBase):
             '_KEY_rows', '_DEAD_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0',\
-            'max_vfiles', '_val_codec', '_key_codec')
+            'max_vfiles', '_val_codec', '_key_codec', '_now_sec', 'now')
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
@@ -1173,6 +1173,41 @@ class JIo(JIoBase):
             return (timestamp - THE_1ST_DATE).days
 
         return NUM_1970_DAYS + max(0, int(timestamp) - THE_1ST_SEC) // DAY_SEC
+
+    @staticmethod
+    def z_conv_day_num(timestamp:Union[int,float,datetime,dt_date,str]) -> float:
+        """Convert a timestamp into a day number whose fraction is the minute-of-day.
+
+        Args:
+            timestamp (int | float | datetime | dt_date | str): The target timestamp.
+                An ``int`` or ``float`` is a Unix timestamp, as in :meth:`z_conv_days`;
+                a ``date`` or ``'YYYY-MM-DD'`` string carries no time of day.
+
+        Returns:
+            float: The day number, with the minute-of-day in the fraction whenever
+            the value carries a time. An aware ``datetime`` is moved to UTC first;
+            a naive one is taken as it reads.
+
+        Example:
+            >>> JIo.z_conv_day_num(dt_date(2026, 8, 21))
+            739848.0
+            >>> JIo.z_conv_day_num(datetime(2026, 8, 21, 10, 15))
+            739848.4270833333
+        """
+        if isinstance(timestamp, str):
+            return float(JIo.z_conv_str_to_days(timestamp))
+
+        if isinstance(timestamp, datetime): # before dt_date
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+
+            return JIo.z_conv_days(timestamp.date()) + (timestamp.hour * 60 + timestamp.minute) / MIN_OF_DAY
+
+        if isinstance(timestamp, dt_date):
+            return float(JIo.z_conv_days(timestamp))
+
+        elapsed = max(0, int(timestamp) - THE_1ST_SEC)
+        return NUM_1970_DAYS + elapsed // DAY_SEC + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
 
     @staticmethod
     @lru_cache(maxsize=256)
@@ -1347,6 +1382,7 @@ class JIo(JIoBase):
                                 LiteKeyTable(self, (-self._key_limit-1) | 0x1000)
 
         self.days = self.min_days = self._swap_id = self._remv_id = self.max_vfiles = -1
+        self.now = self._now_sec = -1
         self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
 
         self.api_ver        = api_ver
@@ -2010,13 +2046,17 @@ class JIo(JIoBase):
             row_size (int): The reserved byte length of the value row.
             val_size (int, optional): The actual value byte length. Defaults to 0.
             ver (Optional[int], optional): The version (write-session id); ``None`` uses the current ``sync_id``. Defaults to None.
-            cdays (int, optional): Creation day index; ``-1`` means today. Defaults to -1.
-            mdays (int, optional): Last-modified day index; ``-1`` means today,
-                which is how a rewrite touches a record without disturbing its
-                creation date. Values below ``cdays`` are raised to ``cdays``. Defaults to -1.
-            ttl (int, optional): Lifetime in days counted from ``mdays``; ``0``
-                means no TTL. Clamped to :data:`MAX_TTL_DAYS`, and a non-zero
-                value derives :attr:`JKeyFlag.EXPIRE`. Defaults to 0.
+            cdays (int, optional): Creation day index; ``-1`` means today. Masked to
+                22 bits, which covers every date ``datetime`` can express. Defaults to -1.
+            mdays (Union[int, float], optional): Last-modified day index; ``-1`` means
+                now, which is how a rewrite touches a record without disturbing its
+                creation date. A sub-day ``ttl`` keeps the minute-of-day in the
+                fraction; any other ``ttl`` drops it. Values below ``cdays`` are
+                raised to ``cdays``. Defaults to -1.
+            ttl (Union[int, float], optional): Lifetime in days counted from ``mdays``
+                as returned by :func:`conv_ttl` -- a value below ``1.0`` is a minute
+                TTL. ``0`` means no TTL. Clamped to :data:`MAX_TTL_DAYS`, and a
+                non-zero value derives :attr:`JKeyFlag.EXPIRE`. Defaults to 0.
             flags (Optional[int], optional): :class:`JKeyFlag` bits for this record.
                 ``None`` (the default) is treated as ``0``; it is used at call sites that deliberately reset the
                 flags, such as moving a row into the DEAD region. Rewrites of a live
@@ -2026,10 +2066,14 @@ class JIo(JIoBase):
             int: The number of bytes written.
         """
         today = self.days
-        cdays = today if cdays < 0 else (cdays & OLD_DAY_MASK)
-        mdays = today if mdays < 0 else mdays
-        mdays = cdays if mdays < cdays else mdays
         ttl = 0 if ttl <= 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
+        cdays = today if cdays < 0 else (cdays & SUB_DAY_MASK)
+        if mdays < 0:
+            mdays = self.now if 0 < ttl < 1 else today  # only a sub-day ttl needs the minute
+        else:
+            if not 1 > ttl > 0:
+                mdays = int(mdays) if not isinstance(mdays, int) else mdays
+            mdays = cdays if mdays < cdays else mdays
 
         ver_i = ver if ver is not None else self.sync_id
         flags = 0 if flags is None else (int(flags) & KEY_FLAG_MASK)
@@ -2126,14 +2170,35 @@ class JIo(JIoBase):
         return info
 
     def update_days(self) -> int:
-        """Refresh and return today's date as a day count (days since the epoch date).
+        """Refresh today's day number and the matching minute-of-day.
 
         Returns:
-            int: Today's day number.
+            int: Today's day number. :attr:`now` holds the same instant as a
+            float whose fraction is the minute-of-day, which is what a sub-day
+            TTL is measured against.
         """
-        timestamp = int(time())
-        self.days = NUM_1970_DAYS + max(0, timestamp - THE_1ST_SEC) // DAY_SEC
+        self._now_sec = ts = int(time())
+        elapsed = max(0, ts - THE_1ST_SEC)
+        self.days = NUM_1970_DAYS + elapsed // DAY_SEC
+        self.now = self.days + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
         return self.days
+
+    @property
+    def utc_now(self) -> float:
+        """float: Today's day number with the live minute-of-day in the fraction.
+
+        Reading it also refreshes :attr:`days` and :attr:`now`, which are only as
+        fresh as the last :meth:`update_days` -- good enough for whole days but
+        not for a minute TTL, so every sub-day expiry test reads this instead.
+        """
+        ts = int(time())
+        if ts != self._now_sec:                     # the minute only moves once every 60 s
+            self._now_sec = ts
+            elapsed = max(0, ts - THE_1ST_SEC)
+            self.days = days = NUM_1970_DAYS + elapsed // DAY_SEC
+            self.now = days + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
+
+        return self.now
 
     def is_updated(self) -> bool:
         """Check whether the in-memory counters match the KEY file on disk.
@@ -2162,6 +2227,7 @@ class JIo(JIoBase):
         self.reserved_rate = max(kwargs.get('reserved_rate', self.reserved_rate), DEF_RATIO)
         self.sync_id = self.swap_id = self.remv_id = self._sync_id = self.n_records = self.n_lines  = self.file_size = 0
         self.days = self._swap_id = self.min_days = self._remv_id = self._n_records = self._n_lines = self.max_vfiles = -1
+        self.now = self._now_sec = -1
         self.key_table.clear()
         self.file_table.clear()
         self._KEY_rows.clear()

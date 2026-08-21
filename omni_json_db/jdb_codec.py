@@ -2,7 +2,8 @@
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from functools import reduce
-from typing import Optional, Any, Dict, Set, List, Tuple, Callable
+from typing import Optional, Any, Dict, Set, List, Tuple, Callable, Union
+from datetime import timedelta
 from pickle import loads as pickle_loads, dumps as pickle_dumps, PicklingError, UnpicklingError # nosec B403
 from marshal import loads as marshal_loads, dumps as marshal_dumps # nosec B403
 
@@ -622,7 +623,13 @@ OLD_DAY_MASK    = 0x3FF_FFFF                        # created, bit 0..25
 MAX_DAY_DELTA   = 0x3F_FFFF
 NEW_DAY_MASK    = MAX_DAY_DELTA << NEW_DAY_SHIFT    # delta, bits 26..47
 
-# --- EXPIRE set: [ 9-bit ttl @39 ][ 13-bit delta @26 ][ 26-bit created @0 ] ---
+# --- EXPIRE set, shared: [ 1-bit sub-day @22 ][ 22-bit created @0 ] ---
+# bit 22 is free to read before the layout is known: 2**22 days is year 11485, past
+# datetime.MAXYEAR, so no legal creation date can ever set it in the day layout.
+SUB_DAY_BIT     = 1 << 22                           # 0 = ttl in days, 1 = ttl in minutes
+SUB_DAY_MASK    = 0x3F_FFFF                         # created, bits 0..21 -> beyond datetime.MAXYEAR
+
+# --- EXPIRE set, day unit: [ 9-bit ttl @39 ][ 13-bit delta @26 ][ 5-bit reserved @21 ] ---
 TTL_SHIFT       = 39
 TTL_DAY_MASK    = 0x1FF
 MAX_EXP_DELTA   = 0x1FFF                            # 8191 days ~ 22.4 years
@@ -630,8 +637,127 @@ MAX_TTL_DAYS    = TTL_DAY_MASK                      # 511 days
 TTL_MASK        = TTL_DAY_MASK << TTL_SHIFT         # bits 39..47
 EXP_DELTA_MASK  = MAX_EXP_DELTA << NEW_DAY_SHIFT    # bits 26..38
 
-if (NEW_DAY_MASK | OLD_DAY_MASK | TTL_MASK) & ~FULL_DAY_MASK: # pragma: no cover
+# --- EXPIRE set, minute unit: [ 11-bit ttl @37 ][ 11-bit mmin @26 ][ 3-bit delta @23 ] ---
+TTL_MIN_SHIFT   = 37
+MAX_TTL_MINS    = 0x7FF                             # 2047 min ~ 34.1 h (conv_ttl never exceeds 1439)
+TTL_MIN_MASK    = MAX_TTL_MINS << TTL_MIN_SHIFT     # bits 37..47
+MIN_MASK        = 0x7FF << NEW_DAY_SHIFT            # modified minute-of-day, bits 26..36
+SUB_DELTA_SHIFT = 23
+MAX_SUB_DELTA   = 0x7                               # 7 days
+SUB_DELTA_MASK  = MAX_SUB_DELTA << SUB_DELTA_SHIFT  # bits 23..25
+
+MIN_SEC         = 60
+MIN_OF_DAY      = 1440
+DAY_SEC         = MIN_OF_DAY*MIN_SEC
+MIN_TTL_DAYS    = 1.0 / MIN_OF_DAY                  # the smallest ttl that can be stored
+HALF_MIN_DAYS   = 0.5 / MIN_OF_DAY                  # guard band: mdays+ttl is not exact in float
+
+if (NEW_DAY_MASK | OLD_DAY_MASK | TTL_MASK | TTL_MIN_MASK | SUB_DAY_BIT) & ~FULL_DAY_MASK: # pragma: no cover
     raise RuntimeError('collide with Key flag')
+
+if (TTL_MIN_MASK | MIN_MASK | SUB_DELTA_MASK | SUB_DAY_BIT | SUB_DAY_MASK) != FULL_DAY_MASK: # pragma: no cover
+    raise RuntimeError('minute layout does not fill the day field')
+
+def conv_ttl(ttl:Optional[Union[int,float,timedelta]]) -> Union[int,float]:
+    """Normalize a TTL argument to days, keeping sub-day lifetimes as a fraction.
+
+    Args:
+        ttl (Optional[Union[int, float, timedelta]]): ``int`` counts whole days,
+            ``float`` counts days so a fraction falls through to minutes
+            (``0.25`` is 6 hours), and a :class:`~datetime.timedelta` is taken as
+            it stands. Anything shorter than one day resolves to whole minutes
+            rounded up; one day or longer resolves to whole days rounded up.
+
+    Returns:
+        Union[int, float]: Lifetime in days. ``-1`` means 'leave it as it is'
+        (``None`` or a negative argument), ``0`` means no TTL, a ``float`` below
+        ``1.0`` is a minute TTL and an ``int`` is a whole-day TTL. The fraction
+        shows up exactly where it carries information, so day TTLs keep the
+        integer arithmetic they always had.
+
+    Raises:
+        JValueError: If ``ttl`` is not an int, float, timedelta or ``None``.
+
+    Example:
+        >>> conv_ttl(45), conv_ttl(0.25) * MIN_OF_DAY, conv_ttl(1.5)
+        (45, 360.0, 2)
+        >>> conv_ttl(timedelta(hours=23)) * MIN_OF_DAY, conv_ttl(timedelta(seconds=61)) * MIN_OF_DAY
+        (1380.0, 2.0)
+    """
+    if ttl is None:
+        return -1
+
+    if isinstance(ttl, timedelta):
+        secs = ttl.total_seconds()
+    elif isinstance(ttl, (int, float)) and not isinstance(ttl, bool):
+        secs = ttl * DAY_SEC
+    else:
+        raise JValueError(f'invalid ttl type: {type(ttl).__name__}')
+
+    if secs <= 0:
+        return -1 if secs < 0 else 0            # the contract is exactly -1 or 0, not -1e-06
+
+    # round first, or 0.1 * DAY_SEC lands on 8640.000000000001
+    secs = max(1, round(secs))
+    return (min(-(-secs // MIN_SEC), MAX_TTL_MINS) / MIN_OF_DAY) if secs < DAY_SEC else \
+            min(-(-secs // DAY_SEC), MAX_TTL_DAYS)
+
+def pack_days(cdays:Union[int,float], mdays:Union[int,float], ttl:Union[int,float]=0) -> int:
+    """Pack created/modified/ttl into the 48-bit ``days`` field.
+
+    Args:
+        cdays (Union[int, float]): Creation day number.
+        mdays (Union[int, float]): Modification day number; the fraction carries
+            the minute-of-day and is only stored for a sub-day ``ttl``.
+        ttl (Union[int, float], optional): Lifetime in days as returned by
+            :func:`conv_ttl`. Defaults to 0.
+
+    Returns:
+        int: The packed ``days`` field, 48 bits wide.
+    """
+    cday_i, mday_i = int(cdays), int(mdays)
+    delta = mday_i - cday_i
+    if ttl <= 0:
+        return ((cday_i & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cday_i & OLD_DAY_MASK)
+
+    if ttl >= 1 or mday_i > SUB_DAY_MASK:            # day layout, or a date 20 bits cannot hold
+        ttl_i = min(int(ttl), MAX_TTL_DAYS)
+        if delta > MAX_EXP_DELTA:
+            cday_i, delta = mday_i, 0
+        return (cday_i & OLD_DAY_MASK) | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl_i << TTL_SHIFT)
+
+    ttl_i = max(1, min(round(ttl * MIN_OF_DAY), MAX_TTL_MINS))
+    if not MAX_SUB_DELTA >= delta >= 0:
+        cday_i, delta = mday_i, 0                   # short-lived record: the creation date is expendable
+    mmin = round((mdays - mday_i) * MIN_OF_DAY) % MIN_OF_DAY
+    return (cday_i & SUB_DAY_MASK) | (delta << SUB_DELTA_SHIFT) | SUB_DAY_BIT \
+            | (mmin << NEW_DAY_SHIFT) | (ttl_i << TTL_MIN_SHIFT)
+
+
+def unpack_days(days:int, flags:int) -> Tuple[int,Union[int,float],Union[int,float]]:
+    """Unpack the 48-bit ``days`` field.
+
+    Args:
+        days (int): The packed field, key flags already stripped.
+        flags (int): The record's :class:`JKeyFlag` bits, used to pick the layout.
+
+    Returns:
+        Tuple[int, Union[int,float], Union[int,float]]: ``(cdays, mdays, ttl)``,
+        both day counts in days. A sub-day TTL makes ``mdays`` a float whose
+        fraction is the minute-of-day and ``ttl`` a float below ``1.0``; a
+        whole-day row stays entirely in ints, as it always was.
+    """
+    if not flags & KF_EXPIRE:
+        cdays = days & OLD_DAY_MASK
+        return cdays, cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT), 0
+
+    if not days & SUB_DAY_BIT:
+        cdays = days & OLD_DAY_MASK
+        return cdays, cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT), (days & TTL_MASK) >> TTL_SHIFT
+
+    cdays = days & SUB_DAY_MASK
+    mdays = cdays + ((days & SUB_DELTA_MASK) >> SUB_DELTA_SHIFT) + ((days & MIN_MASK) >> NEW_DAY_SHIFT) / MIN_OF_DAY
+    return cdays, mdays, ((days & TTL_MIN_MASK) >> TTL_MIN_SHIFT) / MIN_OF_DAY
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -916,12 +1042,14 @@ class JIoKEY_J(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
@@ -939,8 +1067,11 @@ class JIoKEY_J(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -954,12 +1085,14 @@ class JIoKEY_J(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
@@ -974,8 +1107,11 @@ class JIoKEY_J(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -989,12 +1125,14 @@ class JIoKEY_J(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return _json_dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
@@ -1008,8 +1146,11 @@ class JIoKEY_J(JIoKEY):
             key, file_id, offset, row_size, val_size, ver, days, flags = _json_loads(data)[:8]
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1025,12 +1166,14 @@ class JIoKEY_S(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size | (val_size << 32), ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
@@ -1053,8 +1196,11 @@ class JIoKEY_S(JIoKEY):
                 flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
                 cdays = days & OLD_DAY_MASK
                 if flags & KF_EXPIRE:
-                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                    if days & SUB_DAY_BIT:
+                        cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                    else:
+                        mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                        ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
                     mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                     ttl = 0
@@ -1070,12 +1216,14 @@ class JIoKEY_S(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT))) or b''
@@ -1096,8 +1244,11 @@ class JIoKEY_S(JIoKEY):
                 flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
                 cdays = days & OLD_DAY_MASK
                 if flags & KF_EXPIRE:
-                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                    if days & SUB_DAY_BIT:
+                        cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                    else:
+                        mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                        ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
                     mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                     ttl = 0
@@ -1113,12 +1264,14 @@ class JIoKEY_S(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             info_b = _msg_dumps((key, file_id, offset, row_size, val_size, ver, days, flags)) or b''
@@ -1138,8 +1291,11 @@ class JIoKEY_S(JIoKEY):
                 key, file_id, offset, row_size, val_size, ver, days, flags = _msg_loads(data[3:end_idx])[:8]
                 cdays = days & OLD_DAY_MASK
                 if flags & KF_EXPIRE:
-                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                    ttl = (days & TTL_MASK) >> TTL_SHIFT
+                    if days & SUB_DAY_BIT:
+                        cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                    else:
+                        mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                        ttl = (days & TTL_MASK) >> TTL_SHIFT
                 else:
                     mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                     ttl = 0
@@ -1157,12 +1313,14 @@ class JIoKEY_M(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
@@ -1182,8 +1340,11 @@ class JIoKEY_M(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1199,12 +1360,14 @@ class JIoKEY_M(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
@@ -1221,8 +1384,11 @@ class JIoKEY_M(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1238,12 +1404,14 @@ class JIoKEY_M(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             # nosemgrep
@@ -1259,8 +1427,11 @@ class JIoKEY_M(JIoKEY):
             key, file_id, offset, row_size, val_size, ver, days, flags = marshal_loads(data)[:8] # nosec B302
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1278,12 +1449,14 @@ class JIoKEY_L(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size | (val_size << 32)}|{ver}|{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
@@ -1325,8 +1498,11 @@ class JIoKEY_L(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1340,12 +1516,14 @@ class JIoKEY_L(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)}'
@@ -1368,8 +1546,11 @@ class JIoKEY_L(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1383,12 +1564,14 @@ class JIoKEY_L(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             data = f'{key},{file_id},{offset},{row_size},{val_size},{ver},{days},{flags}'
@@ -1410,8 +1593,11 @@ class JIoKEY_L(JIoKEY):
             file_id, offset, row_size, val_size, ver, days, flags = (int(field) for field in fields[-7:])
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1536,12 +1722,14 @@ class JIoKEY_U(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days, flags))
@@ -1558,8 +1746,11 @@ class JIoKEY_U(JIoKEY):
             key, file_id, offset, row_size, val_size, ver, days, flags = self._loads(data)[:8]
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1577,12 +1768,14 @@ class JIoKEY_U(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
@@ -1599,8 +1792,11 @@ class JIoKEY_U(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0
@@ -1617,12 +1813,14 @@ class JIoKEY_U(JIoKEY):
         try:
             delta = mdays - cdays
             if ttl <= 0:
-                days = ((cdays & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+                days = ((cdays & OLD_DAY_MASK) | (int(delta) << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cdays & OLD_DAY_MASK)
+            elif ttl < 1:
+                days = pack_days(cdays, mdays, ttl)     # sub-day ttl: the minute layout
             else:
                 ttl = ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS
+                delta = int(delta)                      # a rewrite can hand over a sub-day mdays
                 if delta > MAX_EXP_DELTA:
-                    cdays = (cdays + delta) & OLD_DAY_MASK
-                    days = cdays | (ttl << TTL_SHIFT)
+                    days = (cdays + delta) & OLD_DAY_MASK | (ttl << TTL_SHIFT)
                 else:
                     days = cdays | ((delta << NEW_DAY_SHIFT) & EXP_DELTA_MASK) | (ttl << TTL_SHIFT)
             return self._dumps_v0((key, file_id, offset, row_size, val_size, ver, days | ((flags & KEY_FLAG_MASK) << KEY_FLAG_SHIFT)))
@@ -1639,8 +1837,11 @@ class JIoKEY_U(JIoKEY):
             flags = ((days >> KEY_FLAG_SHIFT) & KEY_FLAG_MASK) | (KF_GROUP if row_size == 0 and file_id == 0x10 else 0)
             cdays = days & OLD_DAY_MASK
             if flags & KF_EXPIRE:
-                mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
-                ttl = (days & TTL_MASK) >> TTL_SHIFT
+                if days & SUB_DAY_BIT:
+                    cdays, mdays, ttl = unpack_days(days, flags)     # sub-day ttl: the minute layout
+                else:
+                    mdays = cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT)
+                    ttl = (days & TTL_MASK) >> TTL_SHIFT
             else:
                 mdays = cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT)
                 ttl = 0

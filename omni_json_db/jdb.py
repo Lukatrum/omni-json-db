@@ -12,11 +12,12 @@ from collections import OrderedDict
 from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
         VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, NEW_DAY_SHIFT, \
-        API_LATEST, NEW_DAY_MASK, OLD_DAY_MASK, THE_1ST_DATE, MAX_TTL_DAYS, \
+        API_LATEST, NEW_DAY_MASK, OLD_DAY_MASK, THE_1ST_DATE, \
         g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
 from .jdb_dc import  dc_key, dc_to_dict, dc_value, dc_records, dc_keys, is_dc
+from .jdb_codec import conv_ttl, MAX_TTL_DAYS, HALF_MIN_DAYS
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         JKeyFlag, JFlag, USER_FLAG_MASK, WRITABLE_FLAG_MASK, DERIVED_FLAG_MASK, \
         PAYLOAD_FLAG_MASK, WRITE_LOCK_MASK, DELETE_LOCK_MASK, LOCKED, MISSING, \
@@ -430,10 +431,10 @@ class JDb(JDbReader):
             >>> jdb[lambda k,v: v == 10] = 11
             >>> jdb[1:10:2] = "updated"
         """
-        if is_dc(val): # before callable(): a dataclass may define __call__
+        if is_dc(val):      # before callable(): a dataclass may define __call__
             val = dc_value(val, key)
-
-        if callable(val):
+            func = None
+        elif callable(val):
             func = val
             code = getattr(func, '__code__', None) # a class or builtin has none
             if code is None or code.co_argcount != 2:
@@ -1532,7 +1533,7 @@ class JDb(JDbReader):
                 row_id, flags = key_table.get_both(key, fp=key_fp)
                 if flags & KF_EXPIRE:
                     _key, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kfs = io.read_key(key_fp, row_id)
-                    if ttl > 0 and io.days > (mdays + ttl):
+                    if ttl and (io.days > mdays + ttl if ttl >= 1 else io.utc_now - HALF_MIN_DAYS > mdays + ttl):
                         del_rows.append((row_id, _key))
 
             if del_rows:
@@ -1934,7 +1935,11 @@ class JDb(JDbReader):
 
         return True
 
-    def upgrade(self, folder:str='bak', data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, fast_mode:bool=True, **kwargs) -> JDb:
+    def upgrade(self, \
+            folder:str='bak', \
+            data_type:Union[str,int,None]=None, \
+            zip_type:Union[str,int,None]=None, \
+            fast_mode:bool=True, **kwargs) -> JDb:
         """Upgrade the database to a newer format and/or change serialization/compression.
         
         Creates a backup in ``folder``, then rebuilds the database with the new settings.
@@ -2113,7 +2118,11 @@ class JDb(JDbReader):
 
         return jdb.clone_to(self, signal='r', fast_mode=fast_mode, **kwargs)
 
-    def backup(self, folder:Optional[str]=None, data_type:Union[str,int,None]=None, zip_type:Union[str,int,None]=None, fast_mode:bool=True, **kwargs) -> JDb:
+    def backup(self, \
+            folder:Optional[str]=None, \
+            data_type:Union[str,int,None]=None, \
+            zip_type:Union[str,int,None]=None, \
+            fast_mode:bool=True, **kwargs) -> JDb:
         """Create a backup copy of the database (optionally with different format).
         
         If ``data_type`` or ``zip_type`` is specified, the backup uses the new format.
@@ -2173,8 +2182,7 @@ class JDb(JDbReader):
         target_jdb = JDb(path if path else None, zip_type=zip_type, data_type=data_type, **kwargs)
         return self.clone_to(target_jdb, data_type=data_type,  zip_type=zip_type, fast_mode=fast_mode, **kwargs)
 
-    def clone_to(self, \
-            target:Union[JDb,JFilesBase,str], \
+    def clone_to(self, target:Union[JDb,JFilesBase,str], \
             signal:str='.', \
             fast_mode:bool=True, \
             max_file_size:Optional[int]=None, \
@@ -2513,19 +2521,20 @@ class JDb(JDbReader):
 
         return jdb
 
-    def set_key_flags(self, key:Union[str,Any]=None,\
-                        flags:Optional[Union[str,int,JKeyFlag]]=None,\
-                        read_only:Optional[bool]=None,\
-                        append_only:Optional[bool]=None,\
-                        no_cache:Optional[bool]=None,\
-                        no_revert:Optional[bool]=None,\
-                        no_delete:Optional[bool]=None,\
-                        hidden:Optional[bool]=None,\
-                        user0:Optional[bool]=None,\
-                        user1:Optional[bool]=None,\
-                        user2:Optional[bool]=None,\
-                        user3:Optional[bool]=None,
-                        ttl:Optional[int]=None) -> Dict[str,Tuple[int,int]]:
+    def set_key_flags(self, \
+            key:Union[str,Any]=None,\
+            flags:Optional[Union[str,int,JKeyFlag]]=None,\
+            read_only:Optional[bool]=None,\
+            append_only:Optional[bool]=None,\
+            no_cache:Optional[bool]=None,\
+            no_revert:Optional[bool]=None,\
+            no_delete:Optional[bool]=None,\
+            hidden:Optional[bool]=None,\
+            user0:Optional[bool]=None,\
+            user1:Optional[bool]=None,\
+            user2:Optional[bool]=None,\
+            user3:Optional[bool]=None,
+            ttl:Optional[Union[int,float,timedelta]]=None) -> Dict[str,Tuple[int,Union[int,float]]]:
 
         """Set or clear :class:`JKeyFlag` bits on every record matching ``key``.
 
@@ -2574,15 +2583,20 @@ class JDb(JDbReader):
             user1 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER1`. Defaults to None.
             user2 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER2`. Defaults to None.
             user3 (Optional[bool], optional): Toggle :attr:`JKeyFlag.USER3`. Defaults to None.
-            ttl (Optional[int], optional): Lifetime in days from the record's
-                *modified* date, clamped to :data:`MAX_TTL_DAYS` (511). ``0``
-                removes the TTL and restores the wide 22-bit modified-delta
-                layout; ``None`` (the default) leaves it as it is. Defaults to None.
+            ttl (Optional[int|float|timedelta], optional): Lifetime from the record's *modified*
+                stamp: an ``int`` counts days (clamped to :data:`MAX_TTL_DAYS`),
+                a ``float`` counts days so a fraction falls through to minutes
+                (``0.25`` is 6 hours), and a ``timedelta`` is taken as it stands.
+                Anything under a day is stored to the minute, anything longer is
+                rounded up to whole days. ``0`` removes the TTL and restores the
+                wide 22-bit modified-delta layout; ``None`` (the default) leaves
+                it as it is. Defaults to None.
 
         Returns:
-            Dict[str, Tuple[int, int]]: ``{key: (new_flags, new_ttl)}`` for the
-            records that actually changed. Records already holding the requested
-            flags and TTL are omitted.
+            Dict[str, Tuple[int, Union[int, float]]]: ``{key: (new_flags, new_ttl)}``
+            for the records that actually changed, ``new_ttl`` counted in days --
+            an ``int`` for a whole-day TTL, a ``float`` below ``1.0`` for a minute
+            one. Records already holding the requested flags and TTL are omitted.
 
         Example:
             >>> jdb.set_key_flags('audit/2026-08', append_only=True, no_revert=True)
@@ -2608,7 +2622,7 @@ class JDb(JDbReader):
                     clr_mask |= int(_bit)
 
         # clamp once here, or the returned ttl would disagree with the stored one
-        new_ttl_arg = 0 if ttl is None or ttl <= 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
+        new_ttl_arg = (0 if ttl is None or ttl <= 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl))
         if set_mask or clr_mask:
             pending = {}    # own records:  key -> new_flags
             deferred = {}   # group records: grp_name -> {sub_key: new_flags}
@@ -2792,7 +2806,11 @@ class JDb(JDbReader):
 
         return False
 
-    def set(self, key:str, val:Any, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Optional[Any]:
+    def set(self, key:str, val:Any, \
+            flags:Optional[JFlag]=None, \
+            max_wsize:Optional[int]=None, \
+            ttl:Union[int,float,timedelta]=-1, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Optional[Any]:
         """Write a single record and return the value written (or the old value, if using an update function).
 
         Args:
@@ -2828,6 +2846,13 @@ class JDb(JDbReader):
                     - None = use default max_wsize (4)
                     - -ve = disable searching
 
+            ttl (int|float|timedelta, optional): Lifetime counted from the record's
+                *modified* stamp -- days as an int, days as a float, or a
+                ``timedelta``; see :func:`conv_ttl`. Clamped to :data:`MAX_TTL_DAYS`.
+                ``-1`` (the default) keeps whatever the record already has and
+                starts a new record without a TTL; ``0`` explicitly clears an
+                existing TTL. Defaults to -1.
+
             key_flags (Optional[Union[str, int, JKeyFlag]], optional):
                 :class:`JKeyFlag` bits to store alongside the value. A
                 ``chmod``-style string is *relative* to the record's current
@@ -2862,17 +2887,20 @@ class JDb(JDbReader):
                 new_val = func(key, deepcopy(old_val))
                 not_eq = new_val != old_val
                 if not_eq or key_flags is not None:
-                    if self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=key_flags):
+                    if self.f_write(fp, key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=key_flags, ttl=ttl):
                         return new_val
 
                 return old_val
 
-            if self.f_write(fp, key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+            if self.f_write(fp, key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags, ttl=ttl):
                 return val
 
         return None
 
-    def set_n(self, records:Dict[str,Any], default_val:Optional[Any]=None, replace:bool=True, insert:bool=True, **kwargs) -> Dict[str,Any]:
+    def set_n(self, records:Dict[str,Any], \
+            default_val:Optional[Any]=None, \
+            replace:bool=True, \
+            insert:bool=True, **kwargs) -> Dict[str,Any]:
         """Write multiple records from a dict (equivalent to :meth:`add` with ``is_list=False``).
 
         Args:
@@ -2910,7 +2938,10 @@ class JDb(JDbReader):
         with self.open(read_only=True) as fp:
             return self.f_write_dc(fp, data, **kwargs)
 
-    def set_date(self, key:str, cdate:Union[str,dt_date,datetime]=None, mdate:Union[str,dt_date,datetime]=None, ttl:Optional[int]=0) -> bool:
+    def set_date(self, key:str, \
+            cdate:Union[str,dt_date,datetime]=None, \
+            mdate:Union[str,dt_date,datetime]=None, \
+            ttl:Optional[Union[int,float,timedelta]]=0) -> bool:
         """Set the timestamp (``days``) of a single record.
 
         Args:
@@ -2944,7 +2975,7 @@ class JDb(JDbReader):
             if isinstance(cdate, str):
                 cdays = JIo.z_conv_str_to_days(cdate)
             elif isinstance(cdate, (dt_date, datetime)):
-                cdays = JIo.z_conv_days(cdate)
+                cdays = int(JIo.z_conv_day_num(cdate))      # a creation stamp keeps no minute
             else:
                 raise TypeError('invalid cdate type')
 
@@ -2953,12 +2984,11 @@ class JDb(JDbReader):
             if isinstance(mdate, str):
                 mdays = JIo.z_conv_str_to_days(mdate)
             elif isinstance(mdate, (dt_date, datetime)):
-                mdays = JIo.z_conv_days(mdate)
+                mdays = JIo.z_conv_day_num(mdate)
             else:
                 raise TypeError('invalid mdate type')
 
-        if ttl is not None and not isinstance(ttl, int):
-            raise TypeError('invalid ttl type')
+        ttl = None if ttl is None else conv_ttl(ttl)
 
         if cdays is not None or mdays is not None or ttl is not None:
             with self.open(read_only=True) as fp:
@@ -3009,7 +3039,9 @@ class JDb(JDbReader):
         """
         return self.add(records, default_val=default_val, replace=True, insert=True, is_list=False, **kwargs)
 
-    def update_if(self, condition: Union[Condition,dict], patch: Union[Dict[str,Any],Callable[[str,Any],Dict[str,Any]]], with_hidden:bool=False) -> int:
+    def update_if(self, condition: Union[Condition,dict], \
+            patch: Union[Dict[str,Any],Callable[[str,Any],Dict[str,Any]]], \
+            with_hidden:bool=False) -> int:
         """Merge `patch` into every record (dict value) matching `condition`.
 
         This is a query-driven bulk mutation, so it honours
@@ -3318,7 +3350,10 @@ class JDb(JDbReader):
 
         return self
 
-    def from_parquet(self, parquet_file:Union[str,IO], key:Optional[str]=None, columns:Optional[List[str]]=None, batch_size:int=65536, **kwargs) -> JDb:
+    def from_parquet(self, parquet_file:Union[str,IO], \
+            key:Optional[str]=None, \
+            columns:Optional[List[str]]=None, \
+            batch_size:int=65536, **kwargs) -> JDb:
         """Import records from a Parquet file.
 
         Rows are streamed via ``pyarrow``'s ``RecordBatch`` reader instead of being loaded
@@ -3506,7 +3541,9 @@ class JDb(JDbReader):
 
             return self
 
-    def reinit(self, records:Dict[str,Any], default_val:Optional[Any]=None, is_list:bool=False, agree:str='no', wait_sec:int=10, **kwargs) -> bool:
+    def reinit(self, records:Dict[str,Any], \
+            default_val:Optional[Any]=None, \
+            is_list:bool=False, agree:str='no', wait_sec:int=10, **kwargs) -> bool:
         """Clear the database and repopulate it with new records (destructive operation).
         
         Requires confirmation (``agree='yes'``). Useful for replacing all data at once.
@@ -3592,7 +3629,12 @@ class JDb(JDbReader):
 
             return self.io.n_records > 0
 
-    def add(self, records:Dict[str,Any], default_val:Optional[Any]=None, replace:bool=True, insert:bool=True, is_list:bool=False, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
+    def add(self, records:Dict[str,Any], \
+            default_val:Optional[Any]=None, \
+            replace:bool=True, insert:bool=True, is_list:bool=False, \
+            flags:Optional[JFlag]=None, \
+            max_wsize:Optional[int]=None, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
         """Core batch-write method underlying :meth:`set_n`, :meth:`insert`, :meth:`update`, :meth:`replace`, :meth:`append`, and related helpers.
 
         Args:
@@ -4391,7 +4433,9 @@ class JDb(JDbReader):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
             return group
 
-    def _get_dead_row(self, key_fp, key:str, req_size:int, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None) -> Tuple[int,int,str,int,int,int]:
+    def _get_dead_row(self, key_fp:IO, key:str, req_size:int, \
+            flags:Optional[JFlag]=None, \
+            max_wsize:Optional[int]=None) -> Tuple[int,int,str,int,int,int]:
         """Internal: find a reusable "dead" row in the index to reuse for a new write.
 
         Args:
@@ -4484,11 +4528,13 @@ class JDb(JDbReader):
 
         return start_line, -1, 0, 0, 0
 
-    def f_link_write(self, fp_dict:Dict[int,IO], \
-                key:str, target:str, val:Any, \
-                cdays:int=-1, mdays:int=-1, ttl:int=-1, flags:Optional[int]=None, \
-                max_wsize:int=0, overwrite:bool=True, \
-                key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+    def f_link_write(self, fp_dict:Dict[int,IO], key:str, target:str, val:Any, \
+            cdays:int=-1, mdays:int=-1, \
+            ttl:Union[int,float,timedelta]=-1, \
+            flags:Optional[int]=None, \
+            max_wsize:int=0, \
+            overwrite:bool=True, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Internal: write through a link to whatever it points at.
 
         Walks the target path with :meth:`JDbReader.f_link_step`, descending
@@ -4534,7 +4580,9 @@ class JDb(JDbReader):
 
         return self.f_write(fp_dict, obj, val, cdays=cdays, mdays=mdays, ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite, key_flags=key_flags)
 
-    def f_write_key_flags(self, fp_dict:Dict[int,IO], key:str, new_flags:Union[str,int,JKeyFlag], ttl:Optional[int]=None) -> bool:
+    def f_write_key_flags(self, fp_dict:Dict[int,IO], key:str, new_flags:Union[str,int,JKeyFlag], \
+            ttl:Optional[Union[int,float,timedelta]]=None, \
+            mdays:Union[int,float]=-1) -> bool:
         """Replace the :class:`JKeyFlag` bits on one record, leaving its value alone.
 
         Only the KEY index row is rewritten: the VAL files are untouched and no row
@@ -4561,6 +4609,10 @@ class JDb(JDbReader):
                 before it expires; ``0`` never expires. :attr:`JKeyFlag.EXPIRE`
                 is re-derived from the stored ttl, so it cannot be set through
                 ``new_flags``. Defaults to None, keeping the row's current ttl.
+            mdays (Union[int, float], optional): New last-modified day; a sub-day
+                ttl keeps the minute-of-day in the fraction. ``-1`` (the default)
+                keeps the row's stored day, so a pure flag change never renews an
+                expiring record. Defaults to -1.
 
         Returns:
             bool: ``True`` if the row was rewritten, ``False`` if there was nothing
@@ -4570,8 +4622,9 @@ class JDb(JDbReader):
         key_table = io.key_table
         row = key_table.get(key, -1, fp=key_fp)
         if io.n_records > row >= 0:
-            _key, file_id, offset, row_size, val_size, ver, cdays, mdays, old_ttl, old_kflags = io.read_key(key_fp, row)
-            new_ttl = old_ttl if ttl is None else (0 if ttl <= 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS))
+            _key, file_id, offset, row_size, val_size, ver, cdays, old_mdays, old_ttl, old_kflags = io.read_key(key_fp, row)
+            new_ttl = old_ttl if ttl is None else ((0 if ttl <= 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl)))
+            new_mdays = old_mdays if mdays < 0 else mdays
             if isinstance(new_flags, str):
                 set_mask, clr_mask = conv_to_key_flags(new_flags)
                 new_kflags = (old_kflags | set_mask) & ~clr_mask
@@ -4579,8 +4632,8 @@ class JDb(JDbReader):
                 new_kflags = int(new_flags) if new_flags is not None else old_kflags
 
             new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | (old_kflags & DERIVED_FLAG_MASK) | (KF_EXPIRE if new_ttl > 0 else 0)
-            if _key == key and (old_kflags != new_kflags or new_ttl != old_ttl):
-                io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, ver, cdays, mdays, new_ttl, flags=new_kflags)
+            if _key == key and (old_kflags != new_kflags or new_ttl != old_ttl or new_mdays != old_mdays):
+                io.write_key(key_fp, row, key, file_id, offset, row_size, val_size, ver, cdays, new_mdays, new_ttl, flags=new_kflags)
                 io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
                 if new_kflags & KF_NO_CACHE:
                     self._cache.pop(key, None)
@@ -4589,9 +4642,13 @@ class JDb(JDbReader):
 
         return False
 
-    def f_write_dc(self, fp_dict:Dict[int,IO], data:Any, cdays:int=-1, mdays:int=-1, ttl:int=-1,\
-                   flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False,\
-                   key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+    def f_write_dc(self, fp_dict:Dict[int,IO], data:Any, \
+            cdays:int=-1, mdays:int=-1, \
+            ttl:Union[int,float,timedelta]=-1,\
+            flags:Optional[JFlag]=None, \
+            max_wsize:Optional[int]=None, \
+            overwrite:bool=False,\
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Write one dataclass instance as a record, using its ``id`` field as the key.
 
         The instance is flattened into a plain ``dict`` -- ``id`` is lifted out to
@@ -4632,7 +4689,13 @@ class JDb(JDbReader):
                             ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite,\
                             key_flags=key_flags)
 
-    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, cdays:int=-1, mdays:int=-1, ttl:int=-1, flags:Optional[JFlag]=None, max_wsize:Optional[int]=None, overwrite:bool=False, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+    def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, \
+            cdays:int=-1, mdays:int=-1, \
+            ttl:Union[int,float,timedelta]=-1, \
+            flags:Optional[JFlag]=None, \
+            max_wsize:Optional[int]=None, \
+            overwrite:bool=False, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Internal: serialize and write a value to the database (used by :meth:`set`, :meth:`add`, etc.).
 
         Args:
@@ -4647,7 +4710,8 @@ class JDb(JDbReader):
             mdays (int, optional): Last-modified day index; ``-1`` (the default)
                 means today, so a rewrite touches the record without disturbing
                 its creation date. Same accepted types as ``cdays``. Defaults to -1.
-            ttl (int, optional): Lifetime in days counted from ``mdays``, clamped
+            ttl (int|float|timedelta, optional): Lifetime counted from ``mdays`` -- days as an
+                int, days as a float, or a ``timedelta``; see :func:`conv_ttl`. Clamped
                 to :data:`MAX_TTL_DAYS`. ``-1`` (the default) keeps whatever the
                 record already has and starts a new record without a TTL; ``0``
                 explicitly clears an existing TTL. Defaults to -1.
@@ -4698,13 +4762,13 @@ class JDb(JDbReader):
         io = self.io
         if not isinstance(cdays, int):
             try:
-                cdays = io.z_conv_str_to_days(cdays) if isinstance(cdays, str) else io.z_conv_days(cdays)
+                cdays = int(io.z_conv_day_num(cdays))       # a creation stamp keeps no minute
             except (ValueError, TypeError): # pragma: no cover
                 cdays = -1
 
         if not isinstance(mdays, int):
             try:
-                mdays = io.z_conv_str_to_days(mdays) if isinstance(mdays, str) else io.z_conv_days(mdays)
+                mdays = io.z_conv_day_num(mdays)
             except (ValueError, TypeError): # pragma: no cover
                 mdays = -1
 
@@ -4738,12 +4802,8 @@ class JDb(JDbReader):
 
                 io, fp_dict, key_fp = self.f_get_fp(fp_dict)
                 _key, file_id, offset, row_size, val_size, _ver, old_cdays, old_mdays, old_ttl, old_kflags = row_info = io.read_key(key_fp, row)
-                new_cdays = old_cdays if cdays < 0 else cdays
-                new_mdays = (old_mdays if transient & KF_NO_ATIME else io.days) if mdays < 0 else mdays
-                new_ttl = old_ttl if ttl < 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
-                no_follow = bool(transient & KF_NO_FOLLOW)
                 if old_kflags & KF_LINK:
-                    if not no_follow:
+                    if not transient & KF_NO_FOLLOW:
                         target = self._f_decode_value(fp_dict, key, file_id, offset, row_size, val_size)
                         return self.f_link_write(fp_dict, key, target, val, cdays=cdays, mdays=mdays, ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite, key_flags=key_flags)
 
@@ -4762,7 +4822,12 @@ class JDb(JDbReader):
                 else:
                     new_kflags = int(key_flags) if key_flags is not None else old_kflags
 
-                new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | (KF_EXPIRE if new_ttl > 0 else 0) | (old_kflags & PAYLOAD_FLAG_MASK if no_follow else 0)
+                _ttl = (ttl if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else conv_ttl(ttl)
+                new_ttl = old_ttl if _ttl < 0 else _ttl     # ttl itself may be a timedelta
+                new_mdays = mdays if mdays >= 0 else old_mdays if transient & KF_NO_ATIME else (io.days if new_ttl >= 1 else io.utc_now) if new_ttl > 0 else io.days
+                new_cdays = old_cdays if cdays < 0 else cdays
+
+                new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | (KF_EXPIRE if new_ttl > 0 else 0) | (old_kflags & PAYLOAD_FLAG_MASK if transient & KF_NO_FOLLOW else 0)
                 if isinstance(val, JDbReader):
                     new_kflags |= KF_GROUP
                     val = self._set_group(key, val)
@@ -4780,7 +4845,8 @@ class JDb(JDbReader):
                         if cache_limit != 0:
                             self._update_cache(key, val, copy=True, key_flags=new_kflags)
 
-                        return self.f_write_key_flags(fp_dict, key, new_kflags, ttl=new_ttl) if new_kflags != old_kflags or new_ttl != old_ttl else False
+                        return self.f_write_key_flags(fp_dict, key, new_kflags, ttl=new_ttl, mdays=new_mdays) \
+                            if new_kflags != old_kflags or new_ttl != old_ttl or (new_ttl and new_mdays != old_mdays) else False
 
                     # (Exist + Header != CHG + Header/Value)
                     io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
@@ -4939,7 +5005,8 @@ class JDb(JDbReader):
                                     self._update_cache(key, val, copy=True, key_flags=new_kflags)
 
                                 # the value is unchanged, but an explicit key_flags still must land
-                                return self.f_write_key_flags(fp_dict, key, new_kflags, ttl=new_ttl) if new_kflags != old_kflags or new_ttl != old_ttl else False
+                                return self.f_write_key_flags(fp_dict, key, new_kflags, ttl=new_ttl, mdays=new_mdays) \
+                                    if new_kflags != old_kflags or new_ttl != old_ttl or (new_ttl and new_mdays != old_mdays) else False
 
                 # (Exist + Value != CHG + Value) use dead/new row
                 io, fp_dict, key_fp, sync_chg = self.f_get_write_fp(fp_dict)
@@ -5009,7 +5076,7 @@ class JDb(JDbReader):
         if transient & KF_MUST_EXIST:
             return False
 
-        new_ttl = 0 if ttl < 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
+        new_ttl = (0 if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl))
         if isinstance(key_flags, str):
             set_mask, clr_mask = conv_to_key_flags(key_flags)
             new_kflags = set_mask & ~clr_mask
@@ -5085,7 +5152,9 @@ class JDb(JDbReader):
         io.key_table.set(key, safe_h, new_kflags)
         return True
 
-    def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, ttl:int=-1, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+    def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, \
+            ttl:Union[int,float,timedelta]=-1, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Internal: append ``val`` to a record, adding a new row at the tail if needed.
 
         An existing key is forwarded to :meth:`f_write` with ``overwrite=True``;
@@ -5096,7 +5165,8 @@ class JDb(JDbReader):
             fp_dict (Dict[int, IO]): Open file handles.
             key (str): The record key.
             val (Any): The value to serialize and write.
-            ttl (int, optional): Lifetime in days counted from ``mdays``, clamped
+            ttl (int|float|timedelta, optional): Lifetime counted from ``mdays`` -- days as an
+                int, days as a float, or a ``timedelta``; see :func:`conv_ttl`. Clamped
                 to :data:`MAX_TTL_DAYS`. ``-1`` (the default) keeps whatever the
                 record already has and starts a new record without a TTL; ``0``
                 explicitly clears an existing TTL. Defaults to -1.
@@ -5154,7 +5224,7 @@ class JDb(JDbReader):
         else:
             new_kflags = int(key_flags) if key_flags else 0
 
-        new_ttl = 0 if ttl < 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
+        new_ttl = (0 if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl))
         new_kflags = new_kflags & WRITABLE_FLAG_MASK | (KF_EXPIRE if new_ttl > 0 else 0)
         if isinstance(val, JDbReader): # pragma: no cover
             new_kflags |= KF_GROUP
@@ -5183,7 +5253,11 @@ class JDb(JDbReader):
         io.key_table.set(key, n_records, new_kflags)
         return True
 
-    def f_delete(self, fp_dict:Dict[int,IO], key:str, read_value:bool=True, row:Optional[int]=None, flags:Optional[JFlag]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None):
+    def f_delete(self, fp_dict:Dict[int,IO], key:str, \
+            read_value:bool=True, \
+            row:Optional[int]=None, \
+            flags:Optional[JFlag]=None, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None):
         """ Internal write-level deletion: mark a record as deleted and optionally compact the index.
 
         When ``read_value=True``, the deleted value is read and returned; ``row`` can specify the row id to skip lookup.
@@ -5286,7 +5360,9 @@ class JDb(JDbReader):
         key_table.pop(key, fp=key_fp)
         return val
 
-    def f_undelete(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
+    def f_undelete(self, fp_dict:Dict[int,IO], key:str, \
+            row:Optional[int]=None, \
+            flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
         """ Internal :meth:`unremove` — restore a deleted record by marking it active again.
 
         Args:
@@ -5380,7 +5456,9 @@ class JDb(JDbReader):
         io.key_table.set(key, safe_h, kflags)
         return safe_h, file_id, offset, row_size, val_size
 
-    def f_unwrite(self, fp_dict:Dict[int,IO], key:str, row:Optional[int]=None, flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
+    def f_unwrite(self, fp_dict:Dict[int,IO], key:str, \
+            row:Optional[int]=None, \
+            flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
         """Internal: revert a record to its previous version (used by :meth:`unwrite`).
 
         Args:

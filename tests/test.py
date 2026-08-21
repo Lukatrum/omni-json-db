@@ -13,7 +13,7 @@ from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     GraphDb, loads, dumps, Query, JIoVAL_U, \
                     register_user_val_codec, register_user_key_codec, \
                     unregister_user_val_codec, unregister_user_key_codec, \
-                    MAX_TTL_DAYS
+                    MAX_TTL_DAYS, MIN_OF_DAY, conv_ttl, JValueError
 
 try:
     import resource
@@ -1368,6 +1368,116 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.unremove(['exp', 'exp2', 'exp3']).keys() | set(), {'exp', 'exp2', 'exp3'})
             jdb.set_key_flags(['exp2'], '-c-0')
             for _k in ('exp', 'exp2', 'exp3'):
+                del jdb[_k]
+
+            # ---------------- minute-unit TTL ----------------
+            # one rule: under a day rounds up to whole minutes, a day or more rounds up to whole days
+            self.assertEqual(conv_ttl(45), 45)
+            self.assertEqual(conv_ttl(0), 0)
+            self.assertEqual(conv_ttl(-1), -1)                                      # 'leave it as it is'
+            self.assertEqual(conv_ttl(None), -1)
+            self.assertEqual(conv_ttl(1.5), 2)
+            self.assertEqual(conv_ttl(0.25) * MIN_OF_DAY, 360)
+            self.assertEqual(conv_ttl(0.1) * MIN_OF_DAY, 144)                       # 0.1*86400 = 8640.000000000001
+            self.assertEqual(conv_ttl(dt.timedelta(days=1, hours=12)), 2)
+            self.assertEqual(conv_ttl(dt.timedelta(hours=40)), 2)
+            self.assertEqual(conv_ttl(dt.timedelta(hours=24)), 1)
+            self.assertEqual(conv_ttl(dt.timedelta(hours=23)) * MIN_OF_DAY, 23 * 60)
+            self.assertEqual(conv_ttl(dt.timedelta(seconds=1)) * MIN_OF_DAY, 1)
+            self.assertEqual(conv_ttl(dt.timedelta(seconds=61)) * MIN_OF_DAY, 2)
+            self.assertEqual(conv_ttl(dt.timedelta(microseconds=1)) * MIN_OF_DAY, 1) # a positive ttl never rounds to 0
+            self.assertEqual(conv_ttl(MAX_TTL_DAYS * 100), MAX_TTL_DAYS)             # clamped
+            self.assertEqual(conv_ttl(dt.timedelta(minutes=1439)) * MIN_OF_DAY, 1439) # the widest minute ttl
+            for _bad in ('3d', True, [1]):
+                with self.assertRaises(JValueError):
+                    conv_ttl(_bad)
+
+            # the db takes either type and reads a sub-day ttl back as float days
+            jdb['exp4'] = 1
+            self.assertEqual(jdb.set_key_flags('exp4', ttl=dt.timedelta(minutes=30)), {'exp4': (expire, 30/MIN_OF_DAY)})
+            self.assertEqual(jdb.get_key_flags('exp4'), {'exp4': (expire, 30/MIN_OF_DAY)})
+            self.assertEqual(jdb.set_key_flags('exp4', ttl=0.25), {'exp4': (expire, 0.25)})
+            self.assertEqual(jdb.set_key_flags('exp4', ttl=0.25), {})               # already there
+            self.assertEqual(jdb.set_key_flags('exp4', ttl=1.5), {'exp4': (expire, 2)})   # a day ttl stays int
+
+            # ... it combines with flags, survives a rewrite and a delete round-trip
+            self.assertEqual(jdb.set_key_flags('exp4', '+c', ttl=dt.timedelta(hours=6)), {'exp4': (expire | int(JKeyFlag.NO_CACHE), 0.25)})
+            jdb['exp4'] = 2
+            self.assertEqual(jdb['exp4'], 2)
+            self.assertEqual(jdb.get_key_flags('exp4'), {'exp4': (expire | int(JKeyFlag.NO_CACHE), 0.25)})
+            del jdb['exp4']
+            self.assertTrue('exp4' in jdb.unremove('exp4'))
+            self.assertEqual(jdb.get_key_flags('exp4'), {'exp4': (expire | int(JKeyFlag.NO_CACHE), 0.25)})
+            self.assertEqual(jdb.set_key_flags('exp4', ttl=0), {'exp4': (int(JKeyFlag.NO_CACHE), 0)})
+            del jdb['exp4']
+
+            # a naive datetime is read as UTC, the same clock the day counter runs on
+            _utc = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+            _tdy = _utc.date()
+            _dago = lambda n: _tdy - dt.timedelta(days=n)
+            _then = _utc - dt.timedelta(hours=2)
+
+            # the modified minute rides in the fraction of [7]; [10]/[11] stay date strings
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'm_old', 1, cdays=_then, mdays=_then, ttl=dt.timedelta(minutes=30)))
+                self.assertTrue(jdb.f_write(fp, 'm_new', 2, ttl=dt.timedelta(minutes=30)))
+                self.assertTrue(jdb.f_write(fp, 'm_day', 3, ttl=dt.timedelta(days=2)))
+
+            _meta = jdb.keys['m_old']
+            self.assertEqual(_meta[8] * MIN_OF_DAY, 30)
+            self.assertTrue(_meta[9] & expire)
+            self.assertEqual(round(_meta[7] % 1 * MIN_OF_DAY), _then.hour * 60 + _then.minute)
+            self.assertEqual(_meta[10], str(_then.date()))
+            self.assertEqual(jdb.keys['m_day'][7] % 1, 0)                           # a day ttl stores no minute
+
+            # ... so the stale one reads as gone while the fresh one and the day ttl stay
+            self.assertEqual(set(jdb.show(key_flags='+e')), {'m_new', 'm_day'})
+            self.assertEqual(dict(jdb.keys.item_iter('m_old', with_expired=False)), {})
+            self.assertEqual(jdb['m_new'], 2)
+            self.assertEqual(jdb['m_day'], 3)
+
+            # a whole-day ttl runs to the end of its last day, a minute ttl to the minute;
+            # 'm_exact' sits on the boundary, where float rounding used to fire a minute early
+            _u0 = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+            _mk = lambda n: _u0 - dt.timedelta(minutes=n)
+            with jdb.open() as fp:
+                jdb.f_write(fp, 'm_edge', 4, cdays=_dago(5), mdays=_dago(5), ttl=5)
+                jdb.f_write(fp, 'm_over', 5, cdays=_mk(31), mdays=_mk(31), ttl=dt.timedelta(minutes=30))
+                jdb.f_write(fp, 'm_exact', 6, cdays=_mk(30), mdays=_mk(30), ttl=dt.timedelta(minutes=30))
+                jdb.f_write(fp, 'm_under', 7, cdays=_mk(29), mdays=_mk(29), ttl=dt.timedelta(minutes=30))
+
+            if _u0.minute == dt.datetime.now(dt.timezone.utc).minute:   # skip if the clock rolled mid-write
+                self.assertEqual(set(jdb.show(key_flags='+e')) & {'m_edge', 'm_over', 'm_exact', 'm_under'},
+                                 {'m_edge', 'm_exact', 'm_under'})      # a ttl never expires early
+
+            # f_write inherits a minute ttl on a plain rewrite, and ttl=0 clears it
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'm_new', 7, overwrite=True))
+
+            self.assertEqual(jdb.keys['m_new'][8] * MIN_OF_DAY, 30)
+            with jdb.open() as fp:
+                self.assertTrue(jdb.f_write(fp, 'm_new', 8, ttl=0, overwrite=True))
+
+            self.assertEqual(jdb.keys['m_new'][8], 0)
+            self.assertFalse(jdb.keys['m_new'][9] & expire)
+
+            # the minute layout keeps a 7-day creation delta and collapses cdays past it
+            with jdb.open() as fp:
+                jdb.f_write(fp, 'm_d7', 1, cdays=_dago(7), ttl=dt.timedelta(minutes=30))
+                jdb.f_write(fp, 'm_d8', 1, cdays=_dago(8), ttl=dt.timedelta(minutes=30))
+
+            self.assertEqual(jdb.keys['m_d7'][-1], str(_dago(7)))
+            self.assertEqual(jdb.keys['m_d8'][-1], str(_tdy))                        # creation date is expendable
+            self.assertEqual(jdb.keys['m_d8'][8] * MIN_OF_DAY, 30)
+
+            # set_date takes a datetime for the minute, a date for the day alone
+            self.assertTrue(jdb.set_date('m_day', mdate=dt.datetime(2026, 8, 21, 10, 15), ttl=dt.timedelta(minutes=45)))
+            _meta = jdb.keys['m_day']
+            self.assertEqual(_meta[8] * MIN_OF_DAY, 45)
+            self.assertEqual(_meta[10], '2026-08-21')
+            self.assertEqual(round(_meta[7] % 1 * MIN_OF_DAY), 10 * 60 + 15)
+
+            for _k in ('m_old', 'm_new', 'm_day', 'm_edge', 'm_over', 'm_exact', 'm_under', 'm_d7', 'm_d8'):
                 del jdb[_k]
 
             # ---------------- an expired record reads as gone, everywhere ----------------

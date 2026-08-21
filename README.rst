@@ -34,7 +34,7 @@
 ****************
 **omni-json-db** is a high-performance, embedded database engine designed for Python developers. It combines the raw speed of a Key-Value store with the flexible querying of a document database and the associative power of a graph database.
 
-Built for high throughput and thread safety, **omni-json-db** utilizes modern serialization (e.g., *JSON*, *MsgPack*, *Pickle*) and efficient compression to provide a compact storage layer. Whether you are building a local cache, a log aggregator, or a complex knowledge graph, **omni-json-db** offers "Zero-Config" simplicity at scale.
+Built for high throughput and thread safety, **omni-json-db** utilizes modern serialization (e.g., *JSON*, *MsgPack*, *marshal*, *Pickle*, *YAML*) and efficient compression to provide a compact storage layer. Whether you are building a local cache, a log aggregator, or a complex knowledge graph, **omni-json-db** offers "Zero-Config" simplicity at scale.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 * **Server-LESS**: Access data directly on disk without a database server overhead.
@@ -124,7 +124,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups. [refer to `Groups Mode`_]
 
-* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups. [refer to `Record Flags`_ + `Symbolic Links`_ + `Expiring Records (TTL)`_]
+* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups, and per-record TTLs from one minute to 511 days. [refer to `Record Flags`_ + `Symbolic Links`_ + `Expiring Records (TTL)`_]
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism. [refer to `Advanced`_]
 
@@ -293,7 +293,7 @@ Any ``@dataclass`` with an ``id`` field can be written and read directly. The ob
    # --- Delete ---
    jdb -= user
    del jdb[User('u2', '')]
-   del jdb[User('u3', ''), User('u4', '')]
+   del jdb[User('u3', ''), User('u4', '')] # del jdb['u3', 'u4']
 
    # --- Still an ordinary record: queries run against the fields ---
    jdb += [User('u5', 'Eve', 41, tags=['python']), User('u6', 'Frank', 22, address=Address('Taipei'))]
@@ -1595,7 +1595,7 @@ disappear* — the retention guarantee a config row or an account record wants.
 ======  ===============  =======================================================================================
 Letter  Flag             Effect
 ======  ===============  =======================================================================================
-``e``   ``EXPIRE``       The record has a TTL. Set it with ``ttl=``, never by name.
+``e``   ``EXPIRE``       The record has a TTL. Set it with ``ttl=`` (days, or a ``timedelta``), never by name.
 ``g``   ``GROUP``        The record holds a group. Never settable.
 ``l``   ``LINK``         A symbolic link; set it with ``set_link()``.
 ======  ===============  =======================================================================================
@@ -1684,10 +1684,31 @@ silently matching every record.
 
 Expiring Records (TTL)
 ^^^^^^^^^^^^^^^^^^^^^^
-A record can be given a lifetime in days with ``ttl=``, counted from the day it
-was last modified. ``ttl`` reads as *days remaining*, so a record written today
-with ``ttl=1`` is still readable today and gone tomorrow. The maximum is
-``MAX_TTL_DAYS`` (511); larger values are clamped.
+A record can be given a lifetime with ``ttl=``, counted from the moment it was
+last modified. Three argument types are accepted, and one rule decides the unit:
+
+=================  =============================================================================
+``ttl=``           Meaning
+=================  =============================================================================
+``int``            Whole days — ``ttl=7`` is a week. Clamped to ``MAX_TTL_DAYS`` (511).
+``float``          Days, so a fraction falls through to minutes — ``0.25`` is 6 hours.
+``timedelta``      Taken as it stands — ``timedelta(minutes=30)``, ``timedelta(hours=6)``.
+=================  =============================================================================
+
+**Anything under a day rounds up to whole minutes; a day or more rounds up to
+whole days.** So ``timedelta(hours=23)`` is 1380 minutes, ``timedelta(hours=24)``
+is 1 day and ``timedelta(hours=40)`` is 2 days. A positive lifetime never rounds
+down to nothing: ``timedelta(seconds=1)`` is one minute, not "no TTL".
+
+``ttl`` reads back as *days remaining* in the same form ``ttl=`` accepts — an
+``int`` for a whole-day TTL, a ``float`` below ``1.0`` for a minute one — so a
+value taken from ``get_key_flags()`` can be written straight back. Multiply by
+``MIN_OF_DAY`` (1440) to read a sub-day TTL in minutes.
+
+**A TTL never expires early.** Both units are stored coarsely — to the day or to
+the minute — and a record stays readable through the end of its last day or
+minute. A record written today with ``ttl=1`` is still there today and gone
+tomorrow; a one-minute TTL lives between 61 and 120 seconds.
 
 ``EXPIRE`` is **derived**: it is set whenever the record has a TTL and cleared
 when it does not. Naming ``'e'`` yourself does nothing — use ``ttl=``.
@@ -1698,12 +1719,13 @@ life — the difference between touching a session and prolonging it.
 
 .. code-block:: python
 
-   from omni_json_db import JDb, JKeyFlag
+   import datetime as dt
+   from omni_json_db import JDb, JKeyFlag, MIN_OF_DAY
 
    jdb = JDb()
    jdb['session/abc'] = {'user': 'ana'}
 
-   # give an existing record a lifetime
+   # give an existing record a lifetime, in days
    print(jdb.set_key_flags('session/abc', ttl=7))
                                            # Output: {'session/abc': (128, 7)}
    flags, ttl = jdb.get_key_flags('session/abc')['session/abc']
@@ -1717,11 +1739,35 @@ life — the difference between touching a session and prolonging it.
    print(jdb.set_key_flags('session/abc', ttl=0))
                                            # Output: {'session/abc': (1, 0)}
 
+   # sub-day lifetimes: a timedelta, or a fraction of a day
+   jdb['cart/9'] = ['socks']
+   print(jdb.set_key_flags('cart/9', ttl=dt.timedelta(minutes=30)))
+                                           # Output: {'cart/9': (128, 0.020833333333333332)}
+   ttl = jdb.get_key_flags('cart/9')['cart/9'][1]
+   print(round(ttl * MIN_OF_DAY), 'minutes')
+                                           # Output: 30 minutes
+
+   # 0.25 of a day is 6 hours; a day or more becomes whole days
+   print(jdb.set_key_flags('cart/9', ttl=0.25))
+                                           # Output: {'cart/9': (128, 0.25)}
+   print(jdb.set_key_flags('cart/9', ttl=1.5))
+                                           # Output: {'cart/9': (128, 2)}
+
    # or set it as the record is written
    with jdb.open() as fp:
        jdb.f_write(fp, 'otp/123', '558021', ttl=1)
+       jdb.f_write(fp, 'otp/456', '331902', ttl=dt.timedelta(seconds=90))
 
    print(jdb.get_key_flags('otp/123'))     # Output: {'otp/123': (128, 1)}
+   print(round(jdb.keys['otp/456'][8] * MIN_OF_DAY), 'minutes')
+                                           # Output: 2 minutes
+
+   # jdb.set() takes it too, so a one-liner cache entry needs no open()
+   jdb.set('tmp/quote', 41.2, ttl=dt.timedelta(minutes=10))
+
+An expired record is gone from every read surface — ``jdb[key]``, ``in``,
+``items()``, ``find()`` and ``show()`` all skip it — and the row is reclaimed
+lazily on the next write that needs space, so expiry costs no background thread.
 
 Symbolic Links
 ^^^^^^^^^^^^^^

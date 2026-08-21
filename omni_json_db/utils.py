@@ -126,11 +126,19 @@ class JKeyFlag(IntFlag):
     NO_REVERT = 0x40
 
     #: ``'e'`` -- the record carries a TTL. **Derived**: it is set iff the row's
-    #: 9-bit ttl field (bits 39..47 of ``days``) is non-zero, and is never taken
-    #: from a caller's ``key_flags`` -- use the ``ttl=`` argument of
-    #: :meth:`JDb.f_write` or :meth:`JDb.set_key_flags`.
-    #: While set, ``days`` switches layout: the modified-delta narrows from 22
-    #: to 13 bits.
+    #: ttl field is non-zero, and is never taken from a caller's ``key_flags``
+    #: -- use the ``ttl=`` argument of :meth:`JDb.f_write` or
+    #: :meth:`JDb.set_key_flags`, which accept days as an ``int``, days as a
+    #: ``float``, or a :class:`~datetime.timedelta` (see :func:`conv_ttl`).
+    #:
+    #: While set, ``days`` switches layout, and bit 22 says which of the two:
+    #:
+    #: * whole-day ttl -- ``[ 9-bit ttl @39 ][ 13-bit delta @26 ][ 0 @22 ]``,
+    #:   so the modified-delta narrows from 22 to 13 bits.
+    #: * sub-day ttl -- ``[ 11-bit minutes @37 ][ 11-bit minute-of-day @26 ]``
+    #:   ``[ 3-bit delta @23 ][ 1 @22 ][ 22-bit created @0 ]``, so the
+    #:   modified-delta narrows to 7 days and a creation date older than that
+    #:   collapses onto the modified day.
     EXPIRE = 0x80
 
     #: ``'p'`` -- protect the record from deletion while still allowing it to be
@@ -139,7 +147,7 @@ class JKeyFlag(IntFlag):
     #: never removed" -- the retention guarantee a config or account row wants.
     #:
     #: Checked through :data:`DELETE_LOCK_MASK`, so it stops :meth:`JDb.remove`,
-    #: ``del jdb[key]`` and ``jdb -= jdb` alike, and :attr:`UNLOCK` waives it for
+    #: ``del jdb[key]`` and ``jdb -= jdb`` alike, and :attr:`UNLOCK` waives it for
     #: one call the same way it waives the write locks.
     NO_DELETE = 0x100
 
@@ -204,7 +212,9 @@ class JKeyFlag(IntFlag):
     #:
     #: A TTL is counted from ``mdays``, so writing with NO_ATIME deliberately
     #: does **not** renew an expiring record -- useful for touching a session
-    #: without extending it, and a footgun everywhere else.
+    #: without extending it, and a footgun everywhere else. A sub-day TTL is
+    #: counted from the stored minute-of-day, so the same rule holds to the
+    #: minute.
     NO_ATIME = 0x80000
 
     #: ``'m'`` -- **transient**. Refuse the write when the key does *not* already

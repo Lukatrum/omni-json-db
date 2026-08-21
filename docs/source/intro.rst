@@ -69,6 +69,8 @@ Features
 
 * **Pythonic Interaction**: Interact with data using familiar Python ``dict`` methods, list slicing, and set operations, avoiding complex SQL queries.
 
+* **Dataclass Objects**: Read and write any ``@dataclass`` directly — ``jdb += user``, ``jdb['u1'] = user``, ``del jdb[user]``. The object is flattened into a plain ``dict`` rather than pickled, so records written from objects stay fully queryable, exportable, and language-neutral.
+
 * **Advanced Serialization & Compression**: Combine formats (JSON, MsgPack, Pickle, YAML) with algorithms like LZ4, Zstandard, or Brotli to optimize your I/O and disk usage.
 
 * **Pluggable Codec & Encryption**: Bring your own serialization or encryption logic via a simple ``dumps``/``loads`` interface — no forking required. Supports both a process-wide default and per-instance codecs (e.g. per-tenant encryption keys).
@@ -79,13 +81,15 @@ Features
 
 * **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``).
 
-* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, INI, and TOML with simple commands.
+* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem.
 
 * **Time-Series Ready**: Native timestamping allows for efficient date-based slicing (e.g., ``jdb[yesterday:now]``).
 
 * **Memory Caching**: Adjustable ``cache_limit`` to balance RAM usage and I/O speed.
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups.
+
+* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups.
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism.
 
