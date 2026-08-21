@@ -10571,6 +10571,35 @@ class TestJDb(unittest.TestCase):
             jdb.remove(vkey)
             self.assertEqual(jdb, expect)
 
+            # min_safe holds rows back from reuse so more versions stay reachable
+            self.assertEqual(jdb.min_safe, 0) # the default reserves nothing
+            reserve = 24
+            churn = [(0, 1), (reserve, 1)] # (min_safe, versions of the hot key)
+            for _ms, _ in churn[:1] + churn[1:]:
+                jmem = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, min_safe=_ms)
+                self.assertEqual(jmem.min_safe, _ms)
+                self.assertEqual(JDb(jmem).min_safe, _ms) # inherited by a second handle
+                for ii in range(60):
+                    jmem['hot'] = f'{ii:04d}' + 'v' * (48 + ii % 32)
+                    jmem[f'cold{ii}'] = 'c' * 40 # a new key each round: this is what reclaims
+
+                _dead = jmem.io.n_lines - jmem.io.n_records
+                _vers = len(jmem.history('hot'))
+                if _ms == 0:
+                    self.assertEqual(_dead, 0) # every parked row was reclaimed
+                    self.assertEqual(_vers, 1) # ... leaving the live record alone
+                    _base = _vers
+                else:
+                    self.assertTrue(_vers > _base, f'{filename}: min_safe={_ms} kept {_vers} <= {_base}')
+                    self.assertTrue(_dead >= reserve, f'{filename}: dead={_dead} < reserve={_ms}')
+                    # bounded: the reserve is a floor to hold, not a region that grows per write
+                    self.assertTrue(_dead < reserve * 4, f'{filename}: dead={_dead} unbounded')
+                    for _item in jmem.history('hot', with_value=True)[1:]:
+                        self.assertEqual(set(jmem.revert('hot', version=_item['ver'])), {'hot'})
+                        self.assertEqual(jmem['hot'], _item['value'])
+
+                self.assertFalse(jmem.check_error(), Style(f'{filename}:min_safe={_ms}', red=1))
+
             # unrevertable but faster: flags=0
             jmem1 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, flags=JFlag.REVERT)
             jmem2 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, flags=0)

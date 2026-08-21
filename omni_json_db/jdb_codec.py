@@ -13,8 +13,7 @@ try:
         return dumper.represent_set(set(data))
 
     yaml.SafeDumper.add_representer(frozenset, frozenset_representer)
-    # bytes is natively dumped as !!binary by SafeRepresenter; register the same
-    # representer for bytearray so dumps_with_zip() fully supports bytearray payloads.
+    # bytes is natively dumped as !!binary by SafeRepresenter
     yaml.SafeDumper.add_representer(bytearray, yaml.SafeDumper.represent_binary)
 
     yaml_dumps = yaml.safe_dump

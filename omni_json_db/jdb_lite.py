@@ -1020,7 +1020,7 @@ class JDbReader(JDbBase):
     data modification. Designed for safe, concurrent read operations.
     """
     __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
-                'io', 'fsize', 'th_table', 'safe_line', 'chg_keys',
+                'io', 'fsize', 'th_table', 'safe_line', 'min_safe', 'chg_keys',
                 'write_hook', 'max_wsize', 'flags')
 
     def __init__(self,\
@@ -1036,6 +1036,7 @@ class JDbReader(JDbBase):
                 api_ver:Optional[int]=None,\
                 write_hook:Optional[Callable[[str,Any],bool]]=None,\
                 max_wsize:Optional[int]=None,\
+                min_safe:Optional[int]=None,\
                 flags:Optional[JFlag]=None, \
                 val_codec:Optional[Any]=None, \
                 key_codec:Optional[Any]=None, **kwargs):
@@ -1108,6 +1109,13 @@ class JDbReader(JDbBase):
 
             write_hook (Optional[Callable[[str, Any], bool]], optional): Callback triggered before writing.
             max_wsize (Optional[int], optional): Search window for dead lines. Defaults to 4.
+            min_safe (Optional[int], optional): Keep at least this many index rows
+                out of reach of row reuse, so a record's previous versions survive
+                long enough for :meth:`history` and :meth:`JDb.revert` to reach them.
+                Rows beyond the reserve are reclaimed as before, so the cost is a
+                constant, not one that grows with the number of writes. Only applies
+                while :attr:`JFlag.REVERT` is active -- without it there is no history
+                to protect. Defaults to ``0`` (reserve nothing: previous behaviour).
             flags (Optional[JFlag], optional): Enum flags for modifying revert/split behavior.
             val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec for 'U' data types
                 (J+U, S+U, U+U), e.g. a different encryption key per JDb instance. Must already
@@ -1130,6 +1138,7 @@ class JDbReader(JDbBase):
             reserved_rate = jio.reserved_rate if reserved_rate is None else reserved_rate
             write_hook = jdb.write_hook if write_hook is None else write_hook
             max_wsize = jdb.max_wsize if max_wsize is None else max_wsize
+            min_safe = jdb.min_safe if min_safe is None else min_safe
             flags = jdb.flags if flags is None else flags
             val_codec = jio._val_codec if val_codec is None else val_codec
             key_codec = jio._key_codec if key_codec is None else key_codec
@@ -1177,6 +1186,10 @@ class JDbReader(JDbBase):
             if not isinstance(max_wsize, int):
                 raise TypeError('max_wsize must be integer')
 
+        if min_safe is not None:
+            if not isinstance(min_safe, int): # pragma: no cover
+                raise TypeError('min_safe must be integer')
+
         self.files_obj:JFilesBase = files_obj
         self.file_lock:FileLock = FileLock(rlock=files_obj.LCK_rlock, \
                                         wlock=files_obj.LCK_wlock, \
@@ -1193,6 +1206,7 @@ class JDbReader(JDbBase):
         self.write_hook:Callable[[str,Any],bool] = write_hook
         self.flags:JFlag = F_REVERT if flags is None else JFlag(flags)
         self.max_wsize:int = 4 if max_wsize is None else max_wsize
+        self.min_safe:int = 0 if min_safe is None else max(0, min_safe)
         self.io:JIo = JIo(
                 files_obj=files_obj,
                 data_type=data_type,
@@ -2535,6 +2549,7 @@ class JDbReader(JDbBase):
                     reserved_rate=jio.reserved_rate,
                     api_ver=jio.api_ver,
                     max_wsize=self.max_wsize,
+                    min_safe=self.min_safe,
                     flags=self.flags,
                     val_codec=jio._val_codec,
                     key_codec=jio._key_codec,
@@ -3201,7 +3216,7 @@ class JDbReader(JDbBase):
                 path = files_obj.get_KEY()
                 info = f'[KEY] {path}'
                 info += f'\n[JFiles] {files_obj}'
-                info += f'\n[Config] min_value_size:{io.min_value_size} max_file_size:{io.max_file_size/(2**20):,.1f}MB reserved:{io.reserved_rate*100.:.2f}% max_wsize:{self.max_wsize}'
+                info += f'\n[Config] min_value_size:{io.min_value_size} max_file_size:{io.max_file_size/(2**20):,.1f}MB reserved:{io.reserved_rate*100.:.2f}% max_wsize:{self.max_wsize} min_safe:{self.min_safe}'
 
                 api_ver = io.api_ver
                 zip_str = io.zip_type_str
@@ -4642,6 +4657,12 @@ class JDbReader(JDbBase):
         write-ahead log: treat a missing version as expected, never as
         corruption.
 
+        With the default ``min_safe=0`` a write to *any* key can reclaim the row
+        holding another key's previous version, so on a busy database this often
+        returns the live record alone. Construct the database with
+        ``min_safe=N`` to hold N index rows back from reuse and keep that many
+        versions reachable.
+
         Args:
             key (str): The record key. Non-``str`` keys are stringified, as
                 everywhere else in the API.
@@ -4731,9 +4752,10 @@ class JDbReader(JDbBase):
 
                 if with_value:
                     val = item['value']
-                    if val is MISSING:
+                    if val is MISSING: # pragma: no cover
                         text = '\x1b[91m<unreadable>\x1b[0m'
-                    elif isinstance(val, JDbBase): # a group: never render the child database inline
+                    elif isinstance(val, JDbBase): # pragma: no cover
+                        # a group: never render the child database inline
                         text = f'\x1b[4m<{type(val).__name__}:{len(val)}>\x1b[0m'
                     else:
                         text = val if isinstance(val, str) else repr(val)

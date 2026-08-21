@@ -234,8 +234,9 @@ class JDb(JDbReader):
             api_ver:Optional[int]=None,\
             write_hook:Optional[Callable[[str,Any],bool]]=None,\
             max_wsize:Optional[int]=None,\
-            flags:Optional[JFlag]=None, \
-            val_codec:Optional[Any]=None, \
+            min_safe:Optional[int]=None,\
+            flags:Optional[JFlag]=None,\
+            val_codec:Optional[Any]=None,\
             key_codec:Optional[Any]=None, **kwargs):
         """
         Initialize the transactional JDb controller object mapping configurations sheets models.
@@ -306,6 +307,13 @@ class JDb(JDbReader):
 
             write_hook (Optional[Callable[[str, Any], bool]], optional): Callback triggered before writing.
             max_wsize (Optional[int], optional): Search window for dead lines. Defaults to 4.
+            min_safe (Optional[int], optional): Keep at least this many index rows
+                out of reach of row reuse, so a record's previous versions survive
+                long enough for :meth:`history` and :meth:`JDb.revert` to reach them.
+                Rows beyond the reserve are reclaimed as before, so the cost is a
+                constant, not one that grows with the number of writes. Only applies
+                while :attr:`JFlag.REVERT` is active -- without it there is no history
+                to protect. Defaults to ``0`` (reserve nothing: previous behaviour).            
             flags (Optional[JFlag], optional): Enum flags for modifying revert/split behavior.
             val_codec (Optional[JIoVAL_U], optional): Per-instance VAL codec for 'U' data types
                 (J+U, S+U, U+U) — e.g. a distinct encryption key per JDb instance instead of one
@@ -345,6 +353,7 @@ class JDb(JDbReader):
             JDbKey_obj=kwargs.pop('JDbKey_obj', JDbKey2(self)),
             write_hook=write_hook,
             max_wsize=max_wsize,
+            min_safe=min_safe,
             flags=flags,
             val_codec=val_codec,
             key_codec=key_codec,
@@ -4394,12 +4403,27 @@ class JDb(JDbReader):
 
         Returns:
             Tuple[int, int, int, int, int]: Contains (safe baseline row, found reusable row number, file ID, offset, block size).
+            The reusable row number is ``-1`` when nothing may be reused -- including
+            when the dead region is still inside the :attr:`min_safe` reserve -- and
+            the caller then appends a fresh row.
+
+        Note:
+            This is the only place a row is taken *back* for reuse, which is why
+            :attr:`min_safe` is enforced here alone. The other sites that derive a
+            SAFE boundary (:meth:`f_write`, :meth:`f_delete`, :meth:`f_undelete`)
+            only move rows within the index; none of them reclaims, so none of them
+            can breach the reserve.
         """
         io = self.io
         n_lines = io.n_lines
         n_records = io.n_records
         if F_REVERT & flags:
-            start_line = safe_line = min(max(self.safe_line, n_records), n_lines)
+            # min_safe holds the first `min_safe` rows out of reach, so a record's
+            # previous versions survive long enough for history()/revert() to reach
+            # them. Clamping to n_lines makes it self-limiting: while the region is
+            # below the reserve there is nothing to reuse, so the write appends a row
+            # and the region grows until it reaches the floor -- then reuse resumes.
+            start_line = safe_line = min(max(self.safe_line, n_records + self.min_safe), n_lines)
             chg_keys = self.chg_keys
             if key not in chg_keys:
                 chg_keys.add(key)
@@ -5521,6 +5545,7 @@ class JDb(JDbReader):
         fp_dict.clear()
         io = self.io
         io.update_days()
+        key_fp = None
         is_latest = self.files_obj.KEY_size() == io.file_size
         try:
             key_fp = fp_dict[-1] = self.files_obj.KEY_open('rb+', buffering=KEY_FILE_BUF_SIZE)

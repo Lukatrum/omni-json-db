@@ -185,7 +185,7 @@ def _decode(val:Any, hint:Any) -> Any:
         try: # also covers 'id', which always comes back as the str record key
             return hint(val)
 
-        except (TypeError, ValueError):
+        except (TypeError, ValueError): # pragma: no cover
             return _detach(val)
 
     if issubclass(hint, (str, bytes)) and not isinstance(val, hint):
