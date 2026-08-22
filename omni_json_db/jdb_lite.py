@@ -824,7 +824,7 @@ class JDbKey:
         with jdb.open(read_only=True) as fp:
             io, fp, key_fp = jdb.f_get_fp(fp)
             key_table = io.key_table
-            io_now, io_days = io.utc_now - HALF_MIN_DAYS, io.days
+            io_now, io_days = io.live_now - HALF_MIN_DAYS, io.days
             skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
                 (lambda _mdays, _ttl, _kflags: _ttl and (io_days > _mdays + _ttl if _ttl >= 1 else io_now > _mdays + _ttl)) if with_hidden else \
                 (lambda _mdays, _ttl, _kflags: _kflags & KF_HIDDEN) if with_expired else \
@@ -2924,7 +2924,7 @@ class JDbReader(JDbBase):
             io, fp, key_fp = self.f_get_fp(fp)
             key_table = io.key_table
             n_records = io.n_records
-            io_now, io_days = io.utc_now - HALF_MIN_DAYS, io.days
+            io_now, io_days = io.live_now - HALF_MIN_DAYS, io.days
             for key in keys:
                 key = str(key) if not isinstance(key, str) else key
                 row_id, kflags = key_table.get_both(key, fp=key_fp)
@@ -3759,7 +3759,7 @@ class JDbReader(JDbBase):
 
             cache = self._cache
             key_table = io.key_table
-            io_now, io_days = io.utc_now - HALF_MIN_DAYS, io.days
+            io_now, io_days = io.live_now - HALF_MIN_DAYS, io.days
             for key,row_id in io.sorted_key_table_items(reverse=reverse, fp=key_fp):
                 n_loops += 1
                 if count >= limit > 0:
@@ -5528,7 +5528,7 @@ class JDbReader(JDbBase):
 
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         _key, file_id, offset, row_size, val_size, _ver, _cdays, mdays, ttl, kflags = io.read_key(key_fp, row)
-        if ttl and (io.days > mdays + ttl if ttl >= 1 else io.utc_now - HALF_MIN_DAYS > mdays + ttl):
+        if ttl and (io.days > mdays + ttl if ttl >= 1 else io.live_now - HALF_MIN_DAYS > mdays + ttl):
             thd = self.th_table.get(get_ident(), None) # absent only outside open()
             if thd is not None:
                 thd['expired'].append((row, _key))
@@ -5794,7 +5794,7 @@ class JDbReader(JDbBase):
         io, fp_dict, key_fp = self.f_get_fp(fp_dict)
         n_records = io.n_records
         io_read_key = io.read_key
-        io_now, io_days = io.utc_now - HALF_MIN_DAYS, io.days
+        io_now, io_days = io.live_now - HALF_MIN_DAYS, io.days
         HIDDEN_FLAG = KF_HIDDEN
         skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \
                 (lambda _mdays, _ttl, _kflags: _ttl and (io_days > _mdays + _ttl if _ttl >= 1 else io_now > _mdays + _ttl)) if with_hidden else \
@@ -5872,7 +5872,7 @@ class JDbReader(JDbBase):
         n_records = self.io.n_records
         if n_records > 0:
             io, fp_dict, key_fp = self.f_get_fp(fp_dict)
-            io_now, io_days = io.utc_now - HALF_MIN_DAYS, io.days
+            io_now, io_days = io.live_now - HALF_MIN_DAYS, io.days
             f_decode_value = self.f_decode_value
             HIDDEN_FLAG = KF_HIDDEN
             skip = (lambda _mdays, _ttl, _kflags: False) if with_hidden and with_expired else \

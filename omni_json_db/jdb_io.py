@@ -2,11 +2,11 @@
 from __future__ import annotations
 from typing import Any, Union, Optional, Tuple, List, Callable, Generator, IO, Dict
 from io import DEFAULT_BUFFER_SIZE
-from time import time
+from time import time, localtime
 from functools import lru_cache
 from collections import defaultdict, OrderedDict
 from re import findall as re_findall
-from datetime import date as dt_date, datetime, timezone  # timedelta
+from datetime import date as dt_date, datetime
 from bz2 import compress as bz2_compress, decompress as bz2_decompress
 from lzma import compress as lzma_compress, decompress as lzma_decompress, LZMAError as XZ_Error
 try:
@@ -25,7 +25,7 @@ from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
         NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, MAX_TTL_DAYS, \
-        SUB_DAY_MASK, MIN_OF_DAY, MIN_SEC, DAY_SEC
+        SUB_DAY_MASK, MIN_OF_DAY, MIN_OF_HOUR
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
@@ -102,8 +102,7 @@ MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ve
 MIN_KEY_STRUCT_V2 = 8 + 8 * 7  # n_pad, (file_id, offset, row_size, val_size, ver, date, flags)
 
 THE_1ST_DATE    = dt_date(1, 1, 1)
-THE_1ST_SEC     = 0             # 1970-1-1 00:00 UTC: the day number rolls over at UTC midnight
-NUM_1970_DAYS   = 719162        # date(1970, 1, 1) - date(1,1,1)
+NUM_1970_DAYS   = 719162        # date(1970, 1, 1) - date(1,1,1); kept for callers, unused here
 NUM_1996_DAYS   = 728689        # date(1996, 2, 1) - date(1,1,1)
 NUM_2000_DAYS   = 730119        # date(2000, 1, 1) - date(1,1,1)
 
@@ -1172,7 +1171,8 @@ class JIo(JIoBase):
 
             return (timestamp - THE_1ST_DATE).days
 
-        return NUM_1970_DAYS + max(0, int(timestamp) - THE_1ST_SEC) // DAY_SEC
+        lt = localtime(max(0, int(timestamp)))
+        return dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
 
     @staticmethod
     def z_conv_day_num(timestamp:Union[int,float,datetime,dt_date,str]) -> float:
@@ -1184,9 +1184,10 @@ class JIo(JIoBase):
                 a ``date`` or ``'YYYY-MM-DD'`` string carries no time of day.
 
         Returns:
-            float: The day number, with the minute-of-day in the fraction whenever
-            the value carries a time. An aware ``datetime`` is moved to UTC first;
-            a naive one is taken as it reads.
+            float: The day number, with the local minute-of-day in the fraction
+            whenever the value carries a time. An aware ``datetime`` is moved to
+            local time first; a naive one is taken as it reads, matching
+            :func:`datetime.datetime.now`.
 
         Example:
             >>> JIo.z_conv_day_num(dt_date(2026, 8, 21))
@@ -1199,15 +1200,16 @@ class JIo(JIoBase):
 
         if isinstance(timestamp, datetime): # before dt_date
             if timestamp.tzinfo is not None:
-                timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+                timestamp = timestamp.astimezone().replace(tzinfo=None)
 
-            return JIo.z_conv_days(timestamp.date()) + (timestamp.hour * 60 + timestamp.minute) / MIN_OF_DAY
+            return JIo.z_conv_days(timestamp.date()) + (timestamp.hour * MIN_OF_HOUR + timestamp.minute) / MIN_OF_DAY
 
         if isinstance(timestamp, dt_date):
             return float(JIo.z_conv_days(timestamp))
 
-        elapsed = max(0, int(timestamp) - THE_1ST_SEC)
-        return NUM_1970_DAYS + elapsed // DAY_SEC + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
+        lt = localtime(max(0, int(timestamp)))
+        return dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1 \
+                + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
 
     @staticmethod
     @lru_cache(maxsize=256)
@@ -2172,31 +2174,44 @@ class JIo(JIoBase):
     def update_days(self) -> int:
         """Refresh today's day number and the matching minute-of-day.
 
+        Both come from the *local* calendar, so :attr:`days` is always the day
+        :func:`datetime.date.today` reports and a record written at 07:00 is
+        found by ``jdb.keys[date.today()]`` at 08:00. Every other date surface
+        -- ``z_conv_days()``, the ``'YYYY-MM-DD'`` parser, date slicing -- is
+        local too, and the day number would disagree with all of them if it were
+        derived from UTC.
+
         Returns:
             int: Today's day number. :attr:`now` holds the same instant as a
-            float whose fraction is the minute-of-day, which is what a sub-day
-            TTL is measured against.
+            float whose fraction is the local minute-of-day, which is what a
+            sub-day TTL is measured against.
         """
         self._now_sec = ts = int(time())
-        elapsed = max(0, ts - THE_1ST_SEC)
-        self.days = NUM_1970_DAYS + elapsed // DAY_SEC
-        self.now = self.days + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
-        return self.days
+        lt = localtime(ts)
+        self.days = days = dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
+        self.now = days + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
+        return days
 
     @property
-    def utc_now(self) -> float:
+    def live_now(self) -> float:
         """float: Today's day number with the live minute-of-day in the fraction.
 
         Reading it also refreshes :attr:`days` and :attr:`now`, which are only as
         fresh as the last :meth:`update_days` -- good enough for whole days but
         not for a minute TTL, so every sub-day expiry test reads this instead.
+        The clock is read at most once a second, since the minute cannot move
+        faster than that.
+
+        A zone that observes DST repeats or skips an hour of local time twice a
+        year; a sub-day TTL crossing that hour runs one hour long or one hour
+        short, the same way any wall-clock timer does.
         """
         ts = int(time())
         if ts != self._now_sec:                     # the minute only moves once every 60 s
             self._now_sec = ts
-            elapsed = max(0, ts - THE_1ST_SEC)
-            self.days = days = NUM_1970_DAYS + elapsed // DAY_SEC
-            self.now = days + (elapsed % DAY_SEC) // MIN_SEC / MIN_OF_DAY
+            lt = localtime(ts)
+            self.days = days = dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
+            self.now = days + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
 
         return self.now
 

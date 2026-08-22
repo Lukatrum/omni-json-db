@@ -1533,7 +1533,7 @@ class JDb(JDbReader):
                 row_id, flags = key_table.get_both(key, fp=key_fp)
                 if flags & KF_EXPIRE:
                     _key, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kfs = io.read_key(key_fp, row_id)
-                    if ttl and (io.days > mdays + ttl if ttl >= 1 else io.utc_now - HALF_MIN_DAYS > mdays + ttl):
+                    if ttl and (io.days > mdays + ttl if ttl >= 1 else io.live_now - HALF_MIN_DAYS > mdays + ttl):
                         del_rows.append((row_id, _key))
 
             if del_rows:
@@ -4824,7 +4824,7 @@ class JDb(JDbReader):
 
                 _ttl = (ttl if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else conv_ttl(ttl)
                 new_ttl = old_ttl if _ttl < 0 else _ttl     # ttl itself may be a timedelta
-                new_mdays = mdays if mdays >= 0 else old_mdays if transient & KF_NO_ATIME else (io.days if new_ttl >= 1 else io.utc_now) if new_ttl > 0 else io.days
+                new_mdays = mdays if mdays >= 0 else old_mdays if transient & KF_NO_ATIME else (io.days if new_ttl >= 1 else io.live_now) if new_ttl > 0 else io.days
                 new_cdays = old_cdays if cdays < 0 else cdays
 
                 new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | (KF_EXPIRE if new_ttl > 0 else 0) | (old_kflags & PAYLOAD_FLAG_MASK if transient & KF_NO_FOLLOW else 0)

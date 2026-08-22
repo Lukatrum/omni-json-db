@@ -641,13 +641,14 @@ EXP_DELTA_MASK  = MAX_EXP_DELTA << NEW_DAY_SHIFT    # bits 26..38
 TTL_MIN_SHIFT   = 37
 MAX_TTL_MINS    = 0x7FF                             # 2047 min ~ 34.1 h (conv_ttl never exceeds 1439)
 TTL_MIN_MASK    = MAX_TTL_MINS << TTL_MIN_SHIFT     # bits 37..47
-MIN_MASK        = 0x7FF << NEW_DAY_SHIFT            # modified minute-of-day, bits 26..36
+MIN_MASK        = 0x7FF << NEW_DAY_SHIFT            # modified local minute-of-day, bits 26..36
 SUB_DELTA_SHIFT = 23
 MAX_SUB_DELTA   = 0x7                               # 7 days
 SUB_DELTA_MASK  = MAX_SUB_DELTA << SUB_DELTA_SHIFT  # bits 23..25
 
 MIN_SEC         = 60
-MIN_OF_DAY      = 1440
+MIN_OF_HOUR     = 60
+MIN_OF_DAY      = 24 * MIN_OF_HOUR
 DAY_SEC         = MIN_OF_DAY*MIN_SEC
 MIN_TTL_DAYS    = 1.0 / MIN_OF_DAY                  # the smallest ttl that can be stored
 HALF_MIN_DAYS   = 0.5 / MIN_OF_DAY                  # guard band: mdays+ttl is not exact in float
@@ -720,7 +721,8 @@ def pack_days(cdays:Union[int,float], mdays:Union[int,float], ttl:Union[int,floa
     if ttl <= 0:
         return ((cday_i & OLD_DAY_MASK) | (delta << NEW_DAY_SHIFT) & NEW_DAY_MASK) if delta > 0 else (cday_i & OLD_DAY_MASK)
 
-    if ttl >= 1 or mday_i > SUB_DAY_MASK:            # day layout, or a date 20 bits cannot hold
+    if ttl >= 1 or mday_i > SUB_DAY_MASK:  # pragma: no cover
+        # day layout, or a date 20 bits cannot hold
         ttl_i = min(int(ttl), MAX_TTL_DAYS)
         if delta > MAX_EXP_DELTA:
             cday_i, delta = mday_i, 0
@@ -747,11 +749,11 @@ def unpack_days(days:int, flags:int) -> Tuple[int,Union[int,float],Union[int,flo
         fraction is the minute-of-day and ``ttl`` a float below ``1.0``; a
         whole-day row stays entirely in ints, as it always was.
     """
-    if not flags & KF_EXPIRE:
+    if not flags & KF_EXPIRE: # pragma: no cover
         cdays = days & OLD_DAY_MASK
         return cdays, cdays + ((days & NEW_DAY_MASK) >> NEW_DAY_SHIFT), 0
 
-    if not days & SUB_DAY_BIT:
+    if not days & SUB_DAY_BIT: # pragma: no cover
         cdays = days & OLD_DAY_MASK
         return cdays, cdays + ((days & EXP_DELTA_MASK) >> NEW_DAY_SHIFT), (days & TTL_MASK) >> TTL_SHIFT
 

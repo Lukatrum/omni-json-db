@@ -1411,11 +1411,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.set_key_flags('exp4', ttl=0), {'exp4': (int(JKeyFlag.NO_CACHE), 0)})
             del jdb['exp4']
 
-            # a naive datetime is read as UTC, the same clock the day counter runs on
-            _utc = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-            _tdy = _utc.date()
+            # a naive datetime reads as local time, the same clock the day counter runs on
+            _lcl = dt.datetime.now()
+            _tdy = _lcl.date()
             _dago = lambda n: _tdy - dt.timedelta(days=n)
-            _then = _utc - dt.timedelta(hours=2)
+            _then = _lcl - dt.timedelta(hours=2)
 
             # the modified minute rides in the fraction of [7]; [10]/[11] stay date strings
             with jdb.open() as fp:
@@ -1438,7 +1438,7 @@ class TestJDb(unittest.TestCase):
 
             # a whole-day ttl runs to the end of its last day, a minute ttl to the minute;
             # 'm_exact' sits on the boundary, where float rounding used to fire a minute early
-            _u0 = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+            _u0 = dt.datetime.now()
             _mk = lambda n: _u0 - dt.timedelta(minutes=n)
             with jdb.open() as fp:
                 jdb.f_write(fp, 'm_edge', 4, cdays=_dago(5), mdays=_dago(5), ttl=5)
@@ -1446,7 +1446,7 @@ class TestJDb(unittest.TestCase):
                 jdb.f_write(fp, 'm_exact', 6, cdays=_mk(30), mdays=_mk(30), ttl=dt.timedelta(minutes=30))
                 jdb.f_write(fp, 'm_under', 7, cdays=_mk(29), mdays=_mk(29), ttl=dt.timedelta(minutes=30))
 
-            if _u0.minute == dt.datetime.now(dt.timezone.utc).minute:   # skip if the clock rolled mid-write
+            if _u0.minute == dt.datetime.now().minute:      # skip if the clock rolled mid-write
                 self.assertEqual(set(jdb.show(key_flags='+e')) & {'m_edge', 'm_over', 'm_exact', 'm_under'},
                                  {'m_edge', 'm_exact', 'm_under'})      # a ttl never expires early
 
@@ -1471,10 +1471,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys['m_d8'][8] * MIN_OF_DAY, 30)
 
             # set_date takes a datetime for the minute, a date for the day alone
-            self.assertTrue(jdb.set_date('m_day', mdate=dt.datetime(2026, 8, 21, 10, 15), ttl=dt.timedelta(minutes=45)))
+            _at = dt.datetime.combine(_tdy, dt.time(10, 15))    # never hard-code a date: mdate must be >= cdate
+            self.assertTrue(jdb.set_date('m_day', mdate=_at, ttl=dt.timedelta(minutes=45)))
             _meta = jdb.keys['m_day']
             self.assertEqual(_meta[8] * MIN_OF_DAY, 45)
-            self.assertEqual(_meta[10], '2026-08-21')
+            self.assertEqual(_meta[10], str(_tdy))
             self.assertEqual(round(_meta[7] % 1 * MIN_OF_DAY), 10 * 60 + 15)
 
             for _k in ('m_old', 'm_new', 'm_day', 'm_edge', 'm_over', 'm_exact', 'm_under', 'm_d7', 'm_d8'):
@@ -10754,11 +10755,11 @@ class TestJDb(unittest.TestCase):
             print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1, bright=1))
             # --------------------------------------------
             jdb1 = JDb(jdb)
-
-            _now = jdb.io.z_conv_days(now.timestamp())
+            _now_ts = now.timestamp()
+            _now = jdb.io.z_conv_days(_now_ts)
             _cdate = jdb.io.z_conv_days(cdate.timestamp())
             self.assertEqual(_cdate + 10, _now)
-
+            self.assertEqual(jdb.io.z_conv_day_num(now), jdb.io.z_conv_day_num(_now_ts))
             _today = dt.date.today()
             _next_day = _today + dt.timedelta(days=1)
             now = _today2 = dt.datetime.now()
