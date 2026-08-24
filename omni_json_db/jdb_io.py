@@ -1199,9 +1199,7 @@ class JIo(JIoBase):
             return float(JIo.z_conv_str_to_days(timestamp))
 
         if isinstance(timestamp, datetime): # before dt_date
-            if timestamp.tzinfo is not None:
-                timestamp = timestamp.astimezone().replace(tzinfo=None)
-
+            timestamp = timestamp.astimezone().replace(tzinfo=None) if timestamp.tzinfo is not None else timestamp
             return JIo.z_conv_days(timestamp.date()) + (timestamp.hour * MIN_OF_HOUR + timestamp.minute) / MIN_OF_DAY
 
         if isinstance(timestamp, dt_date):
