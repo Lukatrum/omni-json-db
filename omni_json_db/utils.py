@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import IntFlag
 from collections import defaultdict
 from contextlib import contextmanager
-from re import findall as re_findall, compile as re_compile
+from re import compile as re_compile
 from threading import Lock, Event, Condition, get_ident
 from signal import SIGINT, signal, default_int_handler # SIG_IGN
 from typing import Callable, Any, Union, Tuple, List, Dict
@@ -31,6 +31,27 @@ class JTypeError(JError, TypeError):
 class JAttributeError(JError, AttributeError):
     pass
 
+class JLockError(JKeyError):
+    """A write or delete was refused because the record is locked.
+
+    Raised when a record carrying :attr:`JKeyFlag.READ_ONLY`,
+    :attr:`JKeyFlag.APPEND_ONLY` or :attr:`JKeyFlag.NO_DELETE` is asked to
+    change. It subclasses :class:`JKeyError` (and therefore :class:`JError` and
+    ``KeyError``), so ``except JKeyError`` still catches it.
+
+    Pass ``key_flags='u'`` (:attr:`JKeyFlag.UNLOCK`) to override the lock for one
+    call, or ``key_flags='q'`` (:attr:`JKeyFlag.QUIET`) to get the pre-3.1 silent
+    refusal back.
+    """
+
+    def __str__(self) -> str:
+        """Return the message as written, not ``KeyError``'s ``repr`` of it.
+
+        Returns:
+            str: The single string argument, or the default ``KeyError`` text.
+        """
+        return self.args[0] if len(self.args) == 1 and isinstance(self.args[0], str) else super().__str__()
+
 MISSING = object()  # 'not found' -> raise
 LOCKED = object()
 EXPIRED = object()  # 'found but its TTL ran out' -> drop from a (key, value) stream
@@ -52,7 +73,10 @@ class JKeyFlag(IntFlag):
     the section, which Sphinx reports as a duplicate object description.
     """
 
-    #: ``'r'`` -- the record cannot be modified or deleted.
+    #: ``'r'`` -- the record cannot be modified or deleted. A write or delete
+    #: that hits it raises :class:`JLockError` unless the call carries
+    #: :attr:`UNLOCK` (do it anyway) or :attr:`QUIET` (refuse the pre-3.1 way,
+    #: returning ``False`` / :data:`LOCKED`).
     READ_ONLY = 0x01
 
     #: ``'a'`` -- the value may only grow. A write is accepted only when the
@@ -201,9 +225,10 @@ class JKeyFlag(IntFlag):
     #: handle and is repeated after a concurrent-writer retry, so it is
     #: race-free where a test-then-write is not.
     #:
-    #: This is what :meth:`JDb.setdefault` means, expressed precisely: the
-    #: refusal is silent (``f_write`` returns ``False``), matching how
-    #: :attr:`READ_ONLY` and :attr:`APPEND_ONLY` already refuse.
+    #: This is what :meth:`JDb.setdefault` means, expressed precisely, so its
+    #: refusal stays silent (``f_write`` returns ``False``): the caller asked for
+    #: a condition, and the condition not holding is an answer, not an error --
+    #: unlike :attr:`READ_ONLY`, which is the *record* refusing and raises.
     EXCL = 0x40000
 
     #: ``'y'`` -- **transient**. Keep the record's stored *modified* day instead
@@ -224,26 +249,56 @@ class JKeyFlag(IntFlag):
     #: a test against :meth:`JDbReader.__contains__` is not.
     MUST_EXIST = 0x100000
 
+    #: ``'q'`` -- **transient**. Fail quietly: restore the silent refusal that
+    #: locked records used to give. Without it a write or delete blocked by
+    #: :data:`WRITE_LOCK_MASK` / :data:`DELETE_LOCK_MASK` raises
+    #: :class:`JLockError`; with it :meth:`JDb.f_write` returns ``False`` and
+    #: :meth:`JDb.f_delete` returns :data:`LOCKED` exactly as before.
+    #:
+    #: It silences *refusals only*. An unknown flag letter is a programming error
+    #: and still raises :class:`JValueError`, because there is no sane behaviour to
+    #: fall back to. (A bit inside :data:`KEY_FLAG_MASK` that no member names yet is
+    #: not an error at all -- it is reserved space, stored and read back untouched.)
+    #: :attr:`UNLOCK` and :attr:`QUIET` are independent: ``'u'`` asks for the write
+    #: to happen anyway, ``'q'`` asks to be told nothing when it does not.
+    QUIET = 0x200000
+
     @classmethod
     def _missing_(cls, value):
         """Allow constructing flags from a letter string, mirroring ``JFlag``.
 
-        e.g. ``JKeyFlag('ac')`` == ``APPEND_ONLY | NO_CACHE``. Unknown letters
-        are ignored.
+        e.g. ``JKeyFlag('ac')`` == ``APPEND_ONLY | NO_CACHE``. Letter parsing is
+        case-insensitive and strict -- an unknown letter is a typo, never a no-op
+        -- while an ``int`` is taken as given, undefined bits included.
 
         Args:
             value (Any): The letter string (case-insensitive) or an int.
 
         Returns:
             JKeyFlag: The combined flag instance.
+
+        Raises:
+            JValueError: If a letter names no flag. An ``int`` is never rejected:
+                :data:`KEY_FLAG_MASK` is the on-disk width, and every bit in it is
+                writable and readable whether or not a member names it yet.
+            JTypeError: If *value* is neither ``str`` nor ``int``.
+
+        Example:
+            >>> JKeyFlag('ac') == JKeyFlag.APPEND_ONLY | JKeyFlag.NO_CACHE
+            True
+            >>> JKeyFlag('?')
+            Traceback (most recent call last):
+            omni_json_db.utils.JValueError: JKeyFlag: unknown flag letter '?' ...
         """
         if isinstance(value, str):
-            _by_letter = KEY_FLAG_BY_LETTER
-            _value = 0
-            for ch in value.lower():
-                _value |= _by_letter.get(ch, 0)
+            value = conv_key_flag_str(value)
 
-            value = _value
+        elif not isinstance(value, int):
+            raise JTypeError(f'JKeyFlag: expected a str or int, got {type(value).__name__}')
+
+        # an int passes through untouched: IntFlag keeps the bits no member defines, which is
+        # what lets a row written by a newer JKeyFlag round-trip through an older one, and
+        # ``~flag`` still folds a negative into range the way it always did
 
         return super()._missing_(value)
 
@@ -276,6 +331,7 @@ KF_NO_FOLLOW   = int(JKeyFlag.NO_FOLLOW)
 KF_EXCL        = int(JKeyFlag.EXCL)
 KF_NO_ATIME    = int(JKeyFlag.NO_ATIME)
 KF_MUST_EXIST  = int(JKeyFlag.MUST_EXIST)
+KF_QUIET       = int(JKeyFlag.QUIET)
 
 KEY_FLAG_LETTERS = {
     JKeyFlag.READ_ONLY:   'r',
@@ -296,13 +352,23 @@ KEY_FLAG_LETTERS = {
     JKeyFlag.EXCL:        'w',
     JKeyFlag.NO_ATIME:    'y',
     JKeyFlag.MUST_EXIST:  'm',
+    JKeyFlag.QUIET:       'q',
 }
 
 KEY_FLAG_BY_LETTER  = {v: int(k) for k, v in KEY_FLAG_LETTERS.items()}
 
-TRANSIENT_FLAG_MASK = KF_UNLOCK | KF_NO_FOLLOW | KF_EXCL | KF_NO_ATIME | KF_MUST_EXIST
+TRANSIENT_FLAG_MASK = KF_UNLOCK | KF_NO_FOLLOW | KF_EXCL | KF_NO_ATIME | KF_MUST_EXIST | KF_QUIET
+
+#: Every bit a caller may legally pass: the whole on-disk width -- an undefined bit
+#: inside it is reserved, not invalid, and is written and read back untouched -- plus
+#: the call-scoped bits above it. Anything else would be masked away unnoticed.
+ALLOWED_FLAG_BITS   = KEY_FLAG_MASK | TRANSIENT_FLAG_MASK
+
+UNDEF_FLAG_BITS     = ~ALLOWED_FLAG_BITS
 
 TRANSIENT_FLAG_BY_LETTER = {ch: int(f) for f, ch in KEY_FLAG_LETTERS.items() if int(f) & TRANSIENT_FLAG_MASK}
+
+STORED_FLAG_MASK    = ~TRANSIENT_FLAG_MASK  # pre-computed for pop_transient_flags()
 
 WRITE_LOCK_MASK     = KF_READ_ONLY | KF_APPEND_ONLY
 
@@ -318,8 +384,107 @@ WRITABLE_FLAG_MASK  = KEY_FLAG_MASK & ~DERIVED_FLAG_MASK
 
 USER_FLAG_MASK      = KEY_FLAG_MASK & ~KF_GROUP
 
+def conv_key_flag_str(flags:str) -> int:
+    """Turn a plain letter string into the OR of the flags it names.
+
+    The absolute form used by :meth:`JKeyFlag._missing_`: every character must be
+    a letter from :data:`KEY_FLAG_LETTERS`. The relative ``'+r-c'`` form belongs
+    to the ``key_flags=`` arguments and is parsed by :func:`conv_to_key_flags`.
+
+    Args:
+        flags (str): The letter string, e.g. ``'ac'`` (case-insensitive).
+
+    Returns:
+        int: The combined flag bits, 0 for an empty string.
+
+    Raises:
+        JValueError: If a character names no flag.
+
+    Example:
+        >>> conv_key_flag_str('rv') == int(JKeyFlag.READ_ONLY | JKeyFlag.NO_REVERT)
+        True
+    """
+    _by_letter = KEY_FLAG_BY_LETTER
+    value = 0
+    for ch in flags.lower():
+        bit = _by_letter.get(ch, None)
+        if bit is None:
+            raise JValueError(f'JKeyFlag: unknown flag letter {ch!r} in {flags!r}, expected one of {"".join(KEY_FLAG_BY_LETTER)!r}')
+
+        value |= bit
+
+    return value
+
+def conv_key_flags(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[int,int]:
+    """Normalise any ``key_flags`` argument into ``(set_mask, clear_mask)``.
+
+    The one entry point every API should use: it accepts the relative string
+    form, an absolute ``int``/:class:`JKeyFlag`, or ``None``, and validates all
+    three the same way.
+
+    Args:
+        flags (Union[str, int, JKeyFlag, None]): The caller's ``key_flags``.
+
+    Returns:
+        Tuple[int, int]: ``(set_mask, clear_mask)``. ``None`` yields ``(0, 0)``,
+        and an ``int`` never clears anything -- it *is* the set of bits to keep.
+
+    Raises:
+        JValueError: If a letter names no flag.
+        JTypeError: If *flags* is neither ``str``, ``int`` nor ``None``.
+
+    Example:
+        >>> conv_key_flags('+h-c')
+        (16, 32)
+    """
+    if flags is None:
+        return 0, 0
+
+    if isinstance(flags, str):
+        return conv_to_key_flags(flags)
+
+    if isinstance(flags, int):
+        # an int is absolute: it names exactly the bits to keep
+        return flags & ALLOWED_FLAG_BITS, 0
+
+    raise JTypeError(f'key_flags: expected a str, int or JKeyFlag, got {type(flags).__name__}')
+
+def key_flag_letters(flags:int) -> str:
+    """Render flag bits as the compact letter string used in error messages.
+
+    Args:
+        flags (int): The flag bits to describe.
+
+    Returns:
+        str: One letter per set flag, e.g. ``'ra'``; ``'-'`` when nothing is set.
+
+    Example:
+        >>> key_flag_letters(int(JKeyFlag.READ_ONLY | JKeyFlag.NO_DELETE))
+        'rp'
+    """
+    return ''.join(ch for f, ch in KEY_FLAG_LETTERS.items() if flags & int(f)) or '-'
+
+def locked_error(key:str, kflags:int, mask:int, action:str='write') -> JLockError:
+    """Build the :class:`JLockError` a locked record refuses an operation with.
+
+    Args:
+        key (str): The record key.
+        kflags (int): The record's stored flags.
+        mask (int): :data:`WRITE_LOCK_MASK` or :data:`DELETE_LOCK_MASK`.
+        action (str, optional): The refused operation, for the message. Defaults to 'write'.
+
+    Returns:
+        JLockError: The exception to raise (never raised here, so the traceback
+        starts at the call site).
+
+    Example:
+        >>> raise locked_error('cfg', int(JKeyFlag.READ_ONLY), WRITE_LOCK_MASK)  # doctest: +SKIP
+    """
+    return JLockError(f'{action}[{key}] refused: record is locked by JKeyFlag {key_flag_letters(kflags & mask)!r}'
+                      f' -- pass key_flags="u" (UNLOCK) to override it, or key_flags="q" (QUIET) to fail silently')
+
 def conv_to_key_flags(flags:str) -> Tuple[int,int]:
-    """Parse a ``chmod``-style flag string into three masks.
+    """Parse a ``chmod``-style flag string into a set mask and a clear mask.
 
     Each letter is one :class:`JKeyFlag` (see :data:`KEY_FLAG_LETTERS`),
     optionally prefixed to say what should happen to it:
@@ -331,8 +496,9 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int]:
     ``-``       Clear the flag / forbid it.
     ==========  ====================================================
 
-    Parsing is case-insensitive, and letters that name no flag are ignored,
-    mirroring :meth:`JKeyFlag._missing_`.
+    Parsing is case-insensitive and strict: a letter that names no flag raises
+    :class:`JValueError` rather than being dropped, so ``key_flags='f'`` is
+    reported as the typo it is instead of quietly doing nothing.
 
     The masks are returned separately so callers can apply them *relative* to a
     record's current flags -- ``(old | set_mask) & ~clear_mask`` -- which is what
@@ -345,12 +511,16 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int]:
 
     Args:
         flags (str): The flag string, e.g. ``'ra'``, ``'+h-c'``, ``'+0'``.
-            A non-``str`` (or empty) argument yields ``(0, 0)``.
+            An empty argument yields ``(0, 0)``.
 
     Returns:
         Tuple[int, int]: ``(set_mask, clear_mask)``. A letter
         given more than one way ends up in each mask it was given, and when
         applied the clear wins over the set.
+
+    Raises:
+        JValueError: If a character is neither ``'+'``, ``'-'`` nor a known flag letter.
+        JTypeError: If *flags* is not a ``str``.
 
     Example:
         >>> conv_to_key_flags('ra')
@@ -360,13 +530,26 @@ def conv_to_key_flags(flags:str) -> Tuple[int,int]:
     """
     set_mask = clr_mask = 0
     if flags:
-        for flag in re_findall(r'[+\-]?[a-z0-9]', flags.lower()):
-            val = KEY_FLAG_BY_LETTER.get(flag[-1:], None)
-            if val is not None:
-                if flag[0] == '-':
-                    clr_mask |= val
-                else:
-                    set_mask |= val
+        if not isinstance(flags, str):
+            raise JTypeError(f'key_flags: expected a str, got {type(flags).__name__}')
+
+        _by_letter = KEY_FLAG_BY_LETTER
+        is_clr = False
+        for ch in flags.lower():
+            if ch == '+' or ch == '-':
+                is_clr = ch == '-'
+                continue
+
+            val = _by_letter.get(ch, None)
+            if val is None:
+                raise JValueError(f'JKeyFlag: unknown flag letter {ch!r} in {flags!r}, expected one of {"".join(KEY_FLAG_BY_LETTER)!r}')
+
+            if is_clr:
+                clr_mask |= val
+            else:
+                set_mask |= val
+
+            is_clr = False
 
     return set_mask, clr_mask
 
@@ -390,7 +573,13 @@ def pop_transient_flags(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[int, Any]
 
     Returns:
         Tuple[int, Any]: ``(transient_mask, remaining_flags)``, where
-        ``remaining_flags`` is safe to hand to :func:`apply_key_flags`.
+        ``remaining_flags`` is safe to hand to :func:`conv_to_key_flags`.
+
+    Raises:
+        JValueError: If a letter names no flag, or a bit sits outside
+            :data:`ALLOWED_FLAG_BITS` -- one that could be neither stored nor
+            consumed, so passing it would be a silent no-op.
+        JTypeError: If *flags* is neither ``str``, ``int`` nor ``None``.
 
     Example:
         >>> pop_transient_flags('wy') == (int(JKeyFlag.EXCL | JKeyFlag.NO_ATIME), None)
@@ -404,21 +593,42 @@ def pop_transient_flags(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[int, Any]
         return 0, None
 
     if isinstance(flags, str):
-        trans, rest = 0, []
-        for tok in re_findall(r'[+\-]?[a-z0-9]', flags.lower()):
-            bit = TRANSIENT_FLAG_BY_LETTER.get(tok[-1:], None)
+        _transient = TRANSIENT_FLAG_BY_LETTER
+        _by_letter = KEY_FLAG_BY_LETTER
+        trans, rest, is_clr = 0, [], False
+        for ch in flags.lower():
+            if ch == '+' or ch == '-':
+                is_clr = ch == '-'
+                continue
+
+            bit = _transient.get(ch, None)
             if bit is not None:
-                if tok[0] != '-':
+                if not is_clr:
                     trans |= bit
 
-            elif tok[-1:] in KEY_FLAG_BY_LETTER:
-                rest.append(tok)
+            elif ch in _by_letter:
+                rest.append(('-' if is_clr else '+') + ch)
+
+            else:
+                raise JValueError(f'JKeyFlag: unknown flag letter {ch!r} in {flags!r}, expected one of {"".join(KEY_FLAG_BY_LETTER)!r}')
+
+            is_clr = False
 
         return trans, (''.join(rest) or None)
 
-    flags = int(flags)
+    if flags.__class__ is not int:
+        # a JKeyFlag/bool still has to become a plain int; anything else is a bug
+        if not isinstance(flags, int):
+            raise JTypeError(f'key_flags: expected a str, int or JKeyFlag, got {type(flags).__name__}')
+
+        flags = int(flags)
+
+    if flags < 0 or flags & UNDEF_FLAG_BITS:
+        raise JValueError(f'JKeyFlag: unusable flag bit(s) 0x{flags & UNDEF_FLAG_BITS:X} in 0x{flags:X}'
+                          if flags >= 0 else f'JKeyFlag: flag bits cannot be negative, got {flags}')
+
     trans = flags & TRANSIENT_FLAG_MASK
-    rest = flags & ~TRANSIENT_FLAG_MASK
+    rest = flags & STORED_FLAG_MASK
     return trans, (None if trans and not rest else rest)
 
 def is_value_extension(old: Any, new: Any) -> bool:

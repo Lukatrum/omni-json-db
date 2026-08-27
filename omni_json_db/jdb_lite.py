@@ -18,8 +18,8 @@ from .jdb_query import QUERY_OPS, Condition, \
             sorted_by_rules, parse_group_by, grouped_by_rules, \
             match_KEY_rules, match_DATE_rules, match_VAL_rules
 from .utils import FileLock, Style, JError, JKeyError, JValueError, JAttributeError, \
-            JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, EXPIRED, \
-            KEY_FLAG_MASK, TRANSIENT_FLAG_MASK, conv_to_key_flags, pop_transient_flags, \
+            JFlag, JKeyFlag, JTypeError, JDbBase, deepcopy, MISSING, EXPIRED, KEY_FLAG_MASK, \
+            TRANSIENT_FLAG_MASK, conv_to_key_flags, pop_transient_flags, \
             KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, KF_EXPIRE, KF_UNLOCK, \
             KF_NO_FOLLOW, F_REVERT, F_FSYNC, get_display_width, print_table
 #-----------------------------------------------------------------------------
@@ -2149,17 +2149,9 @@ class JDbReader(JDbBase):
                 if not no_raise:
                     raise AttributeError(*e.args) from e
 
-            except JKeyError as e: # pragma: no cover
+            except (JKeyError, JValueError, JTypeError): # pragma: no cover
                 if not no_raise:
-                    raise KeyError(*e.args) from e
-
-            except JValueError as e: # pragma: no cover
-                if not no_raise:
-                    raise ValueError(*e.args) from e
-
-            except JTypeError as e: # pragma: no cover
-                if not no_raise:
-                    raise TypeError(*e.args) from e
+                    raise
 
             except JError as e: # pragma: no cover
                 if not no_raise:
@@ -3615,7 +3607,7 @@ class JDbReader(JDbBase):
             >>> jdb.find_iter(vals={'name.$has': 'ice'})      # $has as query operator
             >>> jdb.find_iter(vals={'name. $has': 'ice'})     # ' $has' as a literal dict key
         """
-        need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else (int(key_flags), 0) if key_flags is not None else (0, 0)
+        need_flags, deny_flags = conv_to_key_flags(key_flags) if isinstance(key_flags, str) else (max(int(key_flags or 0), 0), 0) if key_flags is not None else (0, 0)
         if (need_flags | deny_flags) & TRANSIENT_FLAG_MASK:
             raise JValueError('transient key_flags are call-scoped and cannot be queried')
 

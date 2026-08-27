@@ -1610,6 +1610,7 @@ Letter  Flag             Effect
 ``m``   ``MUST_EXIST``   Refuse the write if the key does *not* exist — update-only. The mirror of ``EXCL``.
 ``n``   ``NO_FOLLOW``    Read a ``LINK`` as its own target path instead of following it; on write, retarget it.
 ``y``   ``NO_ATIME``     Write without moving the modified date, so an existing TTL is not renewed.
+``q``   ``QUIET``        Fail quietly: a lock refuses by return value instead of raising ``JLockError``.
 ======  ===============  =======================================================================================
 
 Transient flags are passed to the operation itself, not to ``set_key_flags()``.
@@ -1618,30 +1619,61 @@ refuses an existing key *and* stores ``READ_ONLY`` on a new one. Naming a
 transient flag in a ``find()`` predicate raises ``JValueError`` rather than
 silently matching every record.
 
+**Refusals are loud, typos are louder**
+
+Naming a locked record raises ``JLockError`` (a ``JKeyError``, so a ``KeyError``):
+``jdb['config'] = x`` on a ``READ_ONLY`` row no longer looks like a successful
+write. Two flags opt out, per call: ``'u'`` (``UNLOCK``) does it anyway, ``'q'``
+(``QUIET``) refuses the old way — ``set()`` returns ``None``, ``remove()`` returns
+``{}``, ``f_write()`` returns ``False`` and ``f_delete()`` returns ``LOCKED``.
+Selector-driven sweeps (``jdb[re.compile(...)] = v``, ``update_if()``, ``jdb -= jdb``,
+the CSV/INI/SQL importers, ``insert()`` and the other batch writers) keep skipping
+what they may not touch — they are best-effort by design; only an explicitly
+*named* key refuses loudly. ``EXCL`` (``'w'``) and ``MUST_EXIST`` (``'m'``) also
+stay quiet: those are conditions the *caller* asked for, not a record saying no,
+which is exactly what ``setdefault()`` is built on.
+
+A malformed ``key_flags`` is a different thing and always raises ``JValueError``,
+``'q'`` or not: an unknown letter (``key_flags='f'``) and an undefined bit
+(``key_flags=0x200``, which ``KEY_FLAG_MASK`` was wide enough to write to disk)
+used to be dropped without a word.
+
 .. code-block:: python
 
-   from omni_json_db import JDb, JKeyFlag
+   from omni_json_db import JDb, JKeyFlag, JLockError
 
    jdb = JDb()
    jdb['config']        = {'theme': 'dark'}
    jdb['audit/2026-08'] = ['created']
 
-   # read-only: writes are refused, silently
+   # read-only: writes are refused, and say so
    jdb.set_key_flags('config', 'r')
-   jdb['config'] = {'theme': 'light'}
+   try:
+       jdb['config'] = {'theme': 'light'}
+   except JLockError as e:
+       print(e)                            # write[config] refused: record is locked ...
+
+   print(jdb.set('config', {'theme': 'light'}, key_flags='q'))
+                                           # Output: None   (refused quietly)
    print(jdb['config'])                    # Output: {'theme': 'dark'}
 
    # append-only + no history: an audit log that can only grow
    jdb.set_key_flags('audit/2026-08', 'av')
    jdb['audit/2026-08'] = ['created', 'updated']   # extension -> allowed
-   jdb['audit/2026-08'] = ['wiped']                # not an extension -> refused
-   del jdb['audit/2026-08']                        # refused too
+   for bad in (['wiped'], 'not a list'):           # not an extension -> refused
+       try:
+           jdb['audit/2026-08'] = bad
+       except JLockError:
+           pass
+
+   print(jdb.remove('audit/2026-08', key_flags='q'))   # delete refused too
+                                           # Output: {}
    print(jdb['audit/2026-08'])             # Output: ['created', 'updated']
 
    # inspect, then unlock again ('-r' clears only READ_ONLY).
    # every flag API returns {key: (flags, ttl)}
    flags, ttl = jdb.get_key_flags('audit/2026-08')['audit/2026-08']
-   print(str(JKeyFlag(flags)), ttl)        # Output: __a_v_____________ 0
+   print(str(JKeyFlag(flags)), ttl)        # Output: __a_v______________ 0
    jdb.set_key_flags('config', '-r')
    jdb['config'] = {'theme': 'light'}
    print(jdb['config'])                    # Output: {'theme': 'light'}
@@ -1662,7 +1694,8 @@ silently matching every record.
    jdb.set_key_flags('account/42', '+p')
    jdb['account/42'] = {'plan': 'team'}    # update -> allowed
    print(jdb['account/42'])                # Output: {'plan': 'team'}
-   print(jdb.remove('account/42'))         # Output: {}
+   print(jdb.remove('account/42', key_flags='q'))
+                                           # Output: {}
    print(jdb.remove('account/42', key_flags='u'))
                                            # Output: {'account/42': {'plan': 'team'}}
 
@@ -1729,7 +1762,7 @@ life — the difference between touching a session and prolonging it.
    print(jdb.set_key_flags('session/abc', ttl=7))
                                            # Output: {'session/abc': (128, 7)}
    flags, ttl = jdb.get_key_flags('session/abc')['session/abc']
-   print(str(JKeyFlag(flags)), ttl)        # Output: _______e__________ 7
+   print(str(JKeyFlag(flags)), ttl)        # Output: _______e___________ 7
 
    # a TTL combines with the other flags, and survives a rewrite
    print(jdb.set_key_flags('session/abc', '+r'))
@@ -2192,3 +2225,4 @@ Contributions to **omni-json-db** are highly welcome! Whether you are reporting 
 
 .. |Language3| image:: https://img.shields.io/badge/-%E6%97%A5%E6%96%87-d3d3d3?logo=googletranslate&logoColor=white
    :target: https://github.com/Lukatrum/omni-json-db/blob/main/README-jp.rst
+   

@@ -7,7 +7,7 @@ exclude = ["artwork", "tests", "benchmark", "db", "docs"]
 
 [project]
 name = "omni_json_db"
-version = "3.00.00"
+version = "3.00.01"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -84,7 +84,7 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Database",
     "Topic :: Database :: Database Engines/Servers",

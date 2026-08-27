@@ -24,6 +24,7 @@ from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         KF_READ_ONLY, KF_APPEND_ONLY, KF_GROUP, KF_LINK, KF_HIDDEN, KF_NO_CACHE, \
         KF_NO_REVERT, KF_EXPIRE, KF_USER0, KF_USER1, KF_USER2, KF_USER3, \
         KF_UNLOCK, KF_NO_FOLLOW, KF_EXCL, KF_NO_ATIME, KF_NO_DELETE, KF_MUST_EXIST, \
+        KF_QUIET, JLockError, locked_error, \
         F_REVERT, F_SPLIT, is_value_extension, conv_to_key_flags, pop_transient_flags
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
@@ -425,6 +426,11 @@ class JDb(JDbReader):
 
         Raises:
             TypeError: If ``val`` is a callable with an invalid signature, or the value type is unsupported.
+            JLockError: If an explicitly *named* key is locked against writing.
+                A selector-driven sweep (regex, callable, slice, date range,
+                :class:`Condition`) skips locked rows instead, the way it always
+                did -- use :meth:`set` with ``key_flags='q'`` to name a key and
+                still be skipped quietly.
 
         Example:
             >>> jdb['name'] = 'Charlie'
@@ -469,14 +475,16 @@ class JDb(JDbReader):
 
                 key_table = io.key_table
                 row_id, kflags = key_table.get_both(key, fp=key_fp)
-                if not kflags & KF_READ_ONLY:
-                    if func:
-                        old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
-                        new_val = func(key, deepcopy(old_val))
-                        if new_val != old_val:
-                            self.f_write(fp, key, new_val, overwrite=True)
-                    else:
-                        self.f_write(fp, key, val)
+                if kflags & KF_READ_ONLY:
+                    raise locked_error(key, kflags, WRITE_LOCK_MASK)
+
+                if func:
+                    old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
+                    new_val = func(key, deepcopy(old_val))
+                    if new_val != old_val:
+                        self.f_write(fp, key, new_val, overwrite=True)
+                else:
+                    self.f_write(fp, key, val)
             return
 
         if isinstance(key, Pattern):
@@ -518,14 +526,15 @@ class JDb(JDbReader):
                             old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, _key, new_val, overwrite=True)
+                                # a sweep skips what it may not touch, it never fails as a whole
+                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET)
                                 key_fp = fp[-1]
                 else:
                     for _key in matched_keys:
                         if has_SIGINT(): break
                         row_id, kflags = key_table.get_both(_key, fp=key_fp)
                         if not kflags & KF_READ_ONLY:
-                            f_write(fp, _key, val)
+                            f_write(fp, _key, val, key_flags=KF_QUIET)
 
                 return
 
@@ -547,10 +556,10 @@ class JDb(JDbReader):
                         if func:
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, _key, new_val, overwrite=True)
+                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET)
 
                         elif old_val != val:
-                            f_write(fp, _key, val, overwrite=True)
+                            f_write(fp, _key, val, overwrite=True, key_flags=KF_QUIET)
 
                 return
 
@@ -559,29 +568,32 @@ class JDb(JDbReader):
                 has_SIGINT = self.file_lock.has_SIGINT
                 f_read = self.f_read
                 f_write = self.f_write
-                done = set()
+                done = {}
+                get_both = key_table.get_both
                 for _key in key:
-                    _key = str(_key)
+                    _key = _key if isinstance(_key, str) else str(_key)
                     if _key not in done:
-                        if has_SIGINT(): break
-                        done.add(_key)
-                        row_id, kflags = key_table.get_both(_key, fp=key_fp)
-                        if kflags & KF_READ_ONLY:
-                            continue
+                        _row_id, _kflags = get_both(_key, fp=key_fp)
+                        if _kflags & KF_READ_ONLY:
+                            raise locked_error(_key, _kflags, WRITE_LOCK_MASK)
 
-                        if row_id < 0 and _key.find(SEP_SYM) >= 0: # pylint: disable=R
-                            self[_key] = val
-                            continue
+                        done[_key] = (_row_id, _kflags)
 
-                        if func:
-                            old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
-                            new_val = func(_key, deepcopy(old_val))
-                            if new_val != old_val:
-                                f_write(fp, _key, new_val, overwrite=True)
-                                key_fp = fp[-1]
-                        else:
-                            f_write(fp, _key, val)
+                for _key,(row_id, kflags) in done.items():
+                    if has_SIGINT(): break
+                    if row_id < 0 and _key.find(SEP_SYM) >= 0: # pylint: disable=R
+                        self[_key] = val
+                        continue
+
+                    if func:
+                        old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
+                        new_val = func(_key, deepcopy(old_val))
+                        if new_val != old_val:
+                            f_write(fp, _key, new_val, overwrite=True)
                             key_fp = fp[-1]
+                    else:
+                        f_write(fp, _key, val)
+                        key_fp = fp[-1]
 
                 return
 
@@ -591,14 +603,16 @@ class JDb(JDbReader):
             # int | float | bool
             io, fp, key_fp = self.f_get_fp(fp)
             row_id, kflags = key_table.get_both(key, fp=key_fp)
-            if not kflags & KF_READ_ONLY:
-                if func:
-                    old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
-                    new_val = func(key, deepcopy(old_val))
-                    if new_val != old_val:
-                        self.f_write(fp, key, new_val, overwrite=True)
-                else:
-                    self.f_write(fp, key, val)
+            if kflags & KF_READ_ONLY:
+                raise locked_error(key, kflags, WRITE_LOCK_MASK)
+
+            if func:
+                old_val = None if row_id < 0 else self.f_read(fp, key, row=row_id, copy=False)
+                new_val = func(key, deepcopy(old_val))
+                if new_val != old_val:
+                    self.f_write(fp, key, new_val, overwrite=True)
+            else:
+                self.f_write(fp, key, val)
 
     def __delitem__(self, key:Union[str,Any]):
         """Delete records from the database (must be committed with ``sync()``).
@@ -657,6 +671,11 @@ class JDb(JDbReader):
 
         Raises:
             TypeError: If ``key`` is not a supported selector type.
+            JLockError: If an explicitly *named* key is locked against deletion.
+                A selector-driven sweep (regex, callable, slice, date range,
+                :class:`Condition`) skips locked rows instead, the way it always
+                did -- use :meth:`remove` with ``key_flags='q'`` to name a key and
+                still be skipped quietly.
 
         Example:
             >>> del jdb[:] # delete all records
@@ -694,10 +713,12 @@ class JDb(JDbReader):
                 if row_id < 0:
                     raise JKeyError(key)
 
-                if not kflags & DELETE_LOCK_MASK:
-                    group = self.f_delete(fp, key, read_value=False, row=row_id)
-                    if isinstance(group, JDb) and self.files_obj.is_group(group.files_obj, key):
-                        group.remove_fast(group) # pragma: no cover | NEVER
+                if kflags & DELETE_LOCK_MASK:
+                    raise locked_error(key, kflags, DELETE_LOCK_MASK, 'delete')
+
+                group = self.f_delete(fp, key, read_value=False, row=row_id)
+                if isinstance(group, JDb) and self.files_obj.is_group(group.files_obj, key):
+                    group.remove_fast(group) # pragma: no cover | NEVER
 
                 return
 
@@ -718,6 +739,8 @@ class JDb(JDbReader):
             io = self.io
             key_table = io.key_table
             del_keys = set()
+            # a sweep skips a locked row; an explicitly named key refuses loudly
+            is_sweep = k_arg_cnt > 0 or isinstance(key, (slice, dt_date, datetime, Condition))
             if isinstance(key, (bytes, bytearray)): # pragma: no cover
                 key = bytes(key) if isinstance(key, bytearray) else key
                 try:
@@ -766,12 +789,12 @@ class JDb(JDbReader):
 
             if not del_keys:
                 # int | float | bool | str | bytes
-                row_id,kflags = key_table.get_both(key, fp=fp[-1])
+                row_id, kflags = key_table.get_both(key, fp=fp[-1])
                 if row_id < 0:
                     raise JKeyError(key)
 
                 if kflags & DELETE_LOCK_MASK:
-                    return
+                    raise locked_error(key, kflags, DELETE_LOCK_MASK, 'delete')
 
                 del_keys = [(row_id, kflags, key)]
                 io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
@@ -779,6 +802,11 @@ class JDb(JDbReader):
                 io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
                 del_keys = [key_table.get_both(_key, fp=key_fp) + (_key,) for _key in del_keys]
                 del_keys.sort(reverse=True)
+                if not is_sweep:
+                    # pre-flight: refuse the whole batch rather than delete half of it
+                    for _row_id,_kflags,_key in del_keys:
+                        if _kflags & DELETE_LOCK_MASK:
+                            raise locked_error(_key, _kflags, DELETE_LOCK_MASK, 'delete')
 
             f_delete = self.f_delete
             files_obj = self.files_obj
@@ -847,7 +875,7 @@ class JDb(JDbReader):
                     for row_id in range(io.n_records-1, -1, -1):
                         if has_SIGINT(): break
                         _key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
-                        group_jdb = f_delete(fp, _key, row=row_id, read_value=False)
+                        group_jdb = f_delete(fp, _key, row=row_id, read_value=False, key_flags=KF_QUIET)
                         if isinstance(group_jdb, JDb) and files_obj.is_group(group_jdb.files_obj, _key):
                             group_jdb.remove_fast(group_jdb)
 
@@ -1207,35 +1235,46 @@ class JDb(JDbReader):
         Args:
             key (str): The record key.
             default_val (Optional[Any], optional): Value returned if the key is missing. Defaults to None.
-            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
-                :attr:`JKeyFlag.UNLOCK` (``'u'``) is meaningful here: it waives the
-                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
-                this one call, like ``sudo``. The record's stored flags are not
-                changed. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Two flags
+                are meaningful here. :attr:`JKeyFlag.UNLOCK` (``'u'``) waives the
+                :data:`DELETE_LOCK_MASK` check for this one call, like ``sudo``;
+                :attr:`JKeyFlag.QUIET` (``'q'``) keeps the lock but asks for the
+                pre-3.1 silent refusal instead of :class:`JLockError`. The
+                record's stored flags are not changed. Defaults to None.
 
         Returns:
-            Any: The record's value, or ``default_val`` if the key is missing. A
-            locked record is left in place and its value returned unchanged --
-            pass ``key_flags='f'`` to pop it anyway.
+            Any: The record's value, or ``default_val`` if the key is missing.
+            With ``'q'``, a locked record is left in place and its value returned
+            unchanged; without it, a locked record raises.
+
+        Raises:
+            JLockError: If the record is locked and neither ``'u'`` nor ``'q'``
+                was given.
 
         Example:
             >>> previous_value = jdb.pop('key_to_remove', default_val=0)
-            >>> jdb.pop('read_only_key', key_flags='f')     # sudo
+            >>> jdb.pop('read_only_key', key_flags='u')     # sudo
+            >>> jdb.pop('read_only_key', key_flags='q')     # look, do not touch
         """
         with self.open(read_only=True) as fp:
             try:
                 val = self.f_delete(fp, key, key_flags=key_flags)
                 return val if val is not LOCKED else self.f_read(fp, key, default_val=MISSING)
 
+            # a locked record is a refusal, not a missing key: it must not read as `default_val`
+            except JLockError:
+                raise
+
             # Not a gzipped file
             except OSError: # pragma: no cover
-                self.f_delete(fp, key, read_value=False)
+                key_flags = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
+                self.f_delete(fp, key, read_value=False, key_flags=key_flags)
                 return default_val
 
             except KeyError: # pragma: no cover
                 return default_val
 
-    def unmodify(self, *records:str, version:Optional[int]=None) -> Dict[str,Any]:
+    def unmodify(self, *records:str, version:Optional[int]=None, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
         """Undo modifications to records (revert to the version before the last write).
 
         Returns a dict of the records restored. Calls :meth:`f_unwrite`.
@@ -1252,13 +1291,22 @@ class JDb(JDbReader):
                 left untouched and simply absent from the result, the same way
                 a key with no history at all is. ``None`` (the default) takes
                 the newest parked row. Defaults to ``None``.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
+                :attr:`JKeyFlag.QUIET` (``'q'``) is meaningful here: reverting a
+                record locked by :data:`WRITE_LOCK_MASK` raises
+                :class:`JLockError`, and ``'q'`` asks for the old silent skip
+                instead. Defaults to None.
 
         Returns:
             Dict[str, Any]: Mapping dictionary summarizing all successfully restored entities linked along previous positions data.
 
+        Raises:
+            JLockError: If a named record is locked against writing.
+
         Example:
             >>> recovered_info = jdb.unmodify('over_written_key')
             >>> older = jdb.unmodify('over_written_key', version=7) # a specific history()['ver']
+            >>> jdb.unmodify('read_only_key', key_flags='q')        # skip it quietly
         """
         keys = set()
         results = {}
@@ -1279,13 +1327,20 @@ class JDb(JDbReader):
 
         with self.open(read_only=True) as fp:
             io = self.io
+            io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
+            key_table = io.key_table
+            # a locked key refuses whether or not it has anything parked to restore
+            if not (pop_transient_flags(key_flags)[0] if key_flags is not None else 0) & (KF_UNLOCK | KF_QUIET):
+                for _key in keys:
+                    _row_id, _kflags = key_table.get_both(_key, fp=key_fp)
+                    if _kflags & WRITE_LOCK_MASK:
+                        raise locked_error(_key, _kflags, WRITE_LOCK_MASK, 'unmodify')
+
             if io.n_records == io.n_lines:
                 return results
 
-            io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
             has_SIGINT = self.file_lock.has_SIGINT
             unwrite = self.f_unwrite
-            key_table = io.key_table
             io_read_key = io.read_key
             row_id = io.n_records
             keys = keys.intersection(key_table)
@@ -1530,8 +1585,8 @@ class JDb(JDbReader):
 
             key_table = io.key_table
             for key in key_table:
-                row_id, flags = key_table.get_both(key, fp=key_fp)
-                if flags & KF_EXPIRE:
+                row_id, kflags = key_table.get_both(key, fp=key_fp)
+                if kflags & KF_EXPIRE:
                     _key, _f, _o, _rs, _vs, _v, _cd, mdays, ttl, _kfs = io.read_key(key_fp, row_id)
                     if ttl and (io.days > mdays + ttl if ttl >= 1 else io.live_now - HALF_MIN_DAYS > mdays + ttl):
                         del_rows.append((row_id, _key))
@@ -2609,7 +2664,7 @@ class JDb(JDbReader):
         set_mask, clr_mask = conv_to_key_flags(flags) if isinstance(flags, str) else (0, 0)
         if flags is not None and not isinstance(flags, str):
             # an int/JKeyFlag is absolute: set what it names, clear everything else
-            set_mask = WRITABLE_FLAG_MASK & int(flags)
+            set_mask = WRITABLE_FLAG_MASK & max(int(flags or 0), 0)
             clr_mask = WRITABLE_FLAG_MASK & ~set_mask
 
         for _want, _bit in zip((read_only, append_only, no_cache, no_revert, no_delete, hidden, user0, user1, user2, user3, ttl),
@@ -2767,7 +2822,7 @@ class JDb(JDbReader):
                     return False
 
             if old_kflags & KF_LINK:
-                self.f_delete(fp, key, read_value=False)
+                self.f_delete(fp, key, read_value=False, key_flags=KF_QUIET)
 
             self._cache.pop(key, None)
             if not self.f_write(fp, key, target, key_flags=old_kflags & WRITABLE_FLAG_MASK, overwrite=True):
@@ -2861,13 +2916,19 @@ class JDb(JDbReader):
                 -- while an ``int``/:class:`JKeyFlag` replaces them outright.
                 Passing this also makes the update-function form write even when
                 the value is unchanged, so flags alone can be updated.
-                Defaults to None.
+                :attr:`JKeyFlag.UNLOCK` (``'u'``) waives a lock for this call and
+                :attr:`JKeyFlag.QUIET` (``'q'``) turns a refusal back into a
+                ``None`` return. Defaults to None.
 
         Returns:
             Optional[Any]: The new value if written, the old value if unchanged (update-function case), or ``None`` if nothing was written.
 
         Raises:
             TypeError: If ``val`` is a callable with an invalid signature.
+            JLockError: If the record is locked and neither ``'u'`` nor ``'q'``
+                was given.
+            JValueError: If ``key_flags`` names an unknown flag letter or an
+                undefined bit.
         """
         if callable(val):
             func = val
@@ -3104,7 +3165,7 @@ class JDb(JDbReader):
                 f_write = self.f_write
                 for key,val in chg_keys:
                     if has_SIGINT(): break
-                    f_write(fp, key, val, overwrite=True)
+                    f_write(fp, key, val, overwrite=True, key_flags=KF_QUIET)
                     count += 1
 
             if del_keys:
@@ -3116,7 +3177,7 @@ class JDb(JDbReader):
                 for _row,key in del_keys:
                     if has_SIGINT(): break
                     if _row >= 0:
-                        f_delete(fp, key, read_value=False)
+                        f_delete(fp, key, read_value=False, key_flags=KF_QUIET)
                         count += 1
 
         return count
@@ -3340,7 +3401,7 @@ class JDb(JDbReader):
                     if fix_it or isinstance(row, OrderedDict):
                         row = dict(row)
 
-                    self.f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True)
+                    self.f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
                     if (ii % 1000) == 0:
                         print('.', end='', flush=True)
 
@@ -3397,7 +3458,7 @@ class JDb(JDbReader):
                             key_col = next(iter(row))
 
                         key_id = row.pop(key_col)
-                        f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True)
+                        f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
                         ii += 1
                         if (ii % 1000) == 0: # pragma: no cover
                             print('.', end='', flush=True)
@@ -3465,7 +3526,7 @@ class JDb(JDbReader):
                         for row in rows:
                             val = {col: row[col] for col in val_cols}
                             key = '|'.join(str(row[col]) for col in pk_cols) if pk_cols else str(jio.sync_id)
-                            group_jdb.f_write(fp, key, val, flags=0, max_wsize=0, overwrite=True)
+                            group_jdb.f_write(fp, key, val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
 
             return self
 
@@ -3496,7 +3557,7 @@ class JDb(JDbReader):
             f_write = self.f_write
             for section in parser.sections():
                 for key,val in parser.items(section):
-                    f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True)
+                    f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
 
             return self
 
@@ -3535,9 +3596,9 @@ class JDb(JDbReader):
             for section,attributes in data.items():
                 if isinstance(attributes, dict):
                     for key,val in attributes.items():
-                        f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True)
+                        f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
                 else:
-                    f_write(fp, f'/{section}', attributes, flags=0, max_wsize=0, overwrite=True)
+                    f_write(fp, f'/{section}', attributes, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
 
             return self
 
@@ -3663,6 +3724,7 @@ class JDb(JDbReader):
             # not insert and not replace [do nothing]
             return {}
 
+        _wr_flags = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
         if isinstance(records, JDbReader):
             jdb = records
             if jdb is self or jdb.files_obj == self.files_obj:
@@ -3689,7 +3751,7 @@ class JDb(JDbReader):
                         # insert + replace = update
                         for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
 
@@ -3698,7 +3760,7 @@ class JDb(JDbReader):
                         for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             if _key in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT():break
 
@@ -3707,7 +3769,7 @@ class JDb(JDbReader):
                         for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             if _key not in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
 
@@ -3778,13 +3840,13 @@ class JDb(JDbReader):
                             new_val = func(str_key, deepcopy(old_val))
                             not_eq = new_val != old_val
                             if not_eq or key_flags is not None:
-                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=key_flags):
+                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=_wr_flags):
                                     chg_table[str_key] = new_val
 
                             continue
 
                         if not (_cache and str_key in _cache and _cache[str_key] == val):
-                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
                                 chg_table[str_key] = val
 
                     continue
@@ -3792,11 +3854,11 @@ class JDb(JDbReader):
                 if insert:
                     if func:
                         new_val = func(str_key, None)
-                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, key_flags=key_flags)
+                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags)
                         chg_table[str_key] = new_val
                         continue
 
-                    f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=key_flags)
+                    f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags)
                     chg_table[str_key] = val
 
         return chg_table
@@ -3807,18 +3869,26 @@ class JDb(JDbReader):
         Args:
             *records (str): Keys of the records to delete.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
-                :attr:`JKeyFlag.UNLOCK` (``'u'``) is meaningful here: it waives the
-                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
-                this one call, like ``sudo``. The record's stored flags are not
-                changed. Defaults to None.
+                :attr:`JKeyFlag.UNLOCK` (``'u'``) waives the
+                :data:`DELETE_LOCK_MASK` check for this one call, like ``sudo``;
+                :attr:`JKeyFlag.QUIET` (``'q'``) keeps the lock but asks for the
+                pre-3.1 silent skip instead of :class:`JLockError`. The record's
+                stored flags are not changed. Defaults to None.
 
         Returns:
-            Dict[str, Any]: Mapping of deleted key to its value. Locked records
-            are skipped and simply omitted from the result.
+            Dict[str, Any]: Mapping of deleted key to its value. With ``'q'``,
+            locked records are skipped and simply omitted from the result.
+
+        Raises:
+            JLockError: If one of the *named* keys is locked and neither ``'u'``
+                nor ``'q'`` was given. The check runs before anything is deleted,
+                so the batch either goes through or leaves the database untouched.
+                Passing a whole :class:`JDbReader` is a sweep, not a list of
+                names, and skips locked rows instead.
 
         Example:
             >>> jdb.remove('a', 'b')
-            >>> jdb.remove('read_only_key', key_flags='f')     # sudo
+            >>> jdb.remove('read_only_key', key_flags='u')     # sudo
         """
         keys = set()
         for key in records:
@@ -3829,6 +3899,7 @@ class JDb(JDbReader):
             else:
                 if isinstance(key, JDbReader) and key.files_obj == self.files_obj:
                     ret = {}
+                    key_flags = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
                     with self.open(read_only=False) as fp:
                         has_SIGINT = self.file_lock.has_SIGINT
                         f_delete = self.f_delete
@@ -3869,23 +3940,31 @@ class JDb(JDbReader):
             has_SIGINT = self.file_lock.has_SIGINT
             f_delete = self.f_delete
             files_obj = self.files_obj
-            keys = [(key_table.get(_key, -1, fp=key_fp), _key) for _key in keys]
+            keys = [(key_table.get_both(_key, fp=key_fp) + (_key,)) for _key in keys]
+
+            # pre-flight: refuse the whole batch rather than delete half of it
+            if not (pop_transient_flags(key_flags)[0] if key_flags is not None else 0) & (KF_UNLOCK | KF_QUIET):
+                for _row_id,_kflags,_key in keys:
+                    if _row_id >= 0 and _kflags & DELETE_LOCK_MASK:
+                        raise locked_error(_key, _kflags, DELETE_LOCK_MASK, 'delete')
+
             keys.sort(reverse=True)
-            for row_id,key in keys:
+            _wr_flags = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
+            for row_id,_kflags,key in keys:
                 if has_SIGINT():
                     break
 
                 try:
-                    jdb = val = f_delete(fp, key, row=row_id, key_flags=key_flags)
+                    jdb = val = f_delete(fp, key, row=row_id, key_flags=_wr_flags)
                     if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
                         # cleanup the sub database
-                        jdb.remove_fast(jdb, key_flags=key_flags)
+                        jdb.remove_fast(jdb, key_flags=_wr_flags)
 
                     if val is not LOCKED:
                         ret[key] = val
 
                 except OSError: # pragma: no cover
-                    f_delete(fp, key, read_value=False, key_flags=key_flags)
+                    f_delete(fp, key, read_value=False, key_flags=_wr_flags)
                     ret[key] = None
 
                 except (KeyError, ValueError, TypeError): # pragma: no cover
@@ -3898,11 +3977,16 @@ class JDb(JDbReader):
 
         Args:
             *records (str): Keys of the records to delete.
-            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
-                :attr:`JKeyFlag.UNLOCK` (``'u'``) is meaningful here: it waives the
-                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
-                this one call, like ``sudo``. The record's stored flags are not
-                changed. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional):
+                :attr:`JKeyFlag.UNLOCK` (``'u'``) waives the
+                :data:`DELETE_LOCK_MASK` check for this one call, like ``sudo``;
+                :attr:`JKeyFlag.QUIET` (``'q'``) keeps the lock but asks for the
+                pre-3.1 silent skip instead of :class:`JLockError`. The record's
+                stored flags are not changed. Defaults to None.
+
+        Raises:
+            JLockError: If one of the *named* keys is locked and neither ``'u'``
+                nor ``'q'`` was given; the check runs before anything is deleted.
 
         """
         keys = set()
@@ -3913,6 +3997,7 @@ class JDb(JDbReader):
                 keys.add(str(key))
             else:
                 if isinstance(key, JDbReader) and key.files_obj == self.files_obj:
+                    _quiet = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
                     with self.open(read_only=False) as fp:
                         has_SIGINT = self.file_lock.has_SIGINT
                         f_delete = self.f_delete
@@ -3922,9 +4007,9 @@ class JDb(JDbReader):
                         for row_id in range(io.n_records-1, -1, -1):
                             if has_SIGINT(): break
                             key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, _kflags = io_read_key(key_fp, row_id)
-                            jdb = f_delete(fp, key, row=row_id, read_value=False, key_flags=key_flags)
+                            jdb = f_delete(fp, key, row=row_id, read_value=False, key_flags=_quiet)
                             if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key):
-                                jdb.remove_fast(jdb, key_flags=key_flags)
+                                jdb.remove_fast(jdb, key_flags=_quiet)
                     return
 
                 for kk in key:
@@ -3952,20 +4037,28 @@ class JDb(JDbReader):
             has_SIGINT = self.file_lock.has_SIGINT
             f_delete = self.f_delete
             files_obj = self.files_obj
-            keys = [(key_table.get(_key, -1, fp=key_fp), _key) for _key in keys]
+            keys = [(key_table.get_both(_key, fp=key_fp) + (_key,)) for _key in keys]
+
+            # pre-flight: refuse the whole batch rather than delete half of it
+            if not (pop_transient_flags(key_flags)[0] if key_flags is not None else 0) & (KF_UNLOCK | KF_QUIET):
+                for _row_id,_kflags,_key in keys:
+                    if _row_id >= 0 and _kflags & DELETE_LOCK_MASK:
+                        raise locked_error(_key, _kflags, DELETE_LOCK_MASK, 'delete')
+
             keys.sort(reverse=True)
-            for row,key in keys:
+            _wr_flags = (key_flags + '+q') if isinstance(key_flags, str) else (int(key_flags or 0) | KF_QUIET)
+            for row,_kflags,key in keys:
                 if has_SIGINT():
                     break
 
                 try:
-                    jdb = f_delete(fp, key, row=row, read_value=False, key_flags=key_flags)
+                    jdb = f_delete(fp, key, row=row, read_value=False, key_flags=_wr_flags)
                     if isinstance(jdb, JDb) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
-                        jdb.remove_fast(jdb, key_flags=key_flags) # NEVER
+                        jdb.remove_fast(jdb, key_flags=_wr_flags) # NEVER
 
                 # Not a gzip file
                 except OSError: # pragma: no cover
-                    f_delete(fp, key, read_value=False)
+                    f_delete(fp, key, read_value=False, key_flags=_wr_flags)
 
                 except KeyError: # pragma: no cover
                     pass
@@ -4731,12 +4824,16 @@ class JDb(JDbReader):
 
         Returns:
             bool: True if the write succeeded, False otherwise. A write is
-            *refused silently* (returns False, nothing is written) when the
-            stored record carries :attr:`JKeyFlag.READ_ONLY`, or when it carries
-            :attr:`JKeyFlag.APPEND_ONLY` and ``val`` is not a strict extension of
-            the stored value -- see :func:`is_value_extension`. Enforcing an
-            APPEND_ONLY row costs one extra value read, paid only by records that
-            opted in.
+            *refused* -- nothing is written -- when the stored record carries
+            :attr:`JKeyFlag.READ_ONLY`, or when it carries
+            :attr:`JKeyFlag.APPEND_ONLY` and ``val`` is neither equal to nor a
+            strict extension of the stored value -- see
+            :func:`is_value_extension`. The refusal raises :class:`JLockError`
+            unless ``key_flags`` carries :attr:`JKeyFlag.QUIET` (``'q'``), which
+            returns ``False`` the way every version before 3.1 did, or
+            :attr:`JKeyFlag.UNLOCK` (``'u'``), which waives the lock instead.
+            Enforcing an APPEND_ONLY row costs one extra value read, paid only by
+            records that opted in.
 
             A record carrying :attr:`JKeyFlag.NO_REVERT` is rewritten in place
             instead of parking its previous version in a dead row, even when
@@ -4749,6 +4846,10 @@ class JDb(JDbReader):
 
         Raises:
             TypeError: If ``write_hook`` rejects the key/value.
+            JLockError: If the record is locked and ``key_flags`` carries neither
+                :attr:`JKeyFlag.UNLOCK` nor :attr:`JKeyFlag.QUIET`.
+            JValueError: If ``key_flags`` names an unknown flag letter or an
+                undefined bit.
         """
         key = str(key) if not isinstance(key, str) else key
         val = bytes(val) if isinstance(val, bytearray) else val
@@ -4790,7 +4891,13 @@ class JDb(JDbReader):
             if row >= 0:
                 # (Exist + Value|Header)
                 # EXCL refuses before anything else, and again after a sync_chg retry
-                if transient & KF_EXCL or old_kflags & KF_READ_ONLY and not transient & KF_UNLOCK:
+                if transient & KF_EXCL:
+                    return False
+
+                if old_kflags & KF_READ_ONLY and not transient & KF_UNLOCK:
+                    if not transient & KF_QUIET:
+                        raise locked_error(key, old_kflags, WRITE_LOCK_MASK)
+
                     return False
 
                 if not checked and cache_limit != 0 and key in _cache:
@@ -4814,6 +4921,10 @@ class JDb(JDbReader):
                 if old_kflags & KF_APPEND_ONLY and not transient & KF_UNLOCK:
                     _old_val = self.f_decode_value(fp_dict, key, file_id, offset, row_size, val_size, old_kflags, update_cache=False, copy=False)
                     if not is_value_extension(_old_val, val):
+                        # rewriting the identical value changes nothing, so it is a no-op, not a refusal
+                        if not transient & KF_QUIET and _old_val != val:
+                            raise locked_error(key, old_kflags, WRITE_LOCK_MASK)
+
                         return False
 
                 if isinstance(key_flags, str):
@@ -5197,8 +5308,14 @@ class JDb(JDbReader):
         key_fp = fp_dict[-1] if fp_dict else None
         row, old_kflags = key_table.get_both(key, fp=key_fp)
         if row >= 0:
-            transient, key_flags = pop_transient_flags(key_flags)
-            if transient & KF_EXCL or old_kflags & KF_READ_ONLY and not transient & KF_UNLOCK:
+            transient, _key_flags = pop_transient_flags(key_flags)
+            if transient & KF_EXCL:
+                return False
+
+            if old_kflags & KF_READ_ONLY and not transient & KF_UNLOCK:
+                if not transient & KF_QUIET:
+                    raise locked_error(key, old_kflags, WRITE_LOCK_MASK, 'append')
+
                 return False
 
             return self.f_write(fp_dict, key, val, flags=0, max_wsize=0, overwrite=True, key_flags=key_flags, ttl=ttl)
@@ -5268,19 +5385,24 @@ class JDb(JDbReader):
             read_value (bool, optional): If True, read and return the value before deleting it. Defaults to True.
             row (Optional[int], optional): Row id, if already known (skips lookup). Defaults to None.
             flags (Optional[JFlag], optional): strategic behavioral modifiers flags. Defaults to None.
-            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Only
-                :attr:`JKeyFlag.UNLOCK` (``'u'``) is meaningful here: it waives the
-                :attr:`JKeyFlag.READ_ONLY` / :attr:`JKeyFlag.APPEND_ONLY` check for
-                this one call, like ``sudo``. The record's stored flags are not
-                changed. Defaults to None.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Two flags
+                are meaningful here. :attr:`JKeyFlag.UNLOCK` (``'u'``) waives the
+                :data:`DELETE_LOCK_MASK` check for this one call, like ``sudo``;
+                :attr:`JKeyFlag.QUIET` (``'q'``) keeps the lock but asks for the
+                pre-3.1 ``LOCKED`` sentinel instead of :class:`JLockError`. The
+                record's stored flags are not changed. Defaults to None.
 
         Returns:
             Any: The deleted value, or the group :class:`JDb` if the key was a
-            group. Returns the ``LOCKED`` sentinel -- and deletes
-            nothing -- when the record carries :attr:`JKeyFlag.READ_ONLY` or
-            :attr:`JKeyFlag.APPEND_ONLY`. Callers that report what was removed
-            must test ``val is not LOCKED`` rather than ``val is not None``,
-            because ``None`` is a legal stored value.
+            group. With ``'q'`` a locked record returns the ``LOCKED`` sentinel
+            and deletes nothing; callers that report what was removed must then
+            test ``val is not LOCKED`` rather than ``val is not None``, because
+            ``None`` is a legal stored value.
+
+        Raises:
+            JLockError: If the record carries a :data:`DELETE_LOCK_MASK` bit and
+                ``key_flags`` carries neither :attr:`JKeyFlag.UNLOCK` nor
+                :attr:`JKeyFlag.QUIET`.
         """
         key = str(key) if not isinstance(key, str) else key
         self._cache.pop(key, None)
@@ -5302,6 +5424,9 @@ class JDb(JDbReader):
         transient, key_flags = pop_transient_flags(key_flags)
         _key, file_id, offset, row_size, val_size, _ver, cdays, mdays, ttl, kflags = io.read_key(key_fp, row)
         if kflags & DELETE_LOCK_MASK and not transient & KF_UNLOCK:
+            if not transient & KF_QUIET:
+                raise locked_error(key, kflags, DELETE_LOCK_MASK, 'delete')
+
             return LOCKED
 
         if not key:
