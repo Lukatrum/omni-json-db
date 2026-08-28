@@ -20,7 +20,7 @@ gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP, KF_EXCL
 from .jdb_file import JFilesBase
-from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
+from .jdb_codec import Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
@@ -216,6 +216,30 @@ PAD_lut = (
 #-----------------------------------------------------------------------------
 ROW_ID_SHIFT = KEY_FLAG_MASK.bit_length()
 
+_K2B = tuple(bytes((0x92, 0xa0 | i) if i < 32 else (0x92, 0xd9, i)) for i in range(0x100))
+_V2B = tuple(bytes((i,) if i < 0x80 else (0xcc, i)) for i in range(0x100))
+
+def _kt_entry(key:str, val:Optional[int]=None) -> bytes:
+    """Return one KeyTable bucket entry, byte-identical to ``packb((key, val))``.
+
+    Args:
+        key (str): The record key.
+        val (Optional[int], optional): The packed row_id/flags value. ``None``
+            returns only the ``(key, ...)`` header, i.e. the ``_find_key`` needle.
+
+    Returns:
+        bytes: The msgpack-encoded entry, or its key prefix when ``val`` is None.
+    """
+    kb = key.encode('utf8')
+    n = len(kb)
+    if n < 0x100: pre = _K2B[n] + kb
+    else:         pre = b'\x92\xda' + n.to_bytes(2, 'big') + kb
+    if val is None:       return pre
+    if val < 0x100:       return pre + _V2B[val]
+    if val < 0x10000:     return pre + b'\xcd' + val.to_bytes(2, 'big')
+    if val < 0x100000000: return pre + b'\xce' + val.to_bytes(4, 'big')
+    return pre + b'\xcf' + val.to_bytes(8, 'big')
+
 xhash = hash # hash() is not deterministic, can export PYTHONHASHSEED=0
 class KeyTable(KeyTableBase):
     """Standard indexing schema for tracking key-to-row mappings in the database."""
@@ -293,18 +317,18 @@ class KeyTable(KeyTableBase):
             # new key
             self.size += 1
             self.flags[key_hash & self.flags_mask] = True
-            key_array.extend(_msg_dumps((key, val)) or b'')
+            key_array.extend(_kt_entry(key, val))
         else:
             old_val, s_idx, e_idx = self._find_key(key_array, key)
             if old_val >= 0: # old key
                 if old_val != val:
-                    key_array[s_idx:e_idx] = _msg_dumps((key, val)) or b''
+                    key_array[s_idx:e_idx] = _kt_entry(key, val)
                     if cache: cache.pop(key, None)
 
             else: # new key
                 self.size += 1
                 self.flags[key_hash & self.flags_mask] = True
-                key_array.extend(_msg_dumps((key, val)) or b'')
+                key_array.extend(_kt_entry(key, val))
 
         self._set_found_flag(row_id, True)
 
@@ -633,6 +657,7 @@ class KeyTable(KeyTableBase):
         """
         jio = self.io
         io_groups = jio.groups
+        kt_entry = _kt_entry
         is_empty = self.size == 0
         flags = self.flags
         mask = self.mask
@@ -647,7 +672,7 @@ class KeyTable(KeyTableBase):
             for (_key, _f, _o, _r, _v, _s, _cd, _md, _tl, kflags) in jio.KEY_iter(key_fp, row_id, jio.n_records):
                 _val = (row_id  << ROW_ID_SHIFT) | (kflags & KEY_FLAG_MASK)
                 if is_empty or not get_found_flag(row_id):
-                    wr_bytes = _msg_dumps((_key, _val)) or b''
+                    wr_bytes = kt_entry(_key, _val)
                     key_hash = xhash(_key)
                     flags[key_hash & flags_mask] = True
                     group_id = key_hash & mask
@@ -683,7 +708,7 @@ class KeyTable(KeyTableBase):
         """
         n_bytes = len(key_array)
         if n_bytes > 0:
-            search_prefix = b'\x92' + (_msg_dumps(key) or b'')
+            search_prefix = _kt_entry(key)
             prefix_len = len(search_prefix)
             idx = key_array.find(search_prefix)
             while idx >= 0:
