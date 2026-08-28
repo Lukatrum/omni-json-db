@@ -415,40 +415,6 @@ def conv_key_flag_str(flags:str) -> int:
 
     return value
 
-def conv_key_flags(flags:Union[str,int,'JKeyFlag',None]) -> Tuple[int,int]:
-    """Normalise any ``key_flags`` argument into ``(set_mask, clear_mask)``.
-
-    The one entry point every API should use: it accepts the relative string
-    form, an absolute ``int``/:class:`JKeyFlag`, or ``None``, and validates all
-    three the same way.
-
-    Args:
-        flags (Union[str, int, JKeyFlag, None]): The caller's ``key_flags``.
-
-    Returns:
-        Tuple[int, int]: ``(set_mask, clear_mask)``. ``None`` yields ``(0, 0)``,
-        and an ``int`` never clears anything -- it *is* the set of bits to keep.
-
-    Raises:
-        JValueError: If a letter names no flag.
-        JTypeError: If *flags* is neither ``str``, ``int`` nor ``None``.
-
-    Example:
-        >>> conv_key_flags('+h-c')
-        (16, 32)
-    """
-    if flags is None:
-        return 0, 0
-
-    if isinstance(flags, str):
-        return conv_to_key_flags(flags)
-
-    if isinstance(flags, int):
-        # an int is absolute: it names exactly the bits to keep
-        return flags & ALLOWED_FLAG_BITS, 0
-
-    raise JTypeError(f'key_flags: expected a str, int or JKeyFlag, got {type(flags).__name__}')
-
 def key_flag_letters(flags:int) -> str:
     """Render flag bits as the compact letter string used in error messages.
 

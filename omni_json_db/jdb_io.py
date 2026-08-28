@@ -18,7 +18,7 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP
+from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP, KF_EXCL
 from .jdb_file import JFilesBase
 from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
@@ -29,10 +29,6 @@ from .jdb_codec import _msg_dumps, Unpacker, json_loads, \
 
 try:
     from brotli import compress as brotli_compress, decompress as brotli_decompress, error as BR_Error
-    # Some brotli bindings (e.g. brotlipy / brotlicffi, "brotli/brotli.py") only
-    # accept bytes and raise ``TypeError: expected new array length or
-    # list/tuple/str, not bytearray`` on bytearray/memoryview inputs, so convert
-    # bytes-like inputs here (brotli is the only codec that needs this copy).
     br_compress = lambda _bytes : brotli_compress(_bytes if isinstance(_bytes, bytes) else bytes(_bytes), quality=6)
     br_decompress = lambda _bytes : brotli_decompress(_bytes if isinstance(_bytes, bytes) else bytes(_bytes))
 except ModuleNotFoundError:
@@ -293,16 +289,22 @@ class KeyTable(KeyTableBase):
         if key_array is None:
             groups[group_id] = key_array = bytearray()
 
-        old_val, s_idx, e_idx = self._find_key(key_array, key) if key_array else (-1, -1, -1)
-        if old_val >= 0: # old key
-            if old_val != val:
-                key_array[s_idx:e_idx] = _msg_dumps((key, val)) or b''
-                if cache: cache.pop(key, None)
-
-        else: # new key
+        if flags & KF_EXCL or not key_array:
+            # new key
             self.size += 1
             self.flags[key_hash & self.flags_mask] = True
             key_array.extend(_msg_dumps((key, val)) or b'')
+        else:
+            old_val, s_idx, e_idx = self._find_key(key_array, key)
+            if old_val >= 0: # old key
+                if old_val != val:
+                    key_array[s_idx:e_idx] = _msg_dumps((key, val)) or b''
+                    if cache: cache.pop(key, None)
+
+            else: # new key
+                self.size += 1
+                self.flags[key_hash & self.flags_mask] = True
+                key_array.extend(_msg_dumps((key, val)) or b'')
 
         self._set_found_flag(row_id, True)
 
@@ -2660,7 +2662,7 @@ class JIo(JIoBase):
 
                 if records < n_records:
                     for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
-                        key_table.set(key, records, flags)
+                        key_table.set(key, records, flags|KF_EXCL)
                         records += 1
 
                 if n_records == 0:
@@ -2745,7 +2747,7 @@ class JIo(JIoBase):
             groups.clear()
         else:
             for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
-                key_table.set(key, records, flags)
+                key_table.set(key, records, flags | KF_EXCL)
                 records += 1
 
         self.update_file_table()

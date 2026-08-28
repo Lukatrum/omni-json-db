@@ -713,7 +713,7 @@ class JDb(JDbReader):
                 if row_id < 0:
                     raise JKeyError(key)
 
-                if kflags & DELETE_LOCK_MASK:
+                if kflags & DELETE_LOCK_MASK: # pragma: no cover
                     raise locked_error(key, kflags, DELETE_LOCK_MASK, 'delete')
 
                 group = self.f_delete(fp, key, read_value=False, row=row_id)
@@ -2540,7 +2540,7 @@ class JDb(JDbReader):
                     dst_row_id = dst_io.n_records
                     dst_sync_id = dst_io.sync_id
                     dst_io_write_key(key_fp_d, dst_row_id, key, file_id_d, offset_d, row_size_d, val_size_d, dst_sync_id, cdays, mdays, ttl, flags=kflags)
-                    dst_io.key_table.set(key, dst_row_id, kflags)
+                    dst_io.key_table.set(key, dst_row_id, kflags|KF_EXCL)
                     dst_io.sync_id = (dst_sync_id + 1) & 0X_7FF_FFFF_FFFF
                     dst_io.n_records += 1
 
@@ -5260,7 +5260,7 @@ class JDb(JDbReader):
         self.safe_line += (1 if not F_REVERT & flags else 0)
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        io.key_table.set(key, safe_h, new_kflags)
+        io.key_table.set(key, safe_h, new_kflags|KF_EXCL)
         return True
 
     def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, \
@@ -5367,7 +5367,7 @@ class JDb(JDbReader):
         self.safe_line += 1
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        io.key_table.set(key, n_records, new_kflags)
+        io.key_table.set(key, n_records, new_kflags|KF_EXCL)
         return True
 
     def f_delete(self, fp_dict:Dict[int,IO], key:str, \
@@ -5578,7 +5578,7 @@ class JDb(JDbReader):
 
         io.n_records += 1
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-        io.key_table.set(key, safe_h, kflags)
+        io.key_table.set(key, safe_h, kflags|KF_EXCL)
         return safe_h, file_id, offset, row_size, val_size
 
     def f_unwrite(self, fp_dict:Dict[int,IO], key:str, \
