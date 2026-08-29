@@ -11,7 +11,7 @@ from collections import OrderedDict
 #-----------------------------------------------------------------------------
 from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
-        VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, NEW_DAY_SHIFT, \
+        VAL_FILE_BUF_SIZE, KEY_FILE_BUF_SIZE, NEW_DAY_SHIFT, HEADER_SIZE, \
         API_LATEST, NEW_DAY_MASK, OLD_DAY_MASK, THE_1ST_DATE, \
         g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U
 from .jdb_file import JFilesBase
@@ -28,6 +28,39 @@ from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
         F_REVERT, F_SPLIT, is_value_extension, conv_to_key_flags, pop_transient_flags
 
 MAX_BLOCK_SIZE = 2**18 # 256KB
+MAX_BATCH_ROWS = 2**16 # rows relocated in one batch-insert pass
+MAX_BATCH_SIZE = 2**25 # padded value bytes held by one batch-insert pass
+IMPORT_BATCH_ROWS = 2**13 # rows an importer buffers before flushing them
+
+def _write_all(fp:IO, pos:int, data:Union[bytes,bytearray]) -> int:
+    """Seek to ``pos`` and write every byte of ``data``, retrying on a short write.
+
+    Unbuffered (``buffering=0``) VAL files are raw ``FileIO`` objects whose
+    ``write()`` is allowed to consume only part of the buffer.
+
+    Args:
+        fp (IO): The open VAL file pointer.
+        pos (int): Byte offset to write at.
+        data (Union[bytes, bytearray]): The bytes to write.
+
+    Returns:
+        int: The number of bytes written, always ``len(data)``.
+
+    Raises:
+        OSError: If the stream accepts no bytes at all.
+    """
+    fp.seek(pos)
+    view = memoryview(data)
+    total = len(view)
+    while view:
+        n_bytes = fp.write(view)
+        if not n_bytes: # pragma: no cover
+            raise OSError('VAL file write returned 0 byte')
+
+        view = view[n_bytes:]
+
+    return total
+
 
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -3389,6 +3422,8 @@ class JDb(JDbReader):
                 # [BUG: python 3.7] marshal.dumps(Ordereddict) throw exception
                 fix_it = io.data_type_str.endswith('+M')
                 reader = DictReader(csv_fp, **kwargs)
+                f_extend = self.f_extend
+                batch = {}
                 for ii,row in enumerate(reader):
                     if has_SIGINT(): break
 
@@ -3401,9 +3436,15 @@ class JDb(JDbReader):
                     if fix_it or isinstance(row, OrderedDict):
                         row = dict(row)
 
-                    self.f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                    batch[key_id] = row
+                    if len(batch) >= IMPORT_BATCH_ROWS:
+                        f_extend(fp, batch, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
+                        batch.clear()
+
                     if (ii % 1000) == 0:
                         print('.', end='', flush=True)
+
+                f_extend(fp, batch, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
 
         finally:
             if owns_it and csv_fp is not None:
@@ -3447,10 +3488,11 @@ class JDb(JDbReader):
         try:
             with self.open(read_only=False) as fp:
                 has_SIGINT = self.file_lock.has_SIGINT
-                f_write = self.f_write
+                f_extend = self.f_extend
                 key_col = key
                 ii = 0
                 for batch in pf.iter_batches(batch_size=batch_size, columns=columns):
+                    rows = {}
                     for row in batch.to_pylist():
                         if has_SIGINT(): break
 
@@ -3458,10 +3500,16 @@ class JDb(JDbReader):
                             key_col = next(iter(row))
 
                         key_id = row.pop(key_col)
-                        f_write(fp, key_id, row, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                        rows[key_id] = row
+                        if len(rows) >= IMPORT_BATCH_ROWS:
+                            f_extend(fp, rows, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
+                            rows.clear()
+
                         ii += 1
                         if (ii % 1000) == 0: # pragma: no cover
                             print('.', end='', flush=True)
+
+                    f_extend(fp, rows, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
 
         finally:
             close = getattr(pf, 'close', None)
@@ -3523,10 +3571,16 @@ class JDb(JDbReader):
                         if not rows:
                             break
 
+                        records = {}
                         for row in rows:
                             val = {col: row[col] for col in val_cols}
-                            key = '|'.join(str(row[col]) for col in pk_cols) if pk_cols else str(jio.sync_id)
-                            group_jdb.f_write(fp, key, val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                            key = '|'.join(str(row[col]) for col in pk_cols) if pk_cols else str(jio.sync_id + len(records))
+                            records[key] = val
+                            if len(records) >= IMPORT_BATCH_ROWS:
+                                group_jdb.f_extend(fp, records, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
+                                records.clear()
+
+                        group_jdb.f_extend(fp, records, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
 
             return self
 
@@ -3554,11 +3608,12 @@ class JDb(JDbReader):
             parser.read_file(src)
 
         with self.open(read_only=False) as fp:
-            f_write = self.f_write
+            records = {}
             for section in parser.sections():
                 for key,val in parser.items(section):
-                    f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                    records[f'{section}/{key}'] = val
 
+            self.f_extend(fp, records, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
             return self
 
     def from_toml(self, src:Union[str,IO]) -> JDb:
@@ -3592,14 +3647,15 @@ class JDb(JDbReader):
 
         data = toml_loads(content)
         with self.open(read_only=False) as fp:
-            f_write = self.f_write
+            records = {}
             for section,attributes in data.items():
                 if isinstance(attributes, dict):
                     for key,val in attributes.items():
-                        f_write(fp, f'{section}/{key}', val, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                        records[f'{section}/{key}'] = val
                 else:
-                    f_write(fp, f'/{section}', attributes, flags=0, max_wsize=0, overwrite=True, key_flags=KF_QUIET)
+                    records[f'/{section}'] = attributes
 
+            self.f_extend(fp, records, key_flags=KF_QUIET, flags=0, max_wsize=0, replace=True)
             return self
 
     def reinit(self, records:Dict[str,Any], \
@@ -3662,20 +3718,29 @@ class JDb(JDbReader):
             self.io.reset(**kwargs)
             self.io.swap_id = (swap_id + 1) & 0X_7FF_FFFF_FFFF
             self.io.remv_id = (remv_id + 1) & 0X_7FF_FFFF_FFFF
-            f_write = self.f_write
+            # the database was just cleared, so every key is new: append them all
+            f_extend = self.f_extend
             has_SIGINT = self.file_lock.has_SIGINT
+            batch = {}
             if not jdb:
+                sync_id = self.io.sync_id
                 for key in records:
                     if has_SIGINT():
                         break
 
                     if is_list: # pragma: no cover
                         val = key
-                        key = str(self.io.sync_id)
+                        key = str(sync_id)
+                        sync_id += 1
                     else:
                         val = records[key]
 
-                    f_write(fp, str(key) if not isinstance(key, str) else key, val, flags=JFlag(0), max_wsize=0)
+                    batch[str(key) if not isinstance(key, str) else key] = val
+                    if len(batch) >= IMPORT_BATCH_ROWS:
+                        f_extend(fp, batch, flags=0, max_wsize=0, replace=True)
+                        batch.clear()
+
+                f_extend(fp, batch, flags=0, max_wsize=0, replace=True)
 
             else:
                 with jdb.open(read_only=True) as fp1:
@@ -3685,8 +3750,12 @@ class JDb(JDbReader):
                         if has_SIGINT():
                             break
 
-                        val = jdb_read(fp1, key, row=row, copy=False)
-                        f_write(fp, key, val, flags=JFlag(0), max_wsize=0)
+                        batch[key] = jdb_read(fp1, key, row=row, copy=False)
+                        if len(batch) >= IMPORT_BATCH_ROWS:
+                            f_extend(fp, batch, flags=0, max_wsize=0, replace=True)
+                            batch.clear()
+
+                    f_extend(fp, batch, flags=0, max_wsize=0, replace=True)
 
             return self.io.n_records > 0
 
@@ -3698,6 +3767,11 @@ class JDb(JDbReader):
             key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Dict[str,Any]:
         """Core batch-write method underlying :meth:`set_n`, :meth:`insert`, :meth:`update`, :meth:`replace`, :meth:`append`, and related helpers.
 
+        Existing records are rewritten one at a time by :meth:`f_write`, which may
+        reuse a DEAD row. Records whose key is new are collected and handed to
+        :meth:`f_extend`, which appends them in a single pass and never reclaims a
+        DEAD row.
+
         Args:
             records (Dict[str, Any]): Mapping of key to value (or a list of values, if ``is_list=True``) to write.
             default_val (Optional[Any], optional): Value used for entries mapped to ``None``. Defaults to None.
@@ -3705,7 +3779,9 @@ class JDb(JDbReader):
             insert (bool, optional): Create records whose key doesn't yet exist. Defaults to True.
             is_list (bool, optional): If True, ``records`` is a list and keys are auto-generated. Defaults to False.
             flags (Optional[JFlag], optional): strategic behavioral modifiers. Defaults to None.
-            max_wsize (Optional[int], optional): Maximum number of dead rows to search when reusing space. Defaults to None.
+            max_wsize (Optional[int], optional): Maximum number of dead rows to search
+                when reusing space. Only rewrites look for one; a new record is always
+                appended. Defaults to None.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional): Flags to apply
                 before the per-flag keywords below, which override it. A
                 ``chmod``-style string is *relative* -- ``'ra'`` sets READ_ONLY and
@@ -3747,31 +3823,39 @@ class JDb(JDbReader):
                     src_read = jdb.f_read
                     dst_write = self.f_write
                     has_SIGINT = self.file_lock.has_SIGINT
-                    if insert and replace:
-                        # insert + replace = update
-                        for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
-                            _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
-                                chg_table[_key] = _val
-                            if has_SIGINT(): break
-
-                    elif insert:
-                        # insert only
-                        for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
-                            if _key in key_table: continue
-                            _val = src_read(src_fp, _key, row=row_id, copy=False)
-                            if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
-                                chg_table[_key] = _val
-                            if has_SIGINT():break
-
-                    elif replace:
-                        # replace only
+                    if not insert:
+                        # replace only: every key copied is already here, nothing to append
                         for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
                             if _key not in key_table: continue
                             _val = src_read(src_fp, _key, row=row_id, copy=False)
                             if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
                                 chg_table[_key] = _val
                             if has_SIGINT(): break
+
+                        return chg_table
+
+                    # keys this database does not have yet are appended in batches
+                    batch = {}
+                    f_extend = self.f_extend
+                    for _key,row_id in jio.sorted_key_table_items(fp=key_fp_s):
+                        if _key in key_table:
+                            if replace:
+                                _val = src_read(src_fp, _key, row=row_id, copy=False)
+                                if dst_write(fp, _key, _val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
+                                    chg_table[_key] = _val
+                        else:
+                            batch[_key] = src_read(src_fp, _key, row=row_id, copy=False)
+                            if len(batch) >= IMPORT_BATCH_ROWS:
+                                if f_extend(fp, batch, key_flags=_wr_flags, flags=flags, max_wsize=max_wsize, replace=replace):
+                                    chg_table.update(batch)
+                                batch.clear()
+
+                        if has_SIGINT(): break
+
+                    if batch:
+                        if f_extend(fp, batch, key_flags=_wr_flags, flags=flags, max_wsize=max_wsize, replace=replace):
+                            chg_table.update(batch)
+                        batch.clear()
 
                 return chg_table
 
@@ -3809,14 +3893,18 @@ class JDb(JDbReader):
             f_read = self.f_read
             f_write = self.f_write
             _cache = self._cache
-            has_SIGINT = self.file_lock.has_SIGINT
+            file_lock = self.file_lock
+            has_SIGINT = file_lock.has_SIGINT
+            new_records = {}
+            sync_id = io.sync_id
             for key in records:
                 if has_SIGINT():
                     break
 
                 if is_list:
                     val = key
-                    str_key = str(io.sync_id)
+                    str_key = str(sync_id)
+                    sync_id += 1
                     func = None
                 else:
                     val = records[key]
@@ -3851,15 +3939,40 @@ class JDb(JDbReader):
 
                     continue
 
-                if insert:
-                    if func:
-                        new_val = func(str_key, None)
-                        f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags)
-                        chg_table[str_key] = new_val
+                if not insert:
+                    continue
+
+                if func:
+                    val = func(str_key, None)
+
+                if file_lock.mode != 'w':
+                    # The first new record upgrades the lock, which reloads the KEY
+                    # index, so a key that was missing a moment ago may exist by now --
+                    # re-read it, or a concurrent writer ends up with two rows for one
+                    # key. Every later lookup already runs under the write lock.
+                    io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
+                    key_table = io.key_table
+                    if key_table.get(str_key, -1, fp=key_fp) >= 0:
+                        if replace and f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
+                            chg_table[str_key] = val
+
                         continue
 
-                    f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags)
-                    chg_table[str_key] = val
+                if isinstance(val, JDbReader):
+                    # a group value cannot be pre-encoded: _set_group() must run first
+                    if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
+                        chg_table[str_key] = val
+
+                    continue
+
+                new_records[str_key] = val
+
+            if new_records and self.f_extend(fp, new_records, key_flags=_wr_flags, flags=flags, max_wsize=max_wsize, replace=replace):
+                chg_table.update(new_records)
+
+            if is_list and io.sync_id < sync_id:
+                # generated keys are reserved even when some of them were skipped
+                io.sync_id = sync_id & 0X_7FF_FFFF_FFFF
 
         return chg_table
 
@@ -4525,6 +4638,42 @@ class JDb(JDbReader):
             if isinstance(group, JDb):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
             return group
+
+    def _fill_dead_tail(self, key_fp:IO, from_row:int, dead_head:int, n_chunk:int, n_dead:int, dead_block:List[tuple]) -> int:
+        """Internal: pre-write the DEAD rows a batch insert is about to push past its own tail.
+
+        :meth:`f_extend` appends ``n_chunk`` records in one pass, which shifts every
+        DEAD row down by ``n_chunk`` rows. Instead of moving them one at a time, the
+        block is parked at its final rows up front; the head of the old block is then
+        simply overwritten by the new records. Rows that the new records will claim are
+        filled with blanks, so the KEY file never has a hole below ``io.n_lines`` -- a
+        hole would break :meth:`JIo.resize_keys`.
+
+        Args:
+            key_fp (IO): The open KEY index file pointer.
+            from_row (int): First row to (re)write; rows below it are already correct.
+            dead_head (int): ``io.n_lines`` as it was when the pass started.
+            n_chunk (int): Number of records this pass appends.
+            n_dead (int): Number of DEAD rows in the index (``n_lines - n_records``).
+            dead_block (List[tuple]): The ``read_key()`` rows of the old DEAD block head.
+
+        Returns:
+            int: The KEY index row size the rows were written with.
+        """
+        io = self.io
+        index_size = io.index_size
+        stop_row = dead_head + n_chunk
+        keep_row = dead_head + max(0, n_chunk - n_dead) # rows the new records overwrite
+        blanks = min(stop_row, keep_row) - from_row
+        if blanks > 0:
+            row = io.KEY_dumps('', 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            key_fp.seek(HEADER_SIZE + from_row * index_size)
+            key_fp.write((row + b' ' * (index_size - len(row) - 1) + b'\n') * blanks)
+
+        for row_id in range(max(from_row, keep_row), stop_row):
+            io.write_key(key_fp, row_id, *dead_block[(row_id - dead_head) % n_dead])
+
+        return index_size
 
     def _get_dead_row(self, key_fp:IO, key:str, req_size:int, \
             flags:Optional[JFlag]=None, \
@@ -5262,6 +5411,258 @@ class JDb(JDbReader):
         io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
         io.key_table.set(key, safe_h, new_kflags|KF_EXCL)
         return True
+
+    def f_extend(self, fp_dict:Dict[int,IO], records:Dict[str,Any], \
+            ttl:Union[int,float,timedelta]=-1, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            flags:Optional[int]=None, \
+            max_wsize:Optional[int]=None, \
+            replace:bool=False) -> bool:
+        """Internal: append many brand-new records to the index in a single pass.
+
+        This is the batch counterpart of :meth:`f_write`. A key that is not in the
+        index yet is *appended*: unlike :meth:`f_write` the append never takes a row
+        back from the DEAD area, so a record's previous versions and the free VAL
+        blocks left by :meth:`f_delete` stay untouched, and :attr:`n_lines` grows by
+        exactly one row per appended record. A key that is already there is skipped,
+        or handed to :meth:`f_write` when ``replace`` says so -- that rewrite is an
+        ordinary one and may reclaim a DEAD row.
+
+        Three things make the append faster than the same records written one at a
+        time: values are serialized and padded ahead of the writes, the padded bytes
+        are flushed to each VAL file in one write instead of one unbuffered write per
+        record, and the whole DEAD block is relocated once rather than row by row --
+        see :meth:`_fill_dead_tail`. The work is done in passes of at most
+        ``MAX_BATCH_ROWS`` rows / ``MAX_BATCH_SIZE`` padded bytes, so memory stays
+        bounded however long ``records`` is.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table. The
+                write-mode lock is acquired here, so the caller does not need it.
+            records (Dict[str, Any]): Mapping of key to value to write.
+                **On return this mapping holds exactly the records that were
+                written**, so a caller can report them without a second pass. Records
+                rewritten by ``replace`` are moved to the end of it.
+            ttl (Union[int, float, timedelta], optional): Lifetime shared by every
+                record, as :func:`conv_ttl` reads it. ``-1`` means no TTL, and leaves
+                a record rewritten by ``replace`` with the ttl it already had.
+                Defaults to -1.
+            key_flags (Optional[Union[str, int, JKeyFlag]], optional): Flags shared by
+                every record. A ``chmod``-style string is relative, an
+                ``int``/:class:`JKeyFlag` is absolute. Defaults to None.
+            flags (Optional[int], optional): :class:`JFlag` modifiers. Only
+                :attr:`JFlag.REVERT` reaches the append, which reclaims nothing;
+                a ``replace`` rewrite honours them all. ``None`` uses :attr:`flags`.
+                Defaults to None.
+            max_wsize (Optional[int], optional): Dead-row search window for the
+                ``replace`` rewrites and for a group value, which :meth:`f_write`
+                handles. The append never searches. ``None`` uses :attr:`max_wsize`.
+                Defaults to None.
+            replace (bool, optional): Overwrite a key that is already in the index,
+                instead of leaving it alone -- which turns the call into a bulk
+                upsert. Defaults to False.
+
+        Returns:
+            bool: True if at least one record was written.
+
+        Example:
+            >>> with jdb.open(read_only=False) as fp:
+            ...     new = {'a': 1, 'b': [2, 3]}
+            ...     jdb.f_extend(fp, new, ttl=7)
+            True
+        """
+        if not records:
+            return False
+
+        io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
+        flags = int(self.flags) if flags is None else int(flags)
+        new_ttl = (0 if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl))
+        if isinstance(key_flags, str):
+            set_mask, clr_mask = conv_to_key_flags(key_flags)
+            new_kflags = set_mask & ~clr_mask
+        else:
+            new_kflags = int(key_flags) if key_flags else 0
+
+        new_kflags = (new_kflags & WRITABLE_FLAG_MASK) | (KF_EXPIRE if new_ttl > 0 else 0)
+        encode_row = self._encode_row
+        key_table = io.key_table
+        io_pad = io.pad
+        drop = []   # already in the index: `replace` decides whether they are rewritten
+        fail = []   # never written, and retrying them would not help
+        items = []
+        for key, val in records.items():
+            if key_table.get(key, -1, fp=key_fp) >= 0:
+                drop.append(key)
+                continue
+
+            if isinstance(val, JDbReader):
+                # a group value cannot be pre-encoded: _set_group() must run first
+                if not self.f_write(fp_dict, key, val, ttl=ttl, flags=flags, max_wsize=max_wsize, key_flags=key_flags):
+                    fail.append(key)
+
+                key_fp = fp_dict[-1]
+                continue
+
+            items.append((key, val))
+
+        n_done = 0
+        has_SIGINT = self.file_lock.has_SIGINT
+        if items:
+            is_revert = bool(F_REVERT & flags)
+            min_safe = self.min_safe
+            chg_keys = self.chg_keys
+            cache_on = self._cache_limit != 0
+            max_file_size = io.max_file_size
+            file_table = io.file_table
+            update_cache = self._update_cache
+            get_val_fp = self.f_get_val_fp
+            fill_tail = self._fill_dead_tail
+            copy_key = io.copy_key
+            read_key = io.read_key
+            write_key = io.write_key
+            key_set = io.key_table.set
+            n_records = io.n_records
+            n_lines = io.n_lines
+            n_dead = n_lines - n_records
+            # DEAD[h] - SAFE[h] never changes while a batch appends rows, so a single
+            # probe decides whether the whole DEAD block simply shifts down by one row
+            # per appended record -- which lets it be relocated in one pass.
+            bulk = not is_revert or min(max(self.safe_line, n_records + min_safe), n_lines) == n_records
+            total = len(items)
+            start = n_chunk = n_new = 0
+            dead_block = None
+            val_fp = None
+            buf = None
+            buf_pos = dead_head = idx_size = file_id = offset = free = 0
+            try:
+                while start < total:
+                    # serialize one pass worth of records, capped by both row count and
+                    # byte size, so a batch of any length holds only one pass in memory
+                    rows = []
+                    stop = start
+                    n_size = 0
+                    while stop < total and len(rows) < MAX_BATCH_ROWS and n_size < MAX_BATCH_SIZE:
+                        key, val = items[stop]
+                        type_id, payload, n_bytes = encode_row(key, val)
+                        if type_id < 0:
+                            val_size = len(payload)     # encoded size, n_bytes is the raw one
+                            payload = io_pad(payload, max_size=0)
+                            n_size += len(payload)
+                            rows.append((key, type_id, payload, val_size, len(payload), val))
+                        else:
+                            rows.append((key, type_id, payload, n_bytes, 0, val))
+
+                        stop += 1
+
+                    n_chunk = len(rows)
+                    if bulk and n_dead > 0:
+                        # read the DEAD block once, park it at its final rows and let
+                        # the new records overwrite the head of the old block
+                        dead_head = n_lines
+                        dead_block = [read_key(key_fp, n_records + jj) for jj in range(min(n_chunk, n_dead))]
+                        idx_size = fill_tail(key_fp, dead_head, dead_head, n_chunk, n_dead, dead_block)
+                    else:
+                        dead_block = None
+
+                    n_new = 0
+                    for key, type_id, payload, val_size, row_size, val in rows:
+                        if has_SIGINT():
+                            break
+
+                        safe_h = n_records
+                        if is_revert:
+                            # min_safe keeps the newest history rows out of reach
+                            dead_h = min(max(self.safe_line, n_records + min_safe), n_lines)
+                            if key not in chg_keys:
+                                chg_keys.add(key)
+                                self.safe_line = dead_h + 1
+
+                        else:
+                            dead_h = n_records
+                            self.safe_line += 1
+
+                        # a new record never reuses a DEAD row: it always takes a fresh tail row
+                        dead_row = n_lines
+                        io.n_lines = n_lines = n_lines + 1
+                        if type_id < 0:
+                            if row_size > free:
+                                if buf:
+                                    _write_all(val_fp, buf_pos, buf)
+
+                                val_fp, file_id, offset = get_val_fp(fp_dict, req_size=row_size)
+                                buf_pos = offset
+                                buf = bytearray()
+                                free = max_file_size - offset
+
+                            new_offset = offset
+                            buf += payload
+                            offset += row_size
+                            free -= row_size
+                            file_table[file_id] = max(file_table.get(file_id, 0), offset)
+
+                        if dead_block is None:
+                            if dead_row > dead_h:
+                                # DEAD[h] -> DEAD[t+1]
+                                copy_key(key_fp, dead_h, dead_row)
+
+                            if dead_h > safe_h:
+                                # SAFE[h] -> DEAD[h]
+                                copy_key(key_fp, safe_h, dead_h)
+
+                        # new key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
+                        if type_id < 0:
+                            write_key(key_fp, safe_h, key, file_id, new_offset, row_size, val_size, ttl=new_ttl, flags=new_kflags)
+                        else:
+                            write_key(key_fp, safe_h, key, type_id, payload, 0, val_size, ttl=new_ttl, flags=new_kflags)
+
+                        if dead_block is not None and io.index_size != idx_size:
+                            # resize_keys() rebuilt and truncated the KEY file to
+                            # io.n_lines rows: park the DEAD tail past it again
+                            idx_size = fill_tail(key_fp, n_lines, dead_head, n_chunk, n_dead, dead_block)
+
+                        if cache_on:
+                            update_cache(key, val, copy=True, key_flags=new_kflags)
+
+                        io.n_records = n_records = n_records + 1
+                        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
+                        key_set(key, safe_h, new_kflags|KF_EXCL)
+                        n_new += 1
+                        if buf is not None and len(buf) >= MAX_BLOCK_SIZE:
+                            _write_all(val_fp, buf_pos, buf)
+                            buf_pos = offset
+                            buf = bytearray()
+
+                    n_done = start + n_new
+                    if n_new < n_chunk:
+                        break # SIGINT
+
+                    start = stop
+
+            finally:
+                if buf:
+                    _write_all(val_fp, buf_pos, buf)
+
+                if dead_block and n_new < n_chunk:
+                    # the pass stopped early (SIGINT or a failed write): re-park the
+                    # DEAD block for the rows really written and drop the spare tail
+                    for jj in range(max(0, n_new - n_dead), n_new):
+                        write_key(key_fp, dead_head + jj, *dead_block[jj % n_dead])
+
+                    key_fp.truncate(HEADER_SIZE + n_lines * io.index_size)
+
+            fail.extend(key for key, _val in items[n_done:]) # SIGINT stopped the pass
+
+        for key in fail:
+            records.pop(key, None)
+
+        f_write = self.f_write
+        for key in drop:
+            val = records.pop(key, MISSING)
+            if val is not MISSING and replace and not has_SIGINT():
+                if f_write(fp_dict, key, val, ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=True, key_flags=key_flags):
+                    records[key] = val
+
+        return bool(records)
 
     def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, \
             ttl:Union[int,float,timedelta]=-1, \

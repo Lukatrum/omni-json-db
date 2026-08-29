@@ -7049,6 +7049,93 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
+            # -------------------------------------------- batch insert (add -> f_extend)
+            # a batch of new records is appended in one pass and never takes back a
+            # DEAD row, so the index grows by exactly one row per record
+            jdb.remove(*[f'k{ii}' for ii in range(0, test_size, 2)])
+            self.assertGreater(jdb.n_lines, jdb.n_records) # DEAD rows are waiting
+            batch = {f'b{ii}': ([ii % 7] * (ii % 12) if ii % 3 else ii) for ii in range(40)}
+            self.assertEqual(jdb.insert(batch), batch)
+            self.assertEqual(jdb[batch], batch)
+
+            # a key that is already there is updated in place, never appended twice
+            n_records = jdb.n_records
+            self.assertEqual(jdb.insert(batch), {})
+            changed = {kk: f'upd{kk}' for kk in batch}
+            self.assertEqual(jdb.update(changed), changed)
+            self.assertEqual(jdb.n_records, n_records)
+            self.assertEqual(jdb[changed], changed)
+            self.assertEqual(jdb.update(batch), batch)
+            self.assertEqual(jdb[batch], batch)
+
+            # a pending history row survives the batch and stays revertable
+            jdb['hist'] = 'v1'
+            jdb['hist'] = 'v2'
+            expect = {f'h{ii}': ii for ii in range(8)}
+            self.assertEqual(jdb.insert(expect), expect)
+            self.assertTrue('hist' in jdb.revert('hist'))
+            self.assertEqual(jdb['hist'], 'v1')
+
+            # -------------------------------------------- f_extend
+            with jdb.open(read_only=False) as fp:
+                pending = {'ext1': 'a' * 40, 'ext2': 7, 'ext3': [1, 2, 3]}
+                expect = dict(pending)
+                self.assertTrue(jdb.f_extend(fp, pending))
+                self.assertEqual(pending, expect)          # every record was written
+
+                # a key already in the index is skipped, and dropped from the mapping
+                mixed = {'ext1': 'changed', 'ext4': 'new'}
+                self.assertTrue(jdb.f_extend(fp, mixed))
+                self.assertEqual(mixed, {'ext4': 'new'})
+
+                self.assertFalse(jdb.f_extend(fp, {'ext1': 0, 'ext4': 0}))
+                self.assertFalse(jdb.f_extend(fp, {}))
+
+                # ttl and key_flags are shared by the whole batch
+                self.assertTrue(jdb.f_extend(fp, {'ext5': 'x', 'ext6': 'y'}, ttl=9, key_flags='0'))
+
+            self.assertEqual(jdb['ext1'], 'a' * 40)        # not overwritten
+            self.assertEqual(jdb['ext3'], [1, 2, 3])
+            self.assertEqual(jdb['ext4'], 'new')
+            exp_flags = int(JKeyFlag.USER0 | JKeyFlag.EXPIRE)
+            self.assertEqual(jdb.keys.get_flags('ext5'), {'ext5': (exp_flags, 9)})
+            self.assertEqual(jdb.keys.get_flags('ext6'), {'ext6': (exp_flags, 9)})
+            self.assertEqual(jdb.keys.get_flags('ext1'), {'ext1': (0, 0)})
+
+            # a group value is attached before it is encoded, even mixed into a batch
+            grp = JDb()
+            grp['inner'] = 'g'
+            self.assertEqual(set(jdb.insert({'bg1': 1, 'bgrp': grp, 'bg2': 2})), {'bg1', 'bgrp', 'bg2'})
+            self.assertEqual(jdb.keys.get_flags('bgrp'), {'bgrp': (int(JKeyFlag.GROUP), 0)})
+            self.assertEqual(jdb['bgrp'], {'inner': 'g'})
+            self.assertEqual(jdb['bg1'], 1)
+            self.assertEqual(jdb['bg2'], 2)
+
+            # a key another handle added while this one was still scanning must not be
+            # appended a second time: the write lock reloads the index, so the batch
+            # has to re-read every key it is about to append
+            self.assertEqual(len(jdb1), len(jdb))         # jdb1 starts from a fresh view
+            n_records = jdb.n_records
+            jdb.insert({'gap1': 'from-jdb', 'gap2': 'from-jdb'})
+            self.assertEqual(jdb1.insert({'gap1': 'from-jdb1', 'gap3': 'from-jdb1'}), {'gap3': 'from-jdb1'})
+            self.assertEqual(jdb1.update({'gap2': 'from-jdb1'}), {'gap2': 'from-jdb1'})
+            jdb.unsync()
+            self.assertEqual(jdb['gap1'], 'from-jdb')     # insert() never overwrites
+            self.assertEqual(jdb['gap2'], 'from-jdb1')    # update() does
+            self.assertEqual(jdb['gap3'], 'from-jdb1')
+            self.assertEqual(jdb.n_records, n_records + 3)
+
+            # two handles racing on one batch must not leave two rows for a key
+            race = {f'r{ii}': ii for ii in range(40)}
+            th = threading.Thread(target=jdb1.set_n, args=(race,))
+            th.start()
+            jdb.set_n(race)
+            th.join()
+            jdb.unsync()
+            jdb1.unsync()
+            self.assertTrue(not jdb.check_error(verbose=False))
+            self.assertEqual(jdb[race], race)
+            self.assertEqual(jdb, jdb1)
             # --------------------------------------------
             if last_jdb is not None:
                 self.assertEqual(last_jdb - jdb, set())
