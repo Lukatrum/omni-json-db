@@ -5536,6 +5536,7 @@ class JDb(JDbReader):
         drop = []   # already in the index: `replace` decides whether they are rewritten
         fail = []   # never written, and retrying them would not help
         items = []
+        write_hook = self.write_hook
         for key, val in records.items():
             if key_table.get(key, -1, fp=key_fp) >= 0:
                 drop.append(key)
@@ -5548,6 +5549,9 @@ class JDb(JDbReader):
 
                 key_fp = fp_dict[-1]
                 continue
+
+            if write_hook and not self.write_hook(key, val):
+                raise JTypeError(f'invalid format: key="{key}" val_type={type(val)})')
 
             items.append((key, val))
 
