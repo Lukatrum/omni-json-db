@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines, multiple-imports, W0640, cell-var-from-loop, import-outside-toplevel
-import unittest, time, random, threading, inspect, re, os, io
+import unittest, time, random, threading, inspect, re, os, io, csv
 from marshal import loads as marshal_loads, dumps as marshal_dumps
+from csv import DictReader
 import datetime as dt
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -8,13 +9,15 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 import sqlite3
 import networkx as nx
+import pyarrow as pa
+import pyarrow.parquet as pq
 from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     JNetFiles, JDiskFiles, run_files_server, LOCKED, \
-                    GraphDb, loads, dumps, Query, JIoVAL_U, \
+                    GraphDb, loads, dumps, Query, JIoVAL_U, API_LATEST, \
                     register_user_val_codec, register_user_key_codec, \
                     unregister_user_val_codec, unregister_user_key_codec, \
-                    MAX_TTL_DAYS, MIN_OF_DAY, conv_ttl, JValueError, JTypeError, JLockError
-
+                    MAX_TTL_DAYS, MIN_OF_DAY, IMPORT_BATCH_ROWS, INT_manager, \
+                    conv_ttl, JValueError, JTypeError, JLockError
 try:
     import resource
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -187,6 +190,41 @@ def make_dc_user(uid, **kwargs):
               'balance':Decimal('12.50'), 'scores':{'math':90}, 'labels':{'a', 'b'}}
     fields.update(kwargs)
     return DcUser(**fields)
+
+class SIGINT_Flag:
+    """``threading.Event`` stand-in reporting a deferred SIGINT after ``after`` probes.
+
+    :data:`INT_manager` owns the flag :meth:`FileLock.has_SIGINT` reads, so swapping
+    this one in interrupts a write-locked pass at an exact row without a real signal.
+    """
+    __slots__ = ('left',)
+
+    def __init__(self, after:int=0):
+        self.left = after
+
+    def is_set(self) -> bool:
+        if self.left <= 0:
+            return True
+
+        self.left -= 1
+        return False
+
+    def set(self):
+        self.left = 0
+
+    def clear(self):
+        self.left = 1 << 30
+
+def _extend_SIGINT(jdb, records, after:int) -> bool:
+    """Run :meth:`JDb.f_extend` with a deferred SIGINT arriving after ``after`` probes."""
+    real_flag = INT_manager.call_flag
+    with jdb.open(read_only=False) as fp:       # the write lock arms INT_manager
+        INT_manager.call_flag = SIGINT_Flag(after)
+        try:
+            return jdb.f_extend(fp, records)
+
+        finally:
+            INT_manager.call_flag = real_flag
 
 class TestJDb(unittest.TestCase):
     def setUp(self):
@@ -541,7 +579,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys.set_flags('grp', no_cache=True), {'grp': (int(JKeyFlag.GROUP | JKeyFlag.NO_CACHE),0)})
             self.assertEqual(jdb['grp'], sub_expect)
             with jdb.open() as fp:
-                self.assertTrue(jdb.f_write_key_flags(fp, 'grp', JKeyFlag.READ_ONLY))
+                self.assertTrue(jdb.f_write_key(fp, 'grp', JKeyFlag.READ_ONLY))
 
             self.assertEqual(JKeyFlag(jdb.keys['grp'][9]), JKeyFlag.READ_ONLY | JKeyFlag.GROUP)
             self.assertEqual(jdb['grp'], sub_expect)
@@ -837,11 +875,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.set_key_flags('strf', '-v-0-3+g+l'), {'strf': (0,0)})
             jdb.remove('strf')
 
-            # f_write / f_append / f_write_key_flags accept the same forms
+            # f_write / f_append / f_write_key accept the same forms
             with jdb.open() as fp:
                 self.assertTrue(jdb.f_write(fp, 'sw', 1, key_flags='ra'))
                 self.assertTrue(jdb.f_append(fp, 'sa', 1, key_flags='+h+0'))
-                self.assertTrue(jdb.f_write_key_flags(fp, 'sw', '-a'))
+                self.assertTrue(jdb.f_write_key(fp, 'sw', '-a'))
 
             self.assertEqual(jdb.get_key_flags('sw'), {'sw': (int(JKeyFlag.READ_ONLY),0)})
             self.assertEqual(jdb.get_key_flags('sa'), {'sa': (int(JKeyFlag.HIDDEN | JKeyFlag.USER0),0)})
@@ -945,7 +983,6 @@ class TestJDb(unittest.TestCase):
             self.assertFalse('ud2' in jdb)
 
             # ---- to_csv / clone_to, on a db of this config's own format ----
-            from csv import DictReader
             jhid = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
             jhid.insert({'c1': {'n': 1}, 'c2': {'n': 2}, '_meta': {'n': 9, 'secret': 'x'}})
             self.assertEqual(jhid.set_key_flags('_meta', '+h'), {'_meta': (int(JKeyFlag.HIDDEN),0)})
@@ -2915,12 +2952,6 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(project_jdb[3]['name'], 'coding')
             logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
             self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
-
-            try:
-                import pyarrow as pa
-                import pyarrow.parquet as pq
-            except ImportError:
-                pa = None
 
             if pa is None: # pragma: no cover
                 print(Style(f'{filename}: pyarrow not installed, skipping from_parquet test', yellow=1))
@@ -7054,9 +7085,14 @@ class TestJDb(unittest.TestCase):
             # DEAD row, so the index grows by exactly one row per record
             jdb.remove(*[f'k{ii}' for ii in range(0, test_size, 2)])
             self.assertGreater(jdb.n_lines, jdb.n_records) # DEAD rows are waiting
+            n_lines = jdb.n_lines
             batch = {f'b{ii}': ([ii % 7] * (ii % 12) if ii % 3 else ii) for ii in range(40)}
             self.assertEqual(jdb.insert(batch), batch)
+            self.assertEqual(jdb.n_lines, n_lines + len(batch))
             self.assertEqual(jdb[batch], batch)
+            self.assertTrue(not jdb.check_error(verbose=False))
+            if jdb.file_table:
+                self.assertLessEqual(max(jdb.file_table.values()), jdb.io.max_file_size)
 
             # a key that is already there is updated in place, never appended twice
             n_records = jdb.n_records
@@ -7146,6 +7182,479 @@ class TestJDb(unittest.TestCase):
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
+    def test_batch(self):
+        n_rows = IMPORT_BATCH_ROWS + 1              # every importer has to flush mid-stream
+        for data_type, zip_type in (('J+J', '--'), ('S+S', 'gz')):
+            st_time = time.perf_counter()
+            filename = f'batch_{data_type}_{zip_type}'
+            jdb = JDb(data_type=data_type, zip_type=zip_type, cache_limit=16)
+            print(Style(f'Testing {filename} {jdb}', yellow=1, bright=1))
+            # -------------------------------------------- a group value cannot be pre-encoded
+            src = JDb(data_type=data_type, zip_type=zip_type)
+            grp = src.add_group('grp')
+            grp['inner'] = 'g'
+            with jdb.open(read_only=False) as fp:
+                records = {'plain': 1, 'grp': grp}
+                self.assertTrue(jdb.f_extend(fp, records))
+                self.assertEqual(set(records), {'plain', 'grp'})
+
+            self.assertEqual(jdb.keys.get_flags('grp'), {'grp': (int(JKeyFlag.GROUP), 0)})
+            self.assertEqual(jdb['grp'], {'inner': 'g'})
+            self.assertEqual(jdb['plain'], 1)
+
+            # a group whose write is refused is reported as not written
+            with jdb.open(read_only=False) as fp:
+                refused = {'nogrp': grp}
+                self.assertFalse(jdb.f_extend(fp, refused, key_flags='m'))  # MUST_EXIST
+                self.assertEqual(refused, {})
+
+            self.assertIsNone(jdb.get('nogrp'))
+
+            # -------------------------------------------- f_append() hands a group to f_write too
+            with jdb.open(read_only=False) as fp:
+                self.assertTrue(jdb.f_append(fp, 'agrp', grp))
+
+            self.assertEqual(jdb.keys.get_flags('agrp'), {'agrp': (int(JKeyFlag.GROUP), 0)})
+            self.assertEqual(jdb['agrp'], {'inner': 'g'})
+
+            # -------------------------------------------- one pass flushes at MAX_BLOCK_SIZE
+            # hex of random bytes stays incompressible, so the padded values really do
+            # cross the 256KB block whatever the zip_type is
+            blobs = {f'blob{ii:03}': os.urandom(8192).hex() for ii in range(48)}
+            with jdb.open(read_only=False) as fp:
+                self.assertTrue(jdb.f_extend(fp, blobs))
+
+            self.assertEqual(jdb[blobs], blobs)
+            self.assertTrue(not jdb.check_error(verbose=False), Style(f'{filename}:{jdb}', red=1))
+
+            # -------------------------------------------- SIGINT stops the pass mid-batch
+            jdb1 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb1.set_n({f'k{ii}': ii for ii in range(8)})
+            jdb1.remove('k1', 'k3', 'k5')           # DEAD rows the append must not disturb
+            n_records, n_lines = jdb1.n_records, jdb1.n_lines
+            self.assertGreater(n_lines, n_records)
+
+            # nothing written: every record is dropped from the mapping and the DEAD
+            # block is parked back where it was
+            records = {f'n{ii}': ii for ii in range(5)}
+            self.assertFalse(_extend_SIGINT(jdb1, records, 0))
+            self.assertEqual(records, {})
+            self.assertEqual((jdb1.n_records, jdb1.n_lines), (n_records, n_lines))
+            self.assertTrue(not jdb1.check_error(verbose=False), Style(f'{filename}:{jdb1}', red=1))
+
+            # interrupted after two rows: those two stay, the rest are dropped
+            records = {f'm{ii}': ii for ii in range(5)}
+            self.assertTrue(_extend_SIGINT(jdb1, records, 2))
+            self.assertEqual(records, {'m0': 0, 'm1': 1})
+            self.assertEqual(jdb1[records], records)
+            self.assertEqual((jdb1.n_records, jdb1.n_lines), (n_records + 2, n_lines + 2))
+            self.assertTrue(not jdb1.check_error(level=2, verbose=False), Style(f'{filename}:{jdb1}', red=1))
+            self.assertEqual(jdb1['k0'], 0)         # the untouched records survived
+            self.assertEqual(jdb1['k7'], 7)
+
+            # -------------------------------------------- importers flush every IMPORT_BATCH_ROWS
+            csv_path = 'db/batch.csv'
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csv_fp:
+                writer = csv.writer(csv_fp)
+                writer.writerow(['id', 'name', 'val'])
+                for ii in range(n_rows):
+                    writer.writerow([f'c{ii}', f'n{ii}', ii])
+
+            jdb2 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb2.from_csv(csv_path)
+            self.assertEqual(len(jdb2), n_rows)
+            self.assertEqual(jdb2['c0'], {'name': 'n0', 'val': '0'})
+            self.assertEqual(jdb2[f'c{n_rows-1}']['name'], f'n{n_rows-1}')
+            self.assertTrue(not jdb2.check_error(verbose=False), Style(f'{filename}:{jdb2}', red=1))
+            os.remove(csv_path)
+
+            if pa is None: # pragma: no cover
+                print(Style(f'{filename}: pyarrow not installed, skipping from_parquet test', yellow=1))
+            else:
+                parquet_path = 'db/batch.parquet'
+                pq.write_table(pa.table({'id':[f'p{ii}' for ii in range(n_rows)],
+                                         'val':list(range(n_rows))}), parquet_path)
+                jdb3 = JDb(data_type=data_type, zip_type=zip_type)
+                jdb3.from_parquet(parquet_path)
+                self.assertEqual(len(jdb3), n_rows)
+                self.assertEqual(jdb3['p0'], {'val': 0})
+                self.assertEqual(jdb3[f'p{n_rows-1}'], {'val': n_rows-1})
+                os.remove(parquet_path)
+
+            # -------------------------------------------- reinit()/add() batch the same way
+            big = {f'x{ii}': ii for ii in range(n_rows)}
+            jdb4 = JDb(data_type=data_type, zip_type=zip_type)
+            self.assertTrue(jdb4.reinit(big, agree='yes', wait_sec=0))
+            self.assertEqual(len(jdb4), n_rows)
+            self.assertEqual(jdb4[big], big)
+
+            jdb5 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb5['gone'] = 'cleared by reinit()'
+            self.assertTrue(jdb5.reinit(jdb4, agree='yes', wait_sec=0))
+            self.assertEqual(len(jdb5), n_rows)
+            self.assertEqual(jdb5, jdb4)
+
+            jdb6 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb6['x1'] = -1                         # one key is already here: it is rewritten
+            self.assertEqual(len(jdb6.add(jdb4)), n_rows)
+            self.assertEqual(jdb6, jdb4)
+
+            # clone_to() ticks its progress signal every 1000 records
+            jclone = JDb(data_type=data_type, zip_type=zip_type)
+            self.assertEqual(len(jdb4.clone_to(jclone)), n_rows)
+            self.assertEqual(jclone, jdb4)
+
+            # replace-only: only the keys this database already has are copied over
+            jdb7 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb7.set_n({'x1': -1, 'own': 0})
+            self.assertEqual(jdb7.add(jdb4, insert=False), {'x1': 1})
+            self.assertEqual(dict(jdb7.items()), {'x1': 1, 'own': 0})
+
+
+            # -------------------------------------------- from_sqlite() takes a live Connection
+            sql_path = 'db/batch.sqlite'
+            if os.path.exists(sql_path):
+                os.remove(sql_path)
+
+            conn = sqlite3.connect(sql_path)
+            conn.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)')
+            conn.executemany('INSERT INTO t VALUES (?,?)', [(ii, f'v{ii}') for ii in range(n_rows)])
+            conn.commit()
+            jsql = JDb(data_type=data_type, zip_type=zip_type)
+            jsql.from_sqlite(conn)
+            self.assertEqual(len(jsql.get_group('t')), n_rows)
+            jsql.from_sqlite(conn)                  # a second pass replaces the group
+            self.assertEqual(len(jsql.get_group('t')), n_rows)
+            self.assertEqual(jsql.get_group('t')['0'], {'v': 'v0'})
+            with self.assertRaises(TypeError):
+                jsql.from_sqlite(12345)
+
+            conn.close()
+            os.remove(sql_path)
+
+            # -------------------------------------------- from_ini()/from_toml() take a path
+            ini_path, toml_path = 'db/batch.ini', 'db/batch.toml'
+            with open(ini_path, 'w', encoding='utf-8') as ini_fp:
+                ini_fp.write('[server]\nhost = 127.0.0.1\n')
+
+            with open(toml_path, 'w', encoding='utf-8') as toml_fp:
+                toml_fp.write('name = "omni"\n[net]\nport = 81\n')
+
+            jcfg = JDb(data_type=data_type, zip_type=zip_type)
+            jcfg.from_ini(ini_path)
+            jcfg.from_toml(toml_path)
+            self.assertEqual(jcfg['server/host'], '127.0.0.1')
+            self.assertEqual(jcfg['net/port'], 81)
+            os.remove(ini_path)
+            os.remove(toml_path)
+
+            # -------------------------------------------- to_csv() reports progress per 1000 rows
+            jrow = JDb(data_type=data_type, zip_type=zip_type)
+            jrow.set_n({f'r{ii}': {'v': ii} for ii in range(1200)})
+            csv_out = 'db/batch_out.csv'
+            self.assertTrue(jrow.to_csv(csv_out))
+            jgrp = JDb(data_type=data_type, zip_type=zip_type)
+            jgrp['rows'] = jrow
+            self.assertTrue(jgrp.to_csv(csv_out, key='rows'))
+            os.remove(csv_out)
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
+    def test_operator(self):
+        st_time = time.perf_counter()
+        jdb = JDb(data_type='J+J', cache_limit=16)
+        print(Style(f'Testing operator {jdb}', yellow=1, bright=1))
+        # -------------------------------------------- += is update()/append()
+        jdb += {'a': 1}
+        self.assertEqual(jdb['a'], 1)
+        n_records = jdb.n_records
+        jdb += ('v1', 'v2')                         # a sequence appends values under new keys
+        self.assertEqual(jdb.n_records, n_records + 2)
+        self.assertEqual(len(jdb[lambda k, v: v in ('v1', 'v2')]), 2)
+        jdb += 'bare'                               # anything else is a key with no value
+        self.assertIsNone(jdb['bare'])
+
+        # -------------------------------------------- |= is insert(), &= is replace()
+        n_records = jdb.n_records
+        jdb |= ('v3',)
+        self.assertEqual(jdb.n_records, n_records + 1)
+        jdb |= 'ins'
+        self.assertIsNone(jdb['ins'])
+        jdb['ins'] = 9
+        jdb |= 'ins'                                # insert() never overwrites
+        self.assertEqual(jdb['ins'], 9)
+
+        n_records = jdb.n_records
+        jdb &= ('missing_value',)                   # replace() never inserts
+        self.assertEqual(jdb.n_records, n_records)
+        jdb &= 'ins'
+        self.assertIsNone(jdb['ins'])
+
+        # -------------------------------------------- ^= is revert()
+        jdb['bk'] = 1
+        jdb['bk'] = 2
+        jdb ^= b'bk'                                # bytes are decoded to a key name
+        self.assertEqual(jdb['bk'], 1)
+        jdb[77] = 'a'
+        jdb[77] = 'b'
+        jdb ^= 77                                   # anything else is str()-ed
+        self.assertEqual(jdb['77'], 'a')
+
+        # a DEAD row that was not asked for is stepped over, not restored
+        jdb.set_n({'d1': 1, 'd2': 2})
+        jdb.remove('d1', 'd2')
+        jdb ^= {'d2'}
+        self.assertEqual(jdb['d2'], 2)
+        self.assertIsNone(jdb.get('d1'))
+
+        # -------------------------------------------- non-str keys reach every undo path
+        self.assertEqual(jdb.pop('never_written', 'default'), 'default')
+        jdb[88] = 'a'
+        jdb[88] = 'b'
+        self.assertEqual(set(jdb.unmodify(88)), {'88'})
+        self.assertEqual(jdb['88'], 'a')
+        jdb['u1'] = 1
+        jdb['u1'] = 2
+        self.assertEqual(set(jdb.unmodify(['u1'])), {'u1'})
+        self.assertEqual(jdb['u1'], 1)
+        jdb[99] = 'a'
+        del jdb[99]
+        self.assertEqual(set(jdb.unremove(99)), {'99'})
+        self.assertEqual(jdb['99'], 'a')
+        jdb['u2'] = 1
+        del jdb['u2']
+        self.assertEqual(set(jdb.unremove(['u2'])), {'u2'})
+        self.assertEqual(jdb['u2'], 1)
+        jdb['rv'] = 1
+        jdb['rv'] = 2
+        self.assertEqual(set(jdb.revert(['rv'])), {'rv'})
+        self.assertEqual(jdb['rv'], 1)
+        jdb[100] = 1
+        jdb[100] = 2
+        self.assertEqual(set(jdb.revert(100)), {'100'})
+        self.assertEqual(jdb['100'], 1)
+        jdb[111] = 'x'
+        self.assertEqual(jdb.remove(111), {'111': 'x'})
+        jdb[222] = 'x'
+        jdb.remove_fast(222)
+        self.assertIsNone(jdb.get('222'))
+
+        # -------------------------------------------- rename() reports both refusals
+        jdb.set_n({'r1': 1, 'r2': 2})
+        self.assertEqual(jdb.rename({'r1': 'r2'}), {})      # target already exists
+        self.assertEqual(jdb.rename({'never': 'r3'}), {})   # source does not exist
+        self.assertEqual(jdb.rename({'r1': 'r3'}), {'r1': 'r3'})
+        self.assertEqual(jdb['r3'], 1)
+
+        # -------------------------------------------- date guards
+        with jdb.open(read_only=False) as fp:
+            self.assertFalse(jdb.f_write_key(fp, 'r3', days='not-a-date'))
+
+        with self.assertRaises(JValueError):
+            jdb.set_date('r3', cdate='2030-01-01', mdate='2020-01-01')
+
+        # -------------------------------------------- a locked record refuses a plain write
+        jdb['ro'] = 1
+        jdb.set_key_flags('ro', read_only=True)
+        with self.assertRaises(JLockError):
+            jdb['ro'] = 2
+
+        self.assertEqual(jdb['ro'], 1)
+        jdb['55'] = 1
+        jdb.set_key_flags('55', read_only=True)
+        with self.assertRaises(JLockError):
+            jdb[55] = 2                                 # the same guard on the non-str path
+
+        self.assertEqual(jdb['55'], 1)
+        jdb.set_key_flags('55', read_only=False)
+        jdb.set_key_flags('ro', read_only=False)
+        self.assertTrue(not jdb.check_error(verbose=False), Style(f'operator:{jdb}', red=1))
+
+        # -------------------------------------------- to_csv() renames a clashing key column
+        jcsv = JDb(data_type='J+J')
+        jcsv.set_n({'row1': {'name': 'a', '_id': 1}, 'row2': {'name': 'b', '_id': 2}})
+        buf = io.StringIO()
+        self.assertTrue(jcsv.to_csv(buf))
+        self.assertEqual(buf.getvalue().splitlines()[0].split(',')[0], '_id$')
+
+        # -------------------------------------------- reinit()/add() accept non-dict records
+        jre = JDb(data_type='J+J')
+        self.assertTrue(jre.reinit(['v1', 'v2'], is_list=True, agree='yes', wait_sec=0))
+        self.assertEqual(sorted(jre.values()), ['v1', 'v2'])
+        self.assertTrue(jre.reinit('one', is_list=True, agree='yes', wait_sec=0))
+        self.assertEqual(list(jre.values()), ['one'])
+        self.assertTrue(jre.reinit('only', agree='yes', wait_sec=0))
+        self.assertEqual(dict(jre.items()), {'only': None})
+        self.assertTrue(jre.reinit(42, agree='yes', wait_sec=0))
+        self.assertEqual(dict(jre.items()), {'42': None})
+        self.assertTrue(jre.reinit(42, is_list=True, agree='yes', wait_sec=0))
+        self.assertEqual(list(jre.values()), [42])
+        self.assertEqual(list(jre.add(7, is_list=True).values()), [7])
+        self.assertEqual(jre.add(9), {'9': None})
+
+        # -------------------------------------------- dumps() defaults to JSON
+        self.assertEqual(dumps([1, 2]), b'[1,2]')
+
+        # -------------------------------------------- keys[] takes dates for any key form
+        jdb['dk'] = 1
+        jdb.keys['dk'] = '2020-01-01'
+        self.assertEqual(jdb.keys['dk'][10], '2020-01-01')
+        jdb.keys[b'dk'] = '2019-02-03'                  # bytes are decoded to a key name
+        self.assertEqual(jdb.keys['dk'][10], '2019-02-03')
+        jdb['True'] = 1
+        jdb.keys[True] = '2018-04-05'                   # bool is not a row index
+        self.assertEqual(jdb.keys['True'][10], '2018-04-05')
+
+        # -------------------------------------------- bytes keys reach every accessor
+        jdb[b'bk2'] = 5
+        self.assertEqual(jdb[b'bk2'], 5)
+        self.assertEqual(jdb['bk2'], 5)
+        del jdb[b'bk2']
+        self.assertIsNone(jdb.get('bk2'))
+
+        # bytes that are not utf8 fall back to repr(), and every accessor agrees on it
+        raw = b'\xff\xfe'
+        jdb[raw] = 1
+        self.assertEqual(jdb[raw], 1)
+        self.assertEqual(jdb[str(raw)], 1)
+        jdb.keys[raw] = '2020-01-01'
+        self.assertEqual(jdb.keys[str(raw)][10], '2020-01-01')
+        jdb[str(raw)] = 2
+        jdb ^= raw
+        self.assertEqual(jdb[raw], 1)
+        del jdb[raw]
+        self.assertIsNone(jdb.get(str(raw)))
+
+        # -------------------------------------------- a NO_DELETE record refuses del
+        jdb['nd'] = 1
+        jdb.set_key_flags('nd', no_delete=True)
+        with self.assertRaises(JLockError):
+            del jdb['nd']
+
+        with self.assertRaises(JLockError):
+            del jdb[b'nd']                              # the same guard on the bytes path
+
+        jdb.set_key_flags('nd', no_delete=False)
+        del jdb['nd']
+        self.assertIsNone(jdb.get('nd'))
+
+        # -------------------------------------------- change_KEY() defaults to this api_ver
+        jkey = JDb(data_type='J+J')
+        jkey.set_n({'a': 1, 'b': 2})
+        self.assertTrue(jkey.change_KEY('S'))
+        self.assertEqual(jkey.data_type, 'S+J')
+        self.assertEqual(dict(jkey.items()), {'a': 1, 'b': 2})
+
+        used_s = time.perf_counter() - st_time
+        print(f'operator|{jdb}| used:{used_s:.4f}s')
+
+    def test_recycle(self):
+        st_time = time.perf_counter()
+        print(Style('Testing recycle', yellow=1, bright=1))
+        # -------------------------------------------- nothing to reclaim
+        jdb = JDb(data_type='J+J', max_file_size=64*100)
+        jdb.set_n({f'a{ii}': [ii] for ii in range(20)})
+        jdb.recycle(merge=False)
+        self.assertEqual((jdb.n_records, jdb.n_lines), (20, 20))
+
+        # -------------------------------------------- the newest rows shrink the VAL file
+        jdb1 = JDb(data_type='J+J', max_file_size=64*100)
+        jdb1.set_n({f'b{ii}': [ii] * 10 for ii in range(20)})
+        jdb1.remove('b19', 'b18')
+        jdb1.recycle(merge=False)
+        self.assertEqual((jdb1.n_records, jdb1.n_lines), (18, 18))
+        self.assertTrue(not jdb1.check_error(verbose=False), Style(f'recycle:{jdb1}', red=1))
+
+        # -------------------------------------------- a hole in the middle reclaims nothing
+        jdbm = JDb(data_type='J+J', max_file_size=64*100)
+        jdbm.set_n({f'm{ii}': [ii] * 10 for ii in range(20)})
+        jdbm.remove('m5')                           # not at the end of a VAL file
+        jdbm.recycle(merge=False)
+        self.assertEqual((jdbm.n_records, jdbm.n_lines), (19, 20))
+        self.assertTrue(not jdbm.check_error(verbose=False), Style(f'recycle:{jdbm}', red=1))
+
+        # -------------------------------------------- merge zero-fills the reclaimed blocks
+        jdb2 = JDb(data_type='J+J', max_file_size=64*100)
+        jdb2.set_n({f'c{ii}': [ii] * (ii % 20 + 1) for ii in range(60)})
+        jdb2.remove(*[f'c{ii}' for ii in range(0, 60, 2)])
+        jdb2['c1'] = [9] * 30                       # a rewrite parks a history row too
+        jdb2['c3'] = [9] * 30
+        jdb2.recycle(merge=True, fill_zero=True)
+        self.assertEqual(jdb2.n_records, 30)
+        self.assertEqual(jdb2['c1'], [9] * 30)
+        self.assertTrue(not jdb2.check_error(verbose=False), Style(f'recycle:{jdb2}', red=1))
+
+        # -------------------------------------------- a block with no record in front of it
+        # stays parked as a DEAD row instead of being merged into its neighbour
+        jdb3 = JDb(data_type='J+J', max_file_size=64*100)
+        jdb3.set_n({f'd{ii}': [ii] * 10 for ii in range(12)})
+        jdb3.remove('d0')                           # offset 0 of the VAL file
+        jdb3.recycle(merge=True, fill_zero=True)
+        self.assertEqual((jdb3.n_records, jdb3.n_lines), (11, 12))
+        self.assertEqual(jdb3['d11'], [11] * 10)
+        self.assertTrue(not jdb3.check_error(verbose=False), Style(f'recycle:{jdb3}', red=1))
+
+        # -------------------------------------------- backup()/restore()/upgrade() default to 'bak'
+        os.makedirs('db/bak', exist_ok=True)
+        jdsk = JDb('db/test_recycle.jdb', data_type='J+J')
+        jdsk.clear(agree='yes', wait_sec=0)
+        jdsk.set_n({'a': 1, 'b': 2})
+        self.assertEqual(len(jdsk.backup()), 2)
+        jdsk['c'] = 3
+        self.assertEqual(len(jdsk.restore('')), 2)  # the backup had two records
+        self.assertEqual(len(jdsk), 2)
+        self.assertEqual(len(jdsk.upgrade('')), 2)
+        jdsk.clear(agree='yes', wait_sec=0)
+
+        used_s = time.perf_counter() - st_time
+        print(f'recycle|{jdb2}| used:{used_s:.4f}s')
+
+    def test_upgrade(self):
+        st_time = time.perf_counter()
+        print(Style('Testing upgrade', yellow=1, bright=1))
+        # -------------------------------------------- z_upgrade_API() rewrites a legacy header
+        cfg = {'data_type':'L+J', 'zip_type':'no', 'index_size':64}
+        path = 'db/test_up_v0.jdb'
+        jdb = JDb(path, api_ver=0, **cfg)
+        jdb.clear(agree='yes', wait_sec=0, api_ver=0, **cfg)
+        records = {f'k{ii}': [ii] for ii in range(10)}
+        jdb.set_n(records)
+        jdb.set_date('k1', cdate='1999-01-01', mdate='1999-06-01')
+        self.assertEqual(jdb.io.api_ver, 0)
+
+        jdb = JDb.z_upgrade_API(path)
+        self.assertEqual(jdb.io.api_ver, API_LATEST)
+        self.assertEqual(jdb.data_type, 'J+J')                  # L+J is folded into J+J
+        self.assertEqual(jdb[records], records)
+        self.assertTrue(not jdb.check_error(verbose=False), Style(f'upgrade:{jdb}', red=1))
+        self.assertEqual(JDb.z_upgrade_API(jdb).io.api_ver, API_LATEST)  # already the latest
+        jdb.clear(agree='yes', wait_sec=0, **cfg)
+
+        # -------------------------------------------- z_upgrade_KEY_day() shifts pre-2000 dates
+        cfg = {'data_type':'J+J', 'zip_type':'no', 'index_size':64}
+        path = 'db/test_up_day.jdb'
+        jdb = JDb(path, **cfg)
+        jdb.clear(agree='yes', wait_sec=0, **cfg)
+        records = {f'k{ii}': ii for ii in range(1200)}          # the scan ticks every 1000 rows
+        jdb.set_n(records)
+        jdb.set_date('k1', cdate='1999-01-01', mdate='1999-06-01')
+        mdate_k0 = jdb.keys['k0'][10]
+        self.assertIsNotNone(JDb.z_upgrade_KEY_day(jdb))        # a fresh file is left alone
+        self.assertEqual(jdb.keys['k1'][11], '1999-01-01')
+
+        os.utime(path, (1_700_000_000, 1_700_000_000))          # pretend it is a legacy file
+        jdb = JDb.z_upgrade_KEY_day(path)
+        self.assertEqual(jdb[records], records)
+        self.assertEqual(jdb.keys['k0'][10], mdate_k0)          # a modern row is untouched
+        self.assertNotEqual(jdb.keys['k1'][11], '1999-01-01')   # the legacy row was shifted
+        self.assertTrue(not jdb.check_error(verbose=False), Style(f'upgrade:{jdb}', red=1))
+        jdb.clear(agree='yes', wait_sec=0, **cfg)
+
+        used_s = time.perf_counter() - st_time
+        print(f'upgrade|{jdb}| used:{used_s:.4f}s')
 
     def test_dataclass(self):
         last_jdb = None
@@ -8068,11 +8577,11 @@ class TestJDb(unittest.TestCase):
             with jdb.open() as fp:
                 ret = jdb.f_write(fp, 'key1', 10)
                 self.assertTrue(ret)
-                ret = jdb.f_write_key_flags(fp, 'key1', JKeyFlag.READ_ONLY)
+                ret = jdb.f_write_key(fp, 'key1', JKeyFlag.READ_ONLY)
                 self.assertTrue(ret)
                 ret = jdb.f_write(fp, 'key2', 10, key_flags=JKeyFlag.READ_ONLY|JKeyFlag.GROUP)
                 self.assertTrue(ret)
-                ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READ_ONLY)
+                ret = jdb.f_write_key(fp, 'key2', JKeyFlag.READ_ONLY)
                 self.assertFalse(ret)
 
             ret = jdb.keys.set_flags(Query().endswith(('y1', 'y2')), read_only=False)
@@ -8099,11 +8608,11 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['key2'], old_val)
 
             with jdb.open() as fp:
-                ret = jdb.f_write_key_flags(fp, 'key1', 0)
+                ret = jdb.f_write_key(fp, 'key1', 0)
                 self.assertTrue(ret)
-                ret = jdb.f_write_key_flags(fp, 'key2', JKeyFlag.READ_ONLY)
+                ret = jdb.f_write_key(fp, 'key2', JKeyFlag.READ_ONLY)
                 self.assertFalse(ret)
-                ret = jdb.f_write_key_flags(fp, 'key2', 0)
+                ret = jdb.f_write_key(fp, 'key2', 0)
                 self.assertTrue(ret)
 
             self.assertTrue(jdb['key1'] == jdb['key2'] == 10)
@@ -11093,7 +11602,7 @@ class TestJDb(unittest.TestCase):
             self.assertNotEqual(info0[-1], str(cdate.date()))
 
             with jdb.open(read_only=False) as fp:
-                jdb.f_change_days(fp, 'kk1', _cdate)
+                jdb.f_write_key(fp, 'kk1', days=_cdate)
 
             self.assertEqual(jdb.keys['kk1'][-1], str(cdate.date()))
             info1 = jdb.keys['kk2']

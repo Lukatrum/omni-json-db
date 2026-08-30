@@ -308,7 +308,7 @@ class GraphDb(JDb):
         edge_key = self._generate_edge_key(u, v, directed)
         with self.open() as fp:
             self.f_add_edge(fp, u, v, directed, relation="temporary_access")
-            return self.f_change_days(fp, edge_key, expire_days)
+            return self.f_write_key(fp, edge_key, days=expire_days)
 
         return False
 
