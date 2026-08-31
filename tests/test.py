@@ -10418,6 +10418,99 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
             self.assertEqual(jdb.sync_id, jdb1.sync_id)
 
+            # -------------------------------------------- warm_up()
+            is_lazy = hasattr(jdb.key_table, 'files_obj')
+            th = jdb.warm_up()
+            if is_lazy: # LiteKeyTable/PartialKeyTable load on demand: nothing to warm
+                self.assertIsNone(th)
+            else:
+                self.assertIsNotNone(th)
+                th.join(60)
+                self.assertFalse(th.is_alive())
+                self.assertIsNone(jdb._warm_err)
+                self.assertEqual(len(jdb.key_table), jdb.n_records)
+
+            th = jdb.warm_up(block=True, timeout=60)
+            self.assertTrue(th is None if is_lazy else not th.is_alive())
+            self.assertIsNone(jdb._warm_err)
+            self.assertEqual(jdb, jdb1) # warming must not change what the table answers
+
+            with jdb.open(read_only=True):
+                self.assertIsNone(jdb.warm_up()) # already open on this thread: no-op
+
+            jdb2 = JDb(jdb, warm_up=True) # a clone always defaults to DictKeyTable
+            th2 = jdb2._warm_th
+            self.assertIsNotNone(th2)
+            th2.join(60)
+            self.assertFalse(th2.is_alive())
+            self.assertIsNone(jdb2._warm_err)
+            self.assertEqual(len(jdb2.key_table), jdb2.n_records)
+            self.assertEqual(jdb2, jdb1)
+
+            # -------------------------------------------- index_cache / .KIX
+            files_obj = jdb.files_obj
+            try:
+                used = [] # _kix_rows must be read inside the block: the closing save overwrites it
+                def cold(index_cache, key_limit='no'):
+                    _jdb = JDb(jdb, key_limit=key_limit, index_cache=index_cache, min_kix_rows=8 if index_cache else None)
+                    with _jdb.open(read_only=True):
+                        used.append(_jdb.io._kix_rows)
+
+                    return _jdb
+
+                files_obj.IDX_remove()
+                self.assertIsNone(files_obj.IDX_load())
+
+                # the source table only snapshots when it is a DictKeyTable
+                src = cold(True, config['key_limit'])
+                if hasattr(src.key_table, 'files_obj'): # LiteKeyTable/PartialKeyTable
+                    self.assertIsNone(files_obj.IDX_load())
+                    self.assertFalse(src.save_index())
+
+                self.assertEqual(cold(True).io._kix_rows, jdb.n_records) # written on close
+                self.assertIsNotNone(files_obj.IDX_load())
+
+                used.clear()
+                kix, scan = cold(True), cold(False)
+                self.assertEqual(used, [jdb.n_records, 0])
+                self.assertEqual(dict(kix.key_table.table), dict(scan.key_table.table))
+                self.assertEqual(dict(kix.file_table), dict(scan.file_table))
+                self.assertEqual(set(kix.io.groups), set(scan.io.groups))
+
+                # key flags are stored as the packed integer -- never interpreted
+                flags = [jdb.io.key_table.get_both(kk) for kk in ('xxx0', 'xxx1')]
+                self.assertEqual([kix.io.key_table.get_both(kk) for kk in ('xxx0', 'xxx1')], flags)
+
+                # a stale snapshot must only cost time, never correctness
+                plain = JDb(jdb, key_limit='no', min_kix_rows=8) # index_cache off: the sidecar goes stale
+                plain['kix_tail'] = 'tail'
+                self.assertEqual(dict(cold(True).key_table), dict(cold(False).key_table))
+                del plain['kix_tail']
+                self.assertEqual(dict(cold(True).key_table), dict(cold(False).key_table))
+
+                # truncated, garbage and foreign snapshots are rejected, not trusted
+                raw = files_obj.IDX_load()
+                # same layout and record count, different keys: only the row sampling can tell
+                other = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, index_size=jdb.index_size, \
+                            api_ver=jdb.api_ver, key_limit='no', index_cache=True, min_kix_rows=8)
+                other.insert({f'q{i}' : i for i in range(jdb.n_records)})
+                foreign = other.files_obj.IDX_load() # same stamp by construction: only the sampling can reject it
+                for bad in (raw[:len(raw)//3], b'\xff' * len(raw), foreign):
+                    files_obj.IDX_save(bad)
+                    used.clear()
+                    self.assertEqual(dict(cold(True).key_table), dict(cold(False).key_table))
+                    self.assertEqual(used[0], 0) # the snapshot was refused
+
+                files_obj.IDX_save(raw)
+                self.assertEqual(dict(cold(True).key_table), dict(cold(False).key_table))
+                self.assertTrue(files_obj.IDX_remove())
+                self.assertIsNone(files_obj.IDX_load())
+                self.assertFalse(cold(False).save_index()) # index_cache off writes nothing
+                self.assertIsNone(files_obj.IDX_load())
+
+            finally:
+                files_obj.IDX_remove()
+
             used_s = time.perf_counter() - st_time
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')

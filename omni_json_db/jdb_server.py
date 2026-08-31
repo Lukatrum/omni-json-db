@@ -401,6 +401,15 @@ class ServerHandler(BaseRequestHandler):
                     elif cmd == 'fsync':
                         resp['ret'] = grp_files_obj.fsync(*_args, **_kwargs)
 
+                    elif cmd == 'idx_load':
+                        resp['ret'] = grp_files_obj.IDX_load()
+
+                    elif cmd == 'idx_save':
+                        resp['ret'] = grp_files_obj.IDX_save(*_args, **_kwargs)
+
+                    elif cmd == 'idx_remove':
+                        resp['ret'] = grp_files_obj.IDX_remove()
+
                     else:
                         is_done = False
 

@@ -976,6 +976,72 @@ class JNetFiles(JFilesBase):
 
             raise IOError
 
+    def IDX_load(self) -> Optional[bytes]:
+        """Fetch the remote key-table snapshot (see :meth:`JFilesBase.IDX_load`).
+
+        The sidecar is a disposable cache, so a dead socket or a server that
+        cannot serve one is reported as "no snapshot" instead of raising.
+
+        Returns:
+            Optional[bytes]: The stored bytes, or ``None`` when unavailable.
+        """
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                try:
+                    dump_and_send(self.sock, (self._remote_file('KEY'), 'idx_load', (), {}))
+                    resp = recv_and_load(self.sock)
+                    if resp.get('ok'):
+                        return resp.get('ret', None)
+
+                except (OSError, EOFError, ValueError): # pragma: no cover
+                    pass
+
+        return None
+
+    def IDX_save(self, data:bytes) -> bool:
+        """Store the key-table snapshot on the remote server (see :meth:`JFilesBase.IDX_save`).
+
+        Args:
+            data (bytes): The snapshot payload.
+
+        Returns:
+            bool: ``True`` when the server stored it.
+        """
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                try:
+                    dump_and_send(self.sock, (self._remote_file('KEY'), 'idx_save', (data,), {}))
+                    resp = recv_and_load(self.sock)
+                    if resp.get('ok'):
+                        return bool(resp.get('ret', False))
+
+                except (OSError, EOFError, ValueError): # pragma: no cover
+                    pass
+
+        return False
+
+    def IDX_remove(self) -> bool:
+        """Delete the remote key-table snapshot (see :meth:`JFilesBase.IDX_remove`).
+
+        Returns:
+            bool: ``True`` when the server removed one.
+        """
+        if sys_is_finalizing(): # pragma: no cover
+            return False
+
+        with self.lock:
+            if self.sock and not self.sock._closed:
+                try:
+                    dump_and_send(self.sock, (self._remote_file('KEY'), 'idx_remove', (), {}))
+                    resp = recv_and_load(self.sock)
+                    if resp.get('ok'):
+                        return bool(resp.get('ret', False))
+
+                except (OSError, EOFError, ValueError): # pragma: no cover
+                    pass
+
+        return False
+
     def LCK_rlock(self, block:bool=False):
         """Acquire a shared reader lock on the remote server.
 

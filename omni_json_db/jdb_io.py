@@ -20,7 +20,7 @@ gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
 from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP, KF_EXCL
 from .jdb_file import JFilesBase
-from .jdb_codec import Unpacker, json_loads, \
+from .jdb_codec import Unpacker, json_loads, msg_dumps, msg_loads, \
         JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
@@ -70,32 +70,35 @@ LZ_Error = RuntimeError
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 MAX_FILE_ID     = 0x8000
-DEF_FILE_SIZE   = (2**32) - 1  # 4GB
+DEF_FILE_SIZE   = (2**32) - 1   # 4GB
 MIN_FILE_SIZE   = 1024
-MAX_FILE_SIZE   = (2**50) * 1  # 1024TB
+MAX_FILE_SIZE   = (2**50) * 1   # 1024TB
 
 DEF_INDEX_SIZE  = 128
-MIN_INDEX_SIZE  = 16 + 8 * 6  # key(16), (file_id, offset, row_size, val_size, ver, date)
-MAX_INDEX_SIZE  = 2**13       # 8192
+MIN_INDEX_SIZE  = 16 + 8 * 6    # key(16), (file_id, offset, row_size, val_size, ver, date)
+MAX_INDEX_SIZE  = 2**13         # 8192
 MAX_KEY_SIZE    = MAX_INDEX_SIZE - DEF_INDEX_SIZE
 
-DEF_VALUE_SIZE  = 16 # 1-15 bytes can store in KEY file
+DEF_VALUE_SIZE  = 16            # 1-15 bytes can store in KEY file
 MIN_VALUE_SIZE  = 1
-MAX_VALUE_SIZE  = (2**30) * 4 - 1 # 4GB (32bit)
+MAX_VALUE_SIZE  = (2**30)*4-1   # 4GB (32bit)
 
-DEF_FLAG_MASK   = 2**20 - 1 # bitarray size for key search
+DEF_FLAG_MASK   = 2**20 - 1     # bitarray size for key search
 
 DEF_RATIO       = 0.001
 MAX_RATIO       = 256.
-DEF_KEY_LIMIT   = 0 # 0=DictKeyTable(dict)
+DEF_KEY_LIMIT   = 0             # 0=DictKeyTable(dict)
 HEADER_SIZE     = 128
+
+KIX_MAGIC       = 0x4B495801    # 'KIX' + format rev
+KIX_MIN_ROWS    = 0x4000        # below this a full KEY scan is cheaper than the snapshot
 
 TOTAL_KEY_ROWS  = 8
 TOTAL_DEAD_ROWS = 16
 
-MIN_KEY_STRUCT_V0 = 8 + 8 * 5  # n_pad, (file_id, offset, size, ver, date)
-MIN_KEY_STRUCT_V1 = 8 + 8 * 6  # n_pad, (file_id, offset, row_size, val_size, ver, date)
-MIN_KEY_STRUCT_V2 = 8 + 8 * 7  # n_pad, (file_id, offset, row_size, val_size, ver, date, flags)
+MIN_KEY_STRUCT_V0 = 8 + 8 * 5   # n_pad, (file_id, offset, size, ver, date)
+MIN_KEY_STRUCT_V1 = 8 + 8 * 6   # n_pad, (file_id, offset, row_size, val_size, ver, date)
+MIN_KEY_STRUCT_V2 = 8 + 8 * 7   # n_pad, (file_id, offset, row_size, val_size, ver, date, flags)
 
 THE_1ST_DATE    = dt_date(1, 1, 1)
 NUM_1970_DAYS   = 719162        # date(1970, 1, 1) - date(1,1,1); kept for callers, unused here
@@ -814,6 +817,27 @@ class DictKeyTable(KeyTableBase):
         _fp = fp
         yield from self.table.keys()
 
+    def dump_rows(self) -> Tuple[List[str],List[int]]:
+        """Return the whole table as two parallel lists for :meth:`JIo.save_kix`.
+
+        The values are the packed ``row_id``/flags integers, handed over as they
+        are: the snapshot layer never interprets a single bit of them.
+
+        Returns:
+            Tuple[List[str], List[int]]: The keys and their packed values.
+        """
+        table = self.table
+        return list(table.keys()), list(table.values())
+
+    def load_rows(self, keys:List[str], vals:List[int]):
+        """Refill the table from :meth:`dump_rows` output.
+
+        Args:
+            keys (List[str]): The record keys.
+            vals (List[int]): The packed ``row_id``/flags integers.
+        """
+        self.table.update(zip(keys, vals))
+
     def copy(self) -> DictKeyTable:
         key_table = DictKeyTable(self.io, btree=not isinstance(self.table, dict))
         for key,val in self.table.items():
@@ -1105,7 +1129,8 @@ class JIo(JIoBase):
             '_KEY_rows', '_DEAD_rows', 'row_bytes', 'pad_byte', 'pad0_byte',\
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0',\
-            'max_vfiles', '_val_codec', '_key_codec', '_now_sec', 'now')
+            'max_vfiles', '_val_codec', '_key_codec', '_now_sec', 'now',\
+            '_index_cache', '_kix_rows', 'min_kix_rows')
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
@@ -1279,7 +1304,9 @@ class JIo(JIoBase):
             reserved_rate:Optional[float]=None, \
             sync_id:int=0, swap_id:int=0, remv_id:int=0, \
             val_codec:Optional['JIoVAL_U']=None, \
-            key_codec:Optional['JIoKEY_U']=None):
+            key_codec:Optional['JIoKEY_U']=None, \
+            index_cache:bool=False, \
+            min_kix_rows:Optional[int]=None):
 
         """Initialize the IO engine that reads and writes the KEY/VAL files.
 
@@ -1344,6 +1371,12 @@ class JIo(JIoBase):
             key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec override for the
                 'U+U' data type, analogous to ``val_codec`` but for the row index. Defaults to
                 the process-wide ``g_KEY_U``.
+            index_cache (bool, optional): Keep a key-table snapshot beside the KEY file
+                (see :meth:`save_kix`) so a later handle skips the full index scan.
+                Only ``DictKeyTable`` indexes snapshot. Defaults to False.
+            min_kix_rows (Optional[int], optional): Record count below which the snapshot
+                is neither written nor read, and the tail size that triggers a rewrite.
+                ``None`` uses :data:`KIX_MIN_ROWS`. Defaults to None.
 
         Raises:
             TypeError: If input structural variables violate driver specifications.
@@ -1383,6 +1416,9 @@ class JIo(JIoBase):
         if api_ver is None:
             api_ver = API_LATEST
 
+        if min_kix_rows is None:
+            min_kix_rows = KIX_MIN_ROWS
+
         self._KEY_rows      = OrderedDict()
         self._DEAD_rows     = {}
         self._val_codec     = val_codec
@@ -1393,6 +1429,7 @@ class JIo(JIoBase):
         self.swap_id        = swap_id
         self.remv_id        = remv_id
         self.index_size     = index_size
+        self.min_kix_rows   = min_kix_rows
         self.min_value_size = min_value_size
         self.max_file_size  = max_file_size
         self.reserved_rate  = reserved_rate
@@ -1427,6 +1464,8 @@ class JIo(JIoBase):
         self.window_size = max(1, int(KEY_ROW_WINDOW / index_size))
         self.row_bytes = index_size - min_value_size * (1 + reserved_rate)
 
+        self._index_cache   = index_cache
+        self._kix_rows      = -1
         self.update_days()
         self.init_APIs(api_ver)
 
@@ -1773,6 +1812,8 @@ class JIo(JIoBase):
             self.groups.clear()
             self._KEY_rows.clear()
             self._DEAD_rows.clear()
+            self._kix_rows = -1
+            self.files_obj.IDX_remove()
             self._swap_id = self._remv_id = self.max_vfiles = -1
             self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
             self.update_days()
@@ -2272,6 +2313,8 @@ class JIo(JIoBase):
         self.file_table.clear()
         self._KEY_rows.clear()
         self._DEAD_rows.clear()
+        self._kix_rows = -1
+        self.files_obj.IDX_remove()
         self.update_days()
         self.row_bytes = self.index_size - self.min_value_size * (1 + self.reserved_rate)
         self.window_size = max(1, int(KEY_ROW_WINDOW / self.index_size))
@@ -2576,6 +2619,106 @@ class JIo(JIoBase):
 
         self.max_vfiles = (max(file_table) + 1) if file_table else 0
 
+    def load_kix(self, fp:IO) -> bool:
+        """Restore the key table from the ``.KIX`` sidecar instead of scanning the KEY file.
+
+        The snapshot is a disposable cache, never a source of truth: it only
+        fast-forwards ``_n_records``/``_n_lines`` to the state it was taken at
+        and leaves the tail to the incremental logic in :meth:`load_keys`. A
+        stale snapshot therefore costs time, never correctness, and any doubt
+        at all falls back to the full scan.
+
+        Args:
+            fp (IO): The open KEY file pointer.
+
+        Returns:
+            bool: ``True`` when the table was restored from the sidecar.
+        """
+        key_table = self.key_table
+        if self.n_records < self.min_kix_rows or not isinstance(key_table, DictKeyTable):
+            return False
+
+        data = self.files_obj.IDX_load()
+        if not data:
+            return False
+
+        try:
+            stamp, sync_id, swap_id, remv_id, n_records, n_lines, keys, vals, groups = msg_loads(data)
+            if not stamp \
+                    or stamp[0] != KIX_MAGIC \
+                    or stamp[1:] != [self.index_size, self._data_type, self.api_ver] \
+                    or not n_records <= self.n_records or not 0 < n_lines <= self.n_lines \
+                    or not 0 <= sync_id <= self.sync_id or not 0 <= swap_id <= self.swap_id \
+                    or not 0 <= remv_id <= self.remv_id \
+                    or len(keys) != n_records or len(vals) != n_records:
+                return False
+
+            key_table.clear()
+            key_table.load_rows(keys, vals)
+
+        except (ValueError, TypeError, KeyError, IndexError): # a broken sidecar only costs a full scan
+            key_table.clear()
+            return False
+
+        read_key = self.read_key
+        try:
+            for row_id in range(0, n_records, max(1, n_records >> 4)):
+                if key_table.get(read_key(fp, row_id)[0], -1) != row_id:
+                    key_table.clear()
+                    return False
+
+        except (OSError, ValueError, IndexError, TypeError): # pragma: no cover
+            key_table.clear()
+            return False
+
+        self._n_records = n_records
+        self._n_lines   = n_lines
+        self._sync_id   = sync_id
+        self._swap_id   = swap_id
+        self._remv_id   = remv_id
+
+        io_groups = self.groups
+        for key in groups:
+            io_groups.setdefault(key, None)
+
+        self.update_file_table() # keep the VAL layout identical to a full scan
+        self._kix_rows = n_records
+        return True
+
+    def save_kix(self, force:bool=False) -> bool:
+        """Write the key table to the ``.KIX`` sidecar.
+
+        Rewriting costs about as much as scanning the rows it would save, so by
+        default the snapshot is only refreshed once the tail behind it has grown
+        past :attr:`min_kix_rows`. Pass ``force`` to snapshot on demand, e.g.
+        right after a bulk import.
+
+        Args:
+            force (bool, optional): Rewrite regardless of how far behind the sidecar is. Defaults to False.
+
+        Returns:
+            bool: ``True`` when a snapshot was written.
+        """
+        key_table = self.key_table
+        n_records = self.n_records
+        min_kix_rows = self.min_kix_rows
+        if not self._index_cache or n_records < min_kix_rows or not isinstance(key_table, DictKeyTable):
+            return False
+
+        if n_records != len(key_table) or (not force and n_records - self._kix_rows < min_kix_rows):
+            return False
+
+        keys, vals = key_table.dump_rows()
+        data = msg_dumps([[KIX_MAGIC, self.index_size, self._data_type, self.api_ver], \
+                        self.sync_id, self.swap_id, self.remv_id, \
+                        n_records, self.n_lines, keys, vals, list(self.groups)])
+
+        if self.files_obj.IDX_save(data):
+            self._kix_rows = n_records
+            return True
+
+        return False
+
     def load_keys(self, fp:IO, force:bool=False):
         """Synchronize the master index tracking dataset by parsing the database index file.
 
@@ -2584,6 +2727,11 @@ class JIo(JIoBase):
             force (bool, optional): If ``True``, overrules timeline checks and rebuilds 
                 index layouts from zero. Defaults to ``False``.
         """
+        if self._kix_rows < 0:
+            self._kix_rows = 0
+            if self._index_cache and not force and self._n_lines <= 0:
+                self.load_kix(fp)
+
         n_records       = self.n_records
         n_lines         = self.n_lines
         prev_n_records  = self._n_records
@@ -2833,6 +2981,8 @@ class JIo(JIoBase):
             if n_lines >= sync_id:
                 return
 
+        self._kix_rows = -1
+        self.files_obj.IDX_remove()
         api_ver = API_LATEST if self.api_ver is None else self.api_ver
         dst_io = JIo(files_obj=self.files_obj.copy(), # due to JNetFiles
                     data_type=self._data_type,

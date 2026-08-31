@@ -4,12 +4,12 @@ from contextlib import contextmanager
 from collections import OrderedDict
 from datetime import date as dt_date, datetime, timedelta
 from re import compile as re_compile, match as re_match, Pattern
-from threading import RLock, get_ident
+from threading import RLock, Thread, get_ident
 from struct import Struct
 from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
-from .jdb_io import JIo, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE, THE_1ST_DATE
+from .jdb_io import JIo, DictKeyTable, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE, THE_1ST_DATE
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
 from .jdb_dc import dc_fill, is_dc
@@ -1033,7 +1033,7 @@ class JDbReader(JDbBase):
     """
     __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
                 'io', 'fsize', 'th_table', 'safe_line', 'min_safe', 'chg_keys',
-                'write_hook', 'max_wsize', 'flags')
+                'write_hook', 'max_wsize', 'flags', '_warm_th', '_warm_err')
 
     def __init__(self,\
                 KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\
@@ -1051,7 +1051,9 @@ class JDbReader(JDbBase):
                 min_safe:Optional[int]=None,\
                 flags:Optional[JFlag]=None, \
                 val_codec:Optional[Any]=None, \
-                key_codec:Optional[Any]=None, **kwargs):
+                key_codec:Optional[Any]=None, \
+                warm_up:bool=False, \
+                index_cache:bool=False, **kwargs):
         """
         Initialize the JDbReader instance with specific backend storage and formatting options.
 
@@ -1136,12 +1138,24 @@ class JDbReader(JDbBase):
             key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U'
                 data type. Analogous to ``val_codec`` but for the row index. Defaults to the
                 process-wide codec set by ``register_user_key_codec()``.
-            **kwargs: Extra arguments passed to internal components.
+            warm_up (bool, optional): Build the key table on a background thread as soon
+                as the instance is created, so the first :meth:`open` does not pay for it.
+                See :meth:`warm_up`. Defaults to ``False``.
+            index_cache (bool, optional): Keep a key-table snapshot beside the KEY file
+                so a later handle skips the full index scan (``<KEY>.KIX`` on disk, a
+                shared buffer for :class:`JMemFiles`, a server-side sidecar over
+                :class:`JNetFiles`). Costs about 25 bytes per key and only applies to
+                ``key_limit='no'``/``'bt'``. See :meth:`save_index`. Defaults to ``False``.
+            **kwargs: Extra arguments passed to internal components. ``min_kix_rows``
+                overrides :data:`~omni_json_db.jdb_io.KIX_MIN_ROWS` for this instance,
+                the record count below which ``index_cache`` neither writes nor reads
+                a snapshot (lower it only in tests).
         
         Raises:
             TypeError: Raised if provided arguments are of the incorrect type.
         """
         JDbKey_obj = kwargs.pop('JDbKey_obj', None)
+        min_kix_rows = kwargs.pop('min_kix_rows', None) # must pop: kwargs is forwarded to JMemFiles()
 
         if isinstance(KEY_file, JDbReader):
             jdb = KEY_file
@@ -1209,6 +1223,7 @@ class JDbReader(JDbBase):
                                         close=files_obj.LCK_close, \
                                         remove=files_obj.LCK_remove)
         self.lock = RLock() # solve iter issue [cannot use Lock]
+        self._warm_th = self._warm_err = None
         self.fsize = self.safe_line = 0
         self.th_table:Dict[int,dict] = {}
         self.chg_keys:Set = set()
@@ -1230,7 +1245,12 @@ class JDbReader(JDbBase):
                 max_file_size=max_file_size,
                 reserved_rate=reserved_rate,
                 val_codec=val_codec,
-                key_codec=key_codec)
+                key_codec=key_codec,
+                index_cache=index_cache,
+                min_kix_rows=min_kix_rows)
+
+        if warm_up:
+            self.warm_up(block=False, timeout=None)
 
     def __del__(self):
         """
@@ -1878,6 +1898,87 @@ class JDbReader(JDbBase):
 
         expired_keys.clear()
 
+    def warm_up(self, block:bool=False, timeout:Optional[float]=None) -> Optional[Thread]:
+        """Build the key table on a background thread so the first :meth:`open` does not pay for it.
+
+        The warm-up is a plain read-only :meth:`open`, so the table, the file lock
+        and the per-thread file pointers behave exactly as they do today. A
+        concurrent :meth:`open` simply blocks on :attr:`lock` until the warm-up
+        finishes, so a query can never see a half-filled table.
+
+        This hides latency, it does not remove it: ``load_keys()`` is GIL-bound,
+        so the caller only wins while it is waiting on I/O of its own. Tables that
+        load lazily (``key_limit='l0'``-``'l5'`` / ``+ve``) have nothing to warm
+        and return ``None`` without starting a thread.
+
+        Calling this from inside an open block returns ``None``: the table is
+        already loaded, and a ``block=True`` warm-up would deadlock on
+        :attr:`lock`, which the caller still holds.
+
+        Args:
+            block (bool, optional): Join the thread before returning. Defaults to False.
+            timeout (Optional[float], optional): Seconds to wait when ``block``. Defaults to None.
+
+        Returns:
+            Optional[Thread]: The warm-up thread, or ``None`` when there is nothing to warm.
+
+        Example:
+            >>> db = JDb('data/app.KEY', key_limit='no')
+            >>> th = db.warm_up()               # overlap the load with app start-up
+            >>> with db.open(read_only=True):   # blocks only for the remainder
+            ...     pass
+            >>> db = JDb('data/app.KEY', key_limit='no', warm_up=True) # same, at construction
+        """
+        th = self._warm_th
+        if th is not None and th.is_alive(): # pragma: no cover
+            if block:
+                th.join(timeout)
+
+            return th
+
+        if not isinstance(self.io.key_table, DictKeyTable) or get_ident() in self.th_table:
+            return None
+
+        def _warm_run():
+            try:
+                with self.open(read_only=True):
+                    pass
+
+            except Exception as e: # pragma: no cover
+                self._warm_err = e
+
+        self._warm_err = None
+        th = self._warm_th = Thread(target=_warm_run, name='jdb-warm', daemon=True)
+        th.start()
+        if block:
+            th.join(timeout)
+
+        return th
+
+    def save_index(self, force:bool=True) -> bool:
+        """Write the key-table snapshot now.
+
+        The database writes the snapshot on its own when a close leaves the
+        sidecar far enough behind, so this is only for taking control of the
+        timing -- typically right after a bulk import.
+
+        Args:
+            force (bool, optional): Rewrite even when the sidecar is nearly current. Defaults to True.
+
+        Returns:
+            bool: ``True`` when a snapshot was written. ``False`` when ``index_cache``
+            is off, the backend refused to store one, the table is not a
+            ``DictKeyTable``, or the database holds fewer than :attr:`JIo.min_kix_rows`
+            records (16,384 by default).
+
+        Example:
+            >>> db = JDb('data/app.KEY', key_limit='no', index_cache=True)
+            >>> db.insert(rows)
+            >>> db.save_index()
+        """
+        with self.open(read_only=True):
+            return self.io.save_kix(force=force)
+
     def f_open(self, read_only:bool=True) -> Dict[int,IO]:
         """Manually acquire the file lock and open the KEY file for the current thread.
 
@@ -2048,6 +2149,8 @@ class JDbReader(JDbBase):
                             fp.close()
 
                     fp_dict.clear()
+                    if io._index_cache:
+                        io.save_kix()
                     th_table.pop(ident, 0)
 
                 file_lock.release()
@@ -2236,6 +2339,8 @@ class JDbReader(JDbBase):
                                 fp.close()
 
                         fp_dict.clear()
+                        if io._index_cache:
+                            io.save_kix()
                         th_table.pop(ident, 0)
 
                     file_lock.release()
@@ -5672,6 +5777,7 @@ class JDbReader(JDbBase):
     def f_get_val_fp(self, fp_dict:Dict[int,IO], \
             file_id:Optional[int]=None, \
             req_size:Optional[int]=None, \
+            vfile_args:Optional[list]=None, \
             max_fp:int=32) -> Tuple[IO,int,int]:
         """Open (or reuse) the VAL data file identified by ``file_id`` for the
         current thread. When ``file_id`` is ``None``, pick a VAL file with at
@@ -5685,6 +5791,13 @@ class JDbReader(JDbBase):
                 to pick one with enough free space. Defaults to ``None``.
             req_size (Optional[int], optional): Bytes required when picking a
                 file. Defaults to ``io.min_value_size``.
+            vfile_args (Optional[list], optional): The caller's ``[val_fp, file_id,
+                offset]`` allocation cursor (see :meth:`JDb.f_write`), mutated in
+                place. A cursor whose file pointer is still open and whose next
+                ``req_size`` still fits ``max_file_size`` is handed straight back,
+                skipping the free-space search; otherwise a file is picked as
+                usual and the cursor refilled. ``None`` always searches, which is
+                the unbatched behaviour. Defaults to None.
             max_fp (int, optional): Maximum number of VAL file pointers kept
                 open per thread. Defaults to ``32``.
 
@@ -5693,12 +5806,20 @@ class JDbReader(JDbBase):
             file pointer, its file id, and the file's current used size.
         """
         io = self.io
-        file_table = io.file_table
         if req_size is None:
             req_size = io.min_value_size
 
+        max_file_size = io.max_file_size
+        file_table = io.file_table
+        if vfile_args:
+            cur_fp, cur_id, cur_offset = vfile_args
+            if cur_fp is not None and fp_dict.get(cur_id, MISSING) is cur_fp \
+                    and cur_offset+req_size <= max_file_size \
+                    and cur_offset >= file_table.get(cur_id, 0):
+                vfile_args[2] = cur_offset+req_size
+                return cur_fp, cur_id, cur_offset
+
         if file_id is None:
-            max_file_size = io.max_file_size
             num_files = len(file_table)
             step = max(1, num_files//4)
             file_id = max(0, num_files-1)
@@ -5754,6 +5875,9 @@ class JDbReader(JDbBase):
                     val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb', buffering=VAL_FILE_BUF_SIZE)
                 else:
                     val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb+', buffering=0)
+
+        if vfile_args:
+            vfile_args[:] = [val_fp, file_id, offset+req_size]
 
         return val_fp, file_id, offset
 

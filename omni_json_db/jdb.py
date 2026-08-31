@@ -271,7 +271,9 @@ class JDb(JDbReader):
             min_safe:Optional[int]=None,\
             flags:Optional[JFlag]=None,\
             val_codec:Optional[Any]=None,\
-            key_codec:Optional[Any]=None, **kwargs):
+            key_codec:Optional[Any]=None, \
+            warm_up:bool=False, \
+            index_cache:bool=False, **kwargs):
         """
         Initialize the transactional JDb controller object mapping configurations sheets models.
 
@@ -356,6 +358,14 @@ class JDb(JDbReader):
                 ``register_user_val_codec()``.
             key_codec (Optional[JIoKEY_U], optional): Per-instance KEY codec for the 'U+U' data
                 type. Defaults to the process-wide codec set by ``register_user_key_codec()``.
+            warm_up (bool, optional): Build the key table on a background thread as soon
+                as the instance is created, so the first :meth:`open` does not pay for it.
+                See :meth:`JDbReader.warm_up`. Defaults to ``False``.
+            index_cache (bool, optional): Keep a key-table snapshot beside the KEY file
+                so a later handle skips the full index scan (``<KEY>.KIX`` on disk, a
+                shared buffer for :class:`JMemFiles`, a server-side sidecar over
+                :class:`JNetFiles`). Costs about 25 bytes per key and only applies to
+                ``key_limit='no'``/``'bt'``. See :meth:`JDbReader.save_index`. Defaults to ``False``.
             **kwargs: Extra arguments passed to internal components.
         
         Raises:
@@ -374,6 +384,7 @@ class JDb(JDbReader):
             >>> jdb = JDb('tenant42.jdb', data_type='J+U', val_codec=codec)
         
         """
+        key_obj = kwargs.pop('JDbKey_obj', JDbKey2(self))
         super().__init__(KEY_file=KEY_file,
             min_value_size=min_value_size,
             max_file_size=max_file_size,
@@ -384,13 +395,15 @@ class JDb(JDbReader):
             data_type=data_type,
             zip_type=zip_type,
             api_ver=api_ver,
-            JDbKey_obj=kwargs.pop('JDbKey_obj', JDbKey2(self)),
+            JDbKey_obj=key_obj,
             write_hook=write_hook,
             max_wsize=max_wsize,
             min_safe=min_safe,
             flags=flags,
             val_codec=val_codec,
             key_codec=key_codec,
+            warm_up=warm_up,
+            index_cache=index_cache,
             **kwargs)
 
     def __setitem__(self, key:Union[str,Any], val:Any):
@@ -549,6 +562,7 @@ class JDb(JDbReader):
                 has_SIGINT = self.file_lock.has_SIGINT
                 f_write = self.f_write
                 f_read = self.f_read
+                vfile_args = [None, -1, 0]  # one VAL cursor for the whole sweep
                 if func:
                     io, fp, key_fp = self.f_get_fp(fp)
                     for _key in matched_keys:
@@ -559,14 +573,14 @@ class JDb(JDbReader):
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
                                 # a sweep skips what it may not touch, it never fails as a whole
-                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET)
+                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET, vfile_args=vfile_args)
                                 key_fp = fp[-1]
                 else:
                     for _key in matched_keys:
                         if has_SIGINT(): break
                         row_id, kflags = key_table.get_both(_key, fp=key_fp)
                         if not kflags & KF_READ_ONLY:
-                            f_write(fp, _key, val, key_flags=KF_QUIET)
+                            f_write(fp, _key, val, key_flags=KF_QUIET, vfile_args=vfile_args)
 
                 return
 
@@ -575,6 +589,7 @@ class JDb(JDbReader):
                 f_write = self.f_write
                 f_read = self.f_read
                 io, fp, key_fp = self.f_get_fp(fp)
+                vfile_args = [None, -1, 0]  # one VAL cursor for the whole sweep
                 for _key,row_id in io.sorted_key_table_items(fp=key_fp):
                     if has_SIGINT(): break
                     if k_arg_cnt == 2:
@@ -588,10 +603,10 @@ class JDb(JDbReader):
                         if func:
                             new_val = func(_key, deepcopy(old_val))
                             if new_val != old_val:
-                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET)
+                                f_write(fp, _key, new_val, overwrite=True, key_flags=KF_QUIET, vfile_args=vfile_args)
 
                         elif old_val != val:
-                            f_write(fp, _key, val, overwrite=True, key_flags=KF_QUIET)
+                            f_write(fp, _key, val, overwrite=True, key_flags=KF_QUIET, vfile_args=vfile_args)
 
                 return
 
@@ -611,6 +626,7 @@ class JDb(JDbReader):
 
                         done[_key] = (_row_id, _kflags)
 
+                vfile_args = [None, -1, 0]  # one VAL cursor for the whole run
                 for _key,(row_id, kflags) in done.items():
                     if has_SIGINT(): break
                     if row_id < 0 and _key.find(SEP_SYM) >= 0: # pylint: disable=R
@@ -621,10 +637,10 @@ class JDb(JDbReader):
                         old_val = None if row_id < 0 else f_read(fp, _key, row=row_id, copy=False)
                         new_val = func(_key, deepcopy(old_val))
                         if new_val != old_val:
-                            f_write(fp, _key, new_val, overwrite=True)
+                            f_write(fp, _key, new_val, overwrite=True, vfile_args=vfile_args)
                             key_fp = fp[-1]
                     else:
-                        f_write(fp, _key, val)
+                        f_write(fp, _key, val, vfile_args=vfile_args)
                         key_fp = fp[-1]
 
                 return
@@ -3195,9 +3211,10 @@ class JDb(JDbReader):
 
             if chg_keys:
                 f_write = self.f_write
+                vfile_args = [None, -1, 0]  # one VAL cursor for the whole patch run
                 for key,val in chg_keys:
                     if has_SIGINT(): break
-                    f_write(fp, key, val, overwrite=True, key_flags=KF_QUIET)
+                    f_write(fp, key, val, overwrite=True, key_flags=KF_QUIET, vfile_args=vfile_args)
                     count += 1
 
             if del_keys:
@@ -3896,6 +3913,7 @@ class JDb(JDbReader):
             has_SIGINT = file_lock.has_SIGINT
             new_records = {}
             sync_id = io.sync_id
+            vfile_args = [None, -1, 0]  # one VAL cursor for every rewrite in this scan
             for key in records:
                 if has_SIGINT():
                     break
@@ -3927,13 +3945,13 @@ class JDb(JDbReader):
                             new_val = func(str_key, deepcopy(old_val))
                             not_eq = new_val != old_val
                             if not_eq or key_flags is not None:
-                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=_wr_flags):
+                                if f_write(fp, str_key, new_val, flags=flags, max_wsize=max_wsize, overwrite=not_eq, key_flags=_wr_flags, vfile_args=vfile_args):
                                     chg_table[str_key] = new_val
 
                             continue
 
                         if not (_cache and str_key in _cache and _cache[str_key] == val):
-                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
+                            if f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags, vfile_args=vfile_args):
                                 chg_table[str_key] = val
 
                     continue
@@ -3952,7 +3970,7 @@ class JDb(JDbReader):
                     io, fp, key_fp, _sync_chg = self.f_get_write_fp(fp)
                     key_table = io.key_table
                     if key_table.get(str_key, -1, fp=key_fp) >= 0:
-                        if replace and f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags):
+                        if replace and f_write(fp, str_key, val, flags=flags, max_wsize=max_wsize, key_flags=_wr_flags, vfile_args=vfile_args):
                             chg_table[str_key] = val
 
                         continue
@@ -4936,7 +4954,8 @@ class JDb(JDbReader):
             flags:Optional[JFlag]=None, \
             max_wsize:Optional[int]=None, \
             overwrite:bool=False,\
-            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            vfile_args:Optional[list]=None) -> bool:
         """Write one dataclass instance as a record, using its ``id`` field as the key.
 
         The instance is flattened into a plain ``dict`` -- ``id`` is lifted out to
@@ -4958,6 +4977,10 @@ class JDb(JDbReader):
                 old version in a dead row. Defaults to False.
             key_flags (Optional[Union[str, int, JKeyFlag]], optional):
                 :class:`JKeyFlag` bits for the record's KEY row. Defaults to None.
+            vfile_args (Optional[list], optional): A shared VAL allocation cursor
+                passed straight to :meth:`f_write`; see there. Hand the same list
+                to a whole run of :meth:`f_write_dc` calls to bump-allocate one
+                contiguous span. Defaults to None.
 
         Returns:
             bool: True if the record was written, False if the write was refused
@@ -4975,7 +4998,7 @@ class JDb(JDbReader):
         """
         return self.f_write(fp_dict, dc_key(data), dc_to_dict(data), cdays=cdays, mdays=mdays,\
                             ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=overwrite,\
-                            key_flags=key_flags)
+                            key_flags=key_flags, vfile_args=vfile_args)
 
     def f_write(self, fp_dict:Dict[int,IO], key:str, val:Any, \
             cdays:int=-1, mdays:int=-1, \
@@ -4983,7 +5006,8 @@ class JDb(JDbReader):
             flags:Optional[JFlag]=None, \
             max_wsize:Optional[int]=None, \
             overwrite:bool=False, \
-            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            vfile_args:Optional[list]=None) -> bool:
         """Internal: serialize and write a value to the database (used by :meth:`set`, :meth:`add`, etc.).
 
         Args:
@@ -5016,6 +5040,23 @@ class JDb(JDbReader):
                 :attr:`JKeyFlag.GROUP` and :attr:`JKeyFlag.LINK` are never taken
                 from here: they describe what the value is, so they are re-derived
                 and any such bit passed in is ignored.
+            vfile_args (Optional[list], optional): A caller-owned VAL allocation
+                cursor, ``[val_fp, file_id, offset]``, shared across a run of
+                writes so the run bump-allocates one contiguous span instead of
+                asking :meth:`f_get_val_fp` where to put every record. ``None``
+                (the default) lets this call pick the file itself, which is the
+                unbatched behaviour. When a list is passed, fresh space is taken
+                from ``offset`` while the cursor still holds (its file pointer is
+                still open and ``offset + row`` still fits ``max_file_size``);
+                when it does not, a VAL file is picked as usual and the cursor
+                refilled -- so ``max_file_size`` is honoured exactly as before.
+                **The list is updated in place** and is meant to be handed
+                straight to the next call. Start one with ``[None, -1, 0]``.
+                It is consumed only by a write that allocates *new* VAL space: a
+                rewrite that reuses its own row, a reclaimed DEAD row, a
+                header-inline value and a no-op all leave it untouched. It is
+                never forwarded to a link target or a group, which own their own
+                storage. Defaults to None.
 
         Returns:
             bool: True if the write succeeded, False otherwise. A write is
@@ -5206,7 +5247,7 @@ class JDb(JDbReader):
                         io.n_lines = n_lines = n_lines + 1 # MUST call write_key first
                         data = io.pad(data, max_size=0)
                         new_row_size = len(data)
-                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size) # create new space
+                        val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size, vfile_args=vfile_args) # create new space
 
                     else: # use dead row
                         new_file_id = dead_file_id
@@ -5344,7 +5385,7 @@ class JDb(JDbReader):
                     io.n_lines = n_lines = n_lines + 1  # MUST before call write_key
                     data = io.pad(data, max_size=0)
                     new_row_size = len(data)
-                    val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
+                    val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size, vfile_args=vfile_args)
 
                 else: # use dead row
                     new_file_id = dead_file_id
@@ -5428,7 +5469,7 @@ class JDb(JDbReader):
                 io.n_lines = n_lines = n_lines + 1  # MUST call write_key first
                 data = io.pad(data, max_size=0)
                 new_row_size = len(data)
-                val_fp, new_file_id, new_offset  = self.f_get_val_fp(fp_dict, req_size=new_row_size)
+                val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size, vfile_args=vfile_args)
 
             else: # use dead row
                 val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
@@ -5700,17 +5741,19 @@ class JDb(JDbReader):
             records.pop(key, None)
 
         f_write = self.f_write
+        vfile_args = [None, -1, 0]
         for key in drop:
             val = records.pop(key, MISSING)
             if val is not MISSING and replace and not has_SIGINT():
-                if f_write(fp_dict, key, val, ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=True, key_flags=key_flags):
+                if f_write(fp_dict, key, val, ttl=ttl, flags=flags, max_wsize=max_wsize, overwrite=True, key_flags=key_flags, vfile_args=vfile_args):
                     records[key] = val
 
         return bool(records)
 
     def f_append(self, fp_dict:Dict[int,IO], key:str, val:Any, \
             ttl:Union[int,float,timedelta]=-1, \
-            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None, \
+            vfile_args:Optional[list]=None) -> bool:
         """Internal: append ``val`` to a record, adding a new row at the tail if needed.
 
         An existing key is forwarded to :meth:`f_write` with ``overwrite=True``;
@@ -5734,6 +5777,11 @@ class JDb(JDbReader):
                 :attr:`JKeyFlag.GROUP` and :attr:`JKeyFlag.LINK` are never taken from
                 here -- they describe what the value is, so they are re-derived and
                 any such bit passed in is ignored.
+            vfile_args (Optional[list], optional): A shared VAL allocation cursor,
+                ``[val_fp, file_id, offset]``; see :meth:`f_write`. Hand the same
+                list to a whole run of appends and they bump-allocate one
+                contiguous span instead of re-picking a VAL file per record.
+                Start one with ``[None, -1, 0]``. Defaults to None.
 
         Returns:
             bool: True if the write succeeded, False otherwise.
@@ -5763,7 +5811,7 @@ class JDb(JDbReader):
 
                 return False
 
-            return self.f_write(fp_dict, key, val, flags=0, max_wsize=0, overwrite=True, key_flags=key_flags, ttl=ttl)
+            return self.f_write(fp_dict, key, val, flags=0, max_wsize=0, overwrite=True, key_flags=key_flags, ttl=ttl, vfile_args=vfile_args)
 
         key_fp = fp_dict[-1] if fp_dict else None
         n_lines = io.n_lines
@@ -5801,7 +5849,7 @@ class JDb(JDbReader):
             new_val_size = len(data)
             data = io.pad(data, max_size=0)
             new_row_size = len(data)
-            val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size)
+            val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size, vfile_args=vfile_args)
             val_fp.seek(new_offset)
             _write_size = val_fp.write(data)
 

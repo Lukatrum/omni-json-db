@@ -5,6 +5,7 @@ from io import RawIOBase
 from typing import Optional, Union, IO
 from os import SEEK_SET, SEEK_CUR, SEEK_END, makedirs, getcwd
 from os import remove as os_remove, stat as os_stat, fsync as os_fsync
+from os import replace as os_replace, getpid as os_getpid
 from os.path import basename, dirname, join as path_join, exists as path_exists
 from os import open as os_open, close as os_close, O_APPEND, O_CREAT
 from datetime import datetime
@@ -658,6 +659,37 @@ class JFilesBase(metaclass=ABCMeta): # pragma: no cover
     @abstractmethod
     def LCK_remove(self): ...
 
+    def IDX_load(self) -> Optional[bytes]:
+        """Read the key-table snapshot sidecar written by :meth:`IDX_save`.
+
+        The sidecar is a disposable cache, never part of the database: a backend
+        that does not implement it simply never serves one.
+
+        Returns:
+            Optional[bytes]: The stored bytes, or ``None`` when unsupported or absent.
+        """
+        return None
+
+    def IDX_save(self, data:bytes) -> bool:
+        """Store a key-table snapshot beside the KEY file.
+
+        Args:
+            data (bytes): The snapshot payload.
+
+        Returns:
+            bool: ``True`` when written, ``False`` when unsupported or not writable.
+        """
+        _data = data
+        return False
+
+    def IDX_remove(self) -> bool:
+        """Delete the key-table snapshot sidecar.
+
+        Returns:
+            bool: ``True`` when a sidecar was removed.
+        """
+        return False
+
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
 #---------------------------------------------------------------------
@@ -668,9 +700,9 @@ class JMemFiles(JFilesBase):
     Manages the KEY index and VAL data entirely within RAM using
     mutable bytearrays, bypassing physical storage devices.
     """
-    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'timestamp', 'lock', 'cond', 'group_table')
+    __slots__ = ('name', 'KEY_file', 'VAL_table', 'LCK_file', 'IDX_file', 'timestamp', 'lock', 'cond', 'group_table')
 
-    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None, group_table:Optional[dict]=None):
+    def __init__(self, KEY_file:Optional[bytearray]=None, VAL_table:Optional[dict]=None, LCK_file:Optional[bytearray]=None, lock:Optional[Lock]=None, cond:Optional[Condition]=None, timestamp:Optional[float]=None, name:Optional[str]=None, group_table:Optional[dict]=None, IDX_file:Optional[bytearray]=None):
         """Initialize a volatile in-memory storage manager.
 
         Args:
@@ -686,6 +718,9 @@ class JMemFiles(JFilesBase):
                 calls (from any copy of this object) resolve to the same
                 in-memory buffers — mirroring the path-determinism of
                 :class:`JDiskFiles` groups. Defaults to a new dict.
+            IDX_file (bytearray, optional): Buffer holding the key-table snapshot
+                (see :meth:`IDX_save`). Shared with every :meth:`copy`, so a second
+                handle on the same buffers can skip the KEY scan. Defaults to a new bytearray.
 
         Raises:
             TypeError: If input parameters do not match required native types.
@@ -711,8 +746,13 @@ class JMemFiles(JFilesBase):
         if group_table is None:
             group_table = {}
 
+        if IDX_file is None:
+            IDX_file = bytearray()
+
         name = '' if not name else name
         if not isinstance(KEY_file, bytearray):
+            raise TypeError
+        if not isinstance(IDX_file, bytearray):
             raise TypeError
         if not isinstance(LCK_file, bytearray):
             raise TypeError
@@ -730,6 +770,7 @@ class JMemFiles(JFilesBase):
 
         self.KEY_file = KEY_file
         self.LCK_file = LCK_file
+        self.IDX_file = IDX_file
         self.VAL_table = VAL_table
         self.lock = lock
         self.cond = cond
@@ -797,7 +838,7 @@ class JMemFiles(JFilesBase):
         Returns:
             JMemFiles: A replicated virtual storage controller.
         """
-        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name, group_table=self.group_table)
+        return JMemFiles(self.KEY_file, self.VAL_table, self.LCK_file, lock=self.lock, cond=self.cond, timestamp=self.timestamp, name=self.name, group_table=self.group_table, IDX_file=self.IDX_file)
 
     def fsync(self, fd:int) -> None:
         """Mock file synchronization. Does nothing in memory mode.
@@ -981,6 +1022,43 @@ class JMemFiles(JFilesBase):
         """
         return int(self.timestamp)
 
+    def IDX_load(self) -> Optional[bytes]:
+        """Read the in-memory key-table snapshot.
+
+        Returns:
+            Optional[bytes]: The stored bytes, or ``None`` when no snapshot is held.
+        """
+        IDX_file = self.IDX_file
+        return bytes(IDX_file) if IDX_file else None
+
+    def IDX_save(self, data:bytes) -> bool:
+        """Replace the in-memory key-table snapshot.
+
+        The buffer is shared with every :meth:`copy`, so the snapshot lives as long
+        as the memory database does -- and costs RAM on top of the table it mirrors.
+
+        Args:
+            data (bytes): The snapshot payload.
+
+        Returns:
+            bool: Always ``True``.
+        """
+        self.IDX_file[:] = data
+        return True
+
+    def IDX_remove(self) -> bool:
+        """Drop the in-memory key-table snapshot.
+
+        Returns:
+            bool: ``True`` when a snapshot was held.
+        """
+        IDX_file = self.IDX_file
+        if not IDX_file:
+            return False
+
+        IDX_file.clear()
+        return True
+
     def LCK_rlock(self, block:bool=False):
         """Acquire a shared reader lock for the memory instance.
 
@@ -1092,7 +1170,7 @@ class JDiskFiles(JFilesBase):
     Maps database operations and logical indexing directly to file nodes and 
     segments on the local storage media.
     """
-    __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file', 'group_table')
+    __slots__ = ('KEY_file', 'VAL_file', 'LCK_file', 'IDX_file', 'LCK_fp', 'file_name', 'dir_name', 'group_KEY_file', 'group_table')
 
     def __init__(self, KEY_file:str, group_table:Optional[dict]=None):
         """Initialize a database management context pointing to real disk storage.
@@ -1134,6 +1212,7 @@ class JDiskFiles(JFilesBase):
         self.KEY_file = KEY_file = path_join(dir_name, file_name)
         self.VAL_file = KEY_file + '.{file_id}'
         self.LCK_file = KEY_file  + '.lock'
+        self.IDX_file = KEY_file  + '.KIX'
         self.LCK_fp:Optional[Union[int, IO]] = None
 
         _parts = KEY_file.split('.')
@@ -1414,6 +1493,57 @@ class JDiskFiles(JFilesBase):
             return int(os_stat(self.KEY_file).st_ctime)
         except OSError:
             return 0
+
+    def IDX_load(self) -> Optional[bytes]:
+        """Read ``<KEY>.KIX``, the disposable key-table snapshot.
+
+        Returns:
+            Optional[bytes]: The stored bytes, or ``None`` when the file is missing or unreadable.
+        """
+        try:
+            with open(self.IDX_file, 'rb') as fp:
+                return fp.read()
+
+        except OSError:
+            return None
+
+    def IDX_save(self, data:bytes) -> bool:
+        """Write ``<KEY>.KIX`` atomically via a per-process temp file.
+
+        Args:
+            data (bytes): The snapshot payload.
+
+        Returns:
+            bool: ``True`` when written, ``False`` when the directory is not writable.
+        """
+        tmp_file = f'{self.IDX_file}.{os_getpid()}.tmp'
+        try:
+            with open(tmp_file, 'wb') as fp:
+                fp.write(data)
+
+            os_replace(tmp_file, self.IDX_file)
+            return True
+
+        except OSError: # pragma: no cover
+            try:
+                os_remove(tmp_file)
+            except OSError:
+                pass
+
+            return False
+
+    def IDX_remove(self) -> bool:
+        """Delete ``<KEY>.KIX``.
+
+        Returns:
+            bool: ``True`` when a sidecar was removed.
+        """
+        try:
+            os_remove(self.IDX_file)
+            return True
+
+        except OSError:
+            return False
 
     def LCK_rlock(self, block:bool=False):
         """Secure a platform-safe shared reader lock blocking writers but enabling read parallelism.
