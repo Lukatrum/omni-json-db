@@ -2,6 +2,7 @@ bitarray
 brotli
 BTrees
 lz4
+msgspec
 msgpack
 orjson
 ormsgpack

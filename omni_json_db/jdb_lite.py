@@ -2145,6 +2145,7 @@ class JDbReader(JDbBase):
                     for fp in fp_dict.values():
                         if fp is not None:
                             if is_dirty and F_FSYNC & flags: # pragma: no cover
+                                fp.flush()  # fsync() cannot see what is still buffered
                                 files_obj.fsync(fp.fileno())
                             fp.close()
 
@@ -2335,6 +2336,7 @@ class JDbReader(JDbBase):
                         for fp in fp_dict.values():
                             if fp is not None:
                                 if is_dirty and F_FSYNC & flags:
+                                    fp.flush()  # fsync() cannot see what is still buffered
                                     files_obj.fsync(fp.fileno())
                                 fp.close()
 
@@ -4639,7 +4641,7 @@ class JDbReader(JDbBase):
         the whole database (see :meth:`get_all`).
 
         Args:
-            *records: Keys to fetch. Each argument may be a string, any
+            *records (str): Keys to fetch. Each argument may be a string, any
                 hashable (converted with ``str``), or an iterable of keys.
 
         Returns:
@@ -5785,6 +5787,13 @@ class JDbReader(JDbBase):
         files are full. Excess VAL file pointers beyond ``max_fp`` are closed
         first (the KEY pointer is never closed).
 
+        The handle is buffered (``VAL_FILE_BUF_SIZE``) in both read and write mode,
+        so a ``write()`` never stops short of the bytes it was given, and a run of
+        appends to consecutive offsets costs one syscall per buffer rather than one
+        per record. Bytes therefore reach the operating system only when the handle
+        is read from, seeked, flushed or closed -- see :meth:`f_flush_val` for the
+        cases where that matters.
+
         Args:
             fp_dict (Dict[int, IO]): The thread's open file-pointer table.
             file_id (Optional[int], optional): VAL file id to open, or ``None``
@@ -5864,22 +5873,49 @@ class JDbReader(JDbBase):
                 file_table[file_id] = offset = file_size
 
             try:
-                if file_lock.mode != 'w':
-                    val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'wb+' if file_size < 0 else 'rb', buffering=VAL_FILE_BUF_SIZE)
-                else:
-                    val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'wb+' if file_size < 0 else 'rb+', buffering=0)
+                val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'wb+' if file_size < 0 else 'rb' if file_lock.mode != 'w' else 'rb+', buffering=VAL_FILE_BUF_SIZE)
 
             except FileNotFoundError: # pragma: no cover
                 self._init_VAL(file_id)
-                if file_lock.mode != 'w':
-                    val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb', buffering=VAL_FILE_BUF_SIZE)
-                else:
-                    val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb+', buffering=0)
+                val_fp = fp_dict[file_id] = files_obj.VAL_open(file_id, 'rb' if file_lock.mode != 'w' else 'rb+', buffering=VAL_FILE_BUF_SIZE)
 
         if vfile_args:
             vfile_args[:] = [val_fp, file_id, offset+req_size]
 
         return val_fp, file_id, offset
+
+    def f_flush_val(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None) -> None:
+        """Push this thread's buffered VAL bytes out to the operating system.
+
+        VAL files are opened buffered, so bytes written through ``fp_dict`` are not
+        on disk until the handle is flushed or closed. Call this before anything
+        looks at the same file through a *different* handle -- a second
+        :meth:`JFilesBase.VAL_open`, an ``fsync``, or another process -- otherwise
+        that reader sees a stale file, and a ``truncate()`` through the other handle
+        can be undone when the buffer is flushed afterwards.
+
+        Ordinary reads and writes need no flush: they go through the same handle,
+        which flushes itself before any read or seek that leaves the buffer.
+
+        Args:
+            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
+            file_id (Optional[int], optional): Flush only this VAL file. ``None``
+                (the default) flushes every open VAL handle. The KEY handle
+                (``file_id`` ``-1``) is never touched. Defaults to None.
+
+        Example:
+            >>> jdb.f_flush_val(fp, file_id)   # before truncating through a new handle
+        """
+        if file_id is None:
+            for _id, fp in fp_dict.items():
+                if _id >= 0 and fp is not None and not fp.closed and fp.writable():
+                    fp.flush()
+
+            return
+
+        fp = fp_dict.get(file_id, None)
+        if file_id >= 0 and fp is not None and not fp.closed and fp.writable():
+            fp.flush()
 
     def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition], \
             with_hidden:bool=True, \

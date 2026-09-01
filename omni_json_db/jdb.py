@@ -32,36 +32,6 @@ MAX_BATCH_ROWS = 2**16 # rows relocated in one batch-insert pass
 MAX_BATCH_SIZE = 2**25 # padded value bytes held by one batch-insert pass
 IMPORT_BATCH_ROWS = 2**13 # rows an importer buffers before flushing them
 
-def _write_all(fp:IO, pos:int, data:Union[bytes,bytearray]) -> int:
-    """Seek to ``pos`` and write every byte of ``data``, retrying on a short write.
-
-    Unbuffered (``buffering=0``) VAL files are raw ``FileIO`` objects whose
-    ``write()`` is allowed to consume only part of the buffer.
-
-    Args:
-        fp (IO): The open VAL file pointer.
-        pos (int): Byte offset to write at.
-        data (Union[bytes, bytearray]): The bytes to write.
-
-    Returns:
-        int: The number of bytes written, always ``len(data)``.
-
-    Raises:
-        OSError: If the stream accepts no bytes at all.
-    """
-    fp.seek(pos)
-    view = memoryview(data)
-    total = len(view)
-    while view:
-        n_bytes = fp.write(view)
-        if not n_bytes: # pragma: no cover
-            raise OSError('VAL file write returned 0 byte')
-
-        view = view[n_bytes:]
-
-    return total
-
-
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
@@ -1713,6 +1683,7 @@ class JDb(JDbReader):
                         file_end = file_table.get(file_id, curr_end)
                         if curr_end >= file_end:
                             file_table[file_id] = offset = max(offset, 0)
+                            self.f_flush_val(fp, file_id)   # a second handle is about to truncate it
                             val_fp = None
                             try:
                                 val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
@@ -1803,6 +1774,7 @@ class JDb(JDbReader):
                         file_end = file_table.get(file_id, next_offset)
                         if next_offset >= file_end: # pragma: no cover
                             file_table[file_id] = offset = max(offset, 0)
+                            self.f_flush_val(fp, file_id)   # a second handle is about to truncate it
                             val_fp = None
                             try:
                                 val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
@@ -2080,7 +2052,7 @@ class JDb(JDbReader):
                 - "lz" = lz4 compression(0) for VAL.
 
             fast_mode (bool, optional): If True, copy raw bytes directly when the format is unchanged (faster). Defaults to True.
-            **kwargs: Extra arguments passed through to :meth:`copy_to`.
+            **kwargs: Extra arguments passed through to :meth:`clone_to`.
 
         Returns:
             JDb: This database, after the upgrade.
@@ -2119,7 +2091,7 @@ class JDb(JDbReader):
                             while buf_size == VAL_FILE_BUF_SIZE:
                                 buf_size = val_fp_s.readinto(buf)
                                 if buf_size > 0:
-                                    val_fp_d.write(buf)
+                                    val_fp_d.write(memoryview(buf)[:buf_size])
                                     print('.', end='', flush=True)
 
                             offset = val_fp_d.tell()
@@ -2135,6 +2107,7 @@ class JDb(JDbReader):
 
                     finally:
                         if val_fp_d is not None:
+                            val_fp_d.flush()    # fsync() cannot see what is still buffered
                             self.files_obj.fsync(val_fp_d.fileno())
                             val_fp_d.close()
 
@@ -2190,7 +2163,7 @@ class JDb(JDbReader):
         Args:
             folder (Union[str, JDb]): Backup folder path, or a JDb pointing at the backup. Defaults to 'bak'.
             fast_mode (bool, optional): If True, copy raw bytes directly when the format is unchanged (faster). Defaults to True.
-            **kwargs: Extra arguments passed through to :meth:`copy_to`.
+            **kwargs: Extra arguments passed through to :meth:`clone_to`.
 
         Returns:
             JDb: This database, after being restored.
@@ -2260,7 +2233,7 @@ class JDb(JDbReader):
                 - "lz" = lz4 compression(0) for VAL.
 
             fast_mode (bool, optional): If True, copy raw bytes directly when the format is unchanged (faster). Defaults to True.
-            **kwargs: Extra arguments passed through to :meth:`copy_to`.
+            **kwargs: Extra arguments passed through to :meth:`clone_to`.
 
         Returns:
             JDb: The newly created backup database.
@@ -2605,6 +2578,7 @@ class JDb(JDbReader):
 
                     if offset < old_offset: # pragma: no cover
                         print(f'\ntruncating VAL file -> {file_id} [{old_offset:,} -> {offset:,}]')
+                        jdb.f_flush_val(dst_fp, file_id)    # a second handle is about to truncate it
                         val_fp = None
                         try:
                             val_fp = files_obj.VAL_open(file_id, 'ab+', buffering=0)
@@ -4656,42 +4630,6 @@ class JDb(JDbReader):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
             return group
 
-    def _fill_dead_tail(self, key_fp:IO, from_row:int, dead_head:int, n_chunk:int, n_dead:int, dead_block:List[tuple]) -> int:
-        """Internal: pre-write the DEAD rows a batch insert is about to push past its own tail.
-
-        :meth:`f_extend` appends ``n_chunk`` records in one pass, which shifts every
-        DEAD row down by ``n_chunk`` rows. Instead of moving them one at a time, the
-        block is parked at its final rows up front; the head of the old block is then
-        simply overwritten by the new records. Rows that the new records will claim are
-        filled with blanks, so the KEY file never has a hole below ``io.n_lines`` -- a
-        hole would break :meth:`JIo.resize_keys`.
-
-        Args:
-            key_fp (IO): The open KEY index file pointer.
-            from_row (int): First row to (re)write; rows below it are already correct.
-            dead_head (int): ``io.n_lines`` as it was when the pass started.
-            n_chunk (int): Number of records this pass appends.
-            n_dead (int): Number of DEAD rows in the index (``n_lines - n_records``).
-            dead_block (List[tuple]): The ``read_key()`` rows of the old DEAD block head.
-
-        Returns:
-            int: The KEY index row size the rows were written with.
-        """
-        io = self.io
-        index_size = io.index_size
-        stop_row = dead_head + n_chunk
-        keep_row = dead_head + max(0, n_chunk - n_dead) # rows the new records overwrite
-        blanks = min(stop_row, keep_row) - from_row
-        if blanks > 0:
-            row = io.KEY_dumps('', 0, 0, 0, 0, 0, 0, 0, 0, 0)
-            key_fp.seek(HEADER_SIZE + from_row * index_size)
-            key_fp.write((row + b' ' * (index_size - len(row) - 1) + b'\n') * blanks)
-
-        for row_id in range(max(from_row, keep_row), stop_row):
-            io.write_key(key_fp, row_id, *dead_block[(row_id - dead_head) % n_dead])
-
-        return index_size
-
     def _get_dead_row(self, key_fp:IO, key:str, req_size:int, \
             flags:Optional[JFlag]=None, \
             max_wsize:Optional[int]=None) -> Tuple[int,int,str,int,int,int]:
@@ -5255,7 +5193,9 @@ class JDb(JDbReader):
                         new_row_size = dead_row_size
                         val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
 
-                    val_fp.seek(new_offset)
+                    if val_fp.tell() != new_offset:
+                        val_fp.seek(new_offset)
+
                     _write_size = val_fp.write(data)
                     dead_h = safe_line
                     if dead_row > dead_h:
@@ -5370,7 +5310,9 @@ class JDb(JDbReader):
                     # use same row
                     n_lines = io.n_lines
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
-                    val_fp.seek(offset)
+                    if val_fp.tell() != offset:
+                        val_fp.seek(offset)
+
                     _write_size = val_fp.write(data)
                     io.write_key(key_fp, row, key, file_id, offset, row_size, new_val_size, cdays=new_cdays, mdays=new_mdays, ttl=new_ttl, flags=new_kflags)
                     io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
@@ -5393,7 +5335,9 @@ class JDb(JDbReader):
                     new_row_size = dead_row_size
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
 
-                val_fp.seek(new_offset)
+                if val_fp.tell() != new_offset:
+                    val_fp.seek(new_offset)
+
                 _write_size = val_fp.write(data)
                 dead_h = safe_line
                 if dead_row > dead_h:
@@ -5474,7 +5418,9 @@ class JDb(JDbReader):
             else: # use dead row
                 val_fp, __i, __o = self.f_get_val_fp(fp_dict, new_file_id)
 
-            val_fp.seek(new_offset)
+            if val_fp.tell() != new_offset:
+                val_fp.seek(new_offset)
+
             _write_size = val_fp.write(data)
 
             dead_h = safe_line
@@ -5515,13 +5461,19 @@ class JDb(JDbReader):
         or handed to :meth:`f_write` when ``replace`` says so -- that rewrite is an
         ordinary one and may reclaim a DEAD row.
 
-        Three things make the append faster than the same records written one at a
+        Four things make the append faster than the same records written one at a
         time: values are serialized and padded ahead of the writes, the padded bytes
-        are flushed to each VAL file in one write instead of one unbuffered write per
-        record, and the whole DEAD block is relocated once rather than row by row --
-        see :meth:`_fill_dead_tail`. The work is done in passes of at most
+        are flushed to each VAL file in one write instead of one write per record,
+        the KEY rows are encoded into one block and written with a single ``write()``
+        instead of a :meth:`JIo.write_key` call each, and the DEAD rows the
+        batch displaces are relocated as raw bytes by :meth:`JIo.slide_keys` rather
+        than decoded and re-encoded row by row. The work is done in passes of at most
         ``MAX_BATCH_ROWS`` rows / ``MAX_BATCH_SIZE`` padded bytes, so memory stays
         bounded however long ``records`` is.
+
+        Nothing in a pass touches the KEY file until the whole pass is serialized, so
+        a deferred ``SIGINT`` simply ends the pass early and the records that were
+        already encoded are still written -- there is no half-written row to undo.
 
         Args:
             fp_dict (Dict[int, IO]): The thread's open file-pointer table. The
@@ -5607,133 +5559,158 @@ class JDb(JDbReader):
             file_table = io.file_table
             update_cache = self._update_cache
             get_val_fp = self.f_get_val_fp
-            fill_tail = self._fill_dead_tail
+            slide_keys = io.slide_keys
             copy_key = io.copy_key
-            read_key = io.read_key
-            write_key = io.write_key
-            key_set = io.key_table.set
+            KEY_dumps = io.KEY_dumps
             n_records = io.n_records
             n_lines = io.n_lines
             n_dead = n_lines - n_records
-            # DEAD[h] - SAFE[h] never changes while a batch appends rows, so a single
-            # probe decides whether the whole DEAD block simply shifts down by one row
-            # per appended record -- which lets it be relocated in one pass.
             bulk = not is_revert or min(max(self.safe_line, n_records + min_safe), n_lines) == n_records
             total = len(items)
-            start = n_chunk = n_new = 0
-            dead_block = None
-            val_fp = None
-            buf = None
-            buf_pos = dead_head = idx_size = file_id = offset = free = 0
+            gap_open = val_fp = buf = None
+            buf_pos = file_id = offset = free = start = 0
             try:
                 while start < total:
-                    # serialize one pass worth of records, capped by both row count and
-                    # byte size, so a batch of any length holds only one pass in memory
+                    index_size = io.index_size
+                    today = io.days
+                    ver = io.sync_id
+                    kbuf = bytearray()
                     rows = []
                     stop = start
-                    n_size = 0
-                    while stop < total and len(rows) < MAX_BATCH_ROWS and n_size < MAX_BATCH_SIZE:
+                    n_chunk = n_size = wide_row = 0
+                    sigint = False
+                    while stop < total and n_chunk < MAX_BATCH_ROWS and n_size < MAX_BATCH_SIZE:
+                        if has_SIGINT():
+                            sigint = True
+                            break
+
                         key, val = items[stop]
                         type_id, payload, n_bytes = encode_row(key, val)
                         if type_id < 0:
                             val_size = len(payload)     # encoded size, n_bytes is the raw one
                             payload = io_pad(payload, max_size=0)
-                            n_size += len(payload)
-                            rows.append((key, type_id, payload, val_size, len(payload), val))
-                        else:
-                            rows.append((key, type_id, payload, n_bytes, 0, val))
-
-                        stop += 1
-
-                    n_chunk = len(rows)
-                    if bulk and n_dead > 0:
-                        # read the DEAD block once, park it at its final rows and let
-                        # the new records overwrite the head of the old block
-                        dead_head = n_lines
-                        dead_block = [read_key(key_fp, n_records + jj) for jj in range(min(n_chunk, n_dead))]
-                        idx_size = fill_tail(key_fp, dead_head, dead_head, n_chunk, n_dead, dead_block)
-                    else:
-                        dead_block = None
-
-                    n_new = 0
-                    for key, type_id, payload, val_size, row_size, val in rows:
-                        if has_SIGINT():
-                            break
-
-                        safe_h = n_records
-                        if is_revert:
-                            # min_safe keeps the newest history rows out of reach
-                            dead_h = min(max(self.safe_line, n_records + min_safe), n_lines)
-                            if key not in chg_keys:
-                                chg_keys.add(key)
-                                self.safe_line = dead_h + 1
-
-                        else:
-                            dead_h = n_records
-                            self.safe_line += 1
-
-                        # a new record never reuses a DEAD row: it always takes a fresh tail row
-                        dead_row = n_lines
-                        io.n_lines = n_lines = n_lines + 1
-                        if type_id < 0:
+                            row_size = len(payload)
                             if row_size > free:
                                 if buf:
-                                    _write_all(val_fp, buf_pos, buf)
+                                    if val_fp.tell() != buf_pos:
+                                        val_fp.seek(buf_pos)
+
+                                    val_fp.write(buf)
 
                                 val_fp, file_id, offset = get_val_fp(fp_dict, req_size=row_size)
                                 buf_pos = offset
                                 buf = bytearray()
                                 free = max_file_size - offset
 
-                            new_offset = offset
+                            data = KEY_dumps(key, file_id, offset, row_size, val_size, ver, today, today, new_ttl, new_kflags)
+                        else:
+                            data = KEY_dumps(key, type_id, payload, 0, n_bytes, ver, today, today, new_ttl, new_kflags)
+
+                        pad_size = index_size - len(data) - 1
+                        if pad_size < 0:
+                            # this key needs a wider index, and io.resize_keys() rewrites every row
+                            wide_row = len(data) + 1
+                            break
+
+                        if type_id < 0:                 # the VAL space is claimed only now
                             buf += payload
                             offset += row_size
                             free -= row_size
                             file_table[file_id] = max(file_table.get(file_id, 0), offset)
+                            if len(buf) >= MAX_BLOCK_SIZE:
+                                if val_fp.tell() != buf_pos:
+                                    val_fp.seek(buf_pos)
 
-                        if dead_block is None:
+                                val_fp.write(buf)
+                                buf_pos = offset
+                                buf = bytearray()
+
+                        kbuf += data + b' ' * pad_size + b'\n'
+                        rows.append((key, val))
+                        ver = (ver + 1) & 0X_7FF_FFFF_FFFF  # f_write bumps sync_id per record
+                        n_chunk += 1
+                        stop += 1
+
+                    if not n_chunk:
+                        if not wide_row:
+                            break                       # SIGINT arrived before the first record
+
+                        io.resize_keys(key_fp, wide_row)
+                        key_fp = fp_dict[-1]
+                        continue
+
+                    last_new = -1
+                    if bulk:
+                        # Open the gap
+                        n_move = n_chunk if n_chunk < n_dead else n_dead
+                        if n_move > 0:
+                            gap_open = True
+                            slide_keys(key_fp, n_records, offset=n_dead + n_chunk - n_move, size=n_move)
+
+                        if is_revert:
+                            for jj, (key, _val) in enumerate(rows):
+                                if key not in chg_keys:
+                                    last_new = jj
+                        else:
+                            self.safe_line += n_chunk
+                    else:
+                        # A history row is parked between SAFE and DEAD
+                        gap_open = True
+                        for jj, (key, _val) in enumerate(rows):
+                            safe_h = n_records + jj
+                            dead_row = n_lines + jj
+                            dead_h = min(max(self.safe_line, safe_h + min_safe), dead_row)
+                            if key not in chg_keys:
+                                self.safe_line = dead_h + 1
+
                             if dead_row > dead_h:
-                                # DEAD[h] -> DEAD[t+1]
-                                copy_key(key_fp, dead_h, dead_row)
+                                copy_key(key_fp, dead_h, dead_row)      # DEAD[h] -> DEAD[t+1]
 
                             if dead_h > safe_h:
-                                # SAFE[h] -> DEAD[h]
-                                copy_key(key_fp, safe_h, dead_h)
+                                copy_key(key_fp, safe_h, dead_h)        # SAFE[h] -> DEAD[h]
 
-                        # new key -> SAFE[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
-                        if type_id < 0:
-                            write_key(key_fp, safe_h, key, file_id, new_offset, row_size, val_size, ttl=new_ttl, flags=new_kflags)
-                        else:
-                            write_key(key_fp, safe_h, key, type_id, payload, 0, val_size, ttl=new_ttl, flags=new_kflags)
+                    _offset = HEADER_SIZE + n_records * index_size
+                    if key_fp.tell() != _offset:
+                        key_fp.seek(_offset)
+                    key_fp.write(kbuf)
+                    gap_open = False
+                    io._KEY_rows.clear()
+                    io._DEAD_rows.clear()
+                    if bulk and is_revert and last_new >= 0:
+                        self.safe_line = n_records + last_new + 1
 
-                        if dead_block is not None and io.index_size != idx_size:
-                            idx_size = fill_tail(key_fp, n_lines, dead_head, n_chunk, n_dead, dead_block)
+                    for jj, (key, val) in enumerate(rows):
+                        if is_revert:
+                            chg_keys.add(key)
 
                         if cache_on:
                             update_cache(key, val, copy=True, key_flags=new_kflags)
 
-                        io.n_records = n_records = n_records + 1
-                        io.sync_id = (io.sync_id + 1) & 0X_7FF_FFFF_FFFF
-                        key_set(key, safe_h, new_kflags|KF_EXCL)
-                        n_new += 1
-                        if buf is not None and len(buf) >= MAX_BLOCK_SIZE:
-                            _write_all(val_fp, buf_pos, buf)
-                            buf_pos = offset
-                            buf = bytearray()
+                        key_table.set(key, n_records + jj, new_kflags|KF_EXCL)
 
-                    n_done = start + n_new
-                    if n_new < n_chunk:
-                        break # SIGINT
-
+                    io.n_records = n_records = n_records + n_chunk
+                    io.n_lines = n_lines = n_lines + n_chunk
+                    io.sync_id = ver
+                    n_done = start + n_chunk
                     start = stop
+                    if wide_row:
+                        io.resize_keys(key_fp, wide_row)
+                        key_fp = fp_dict[-1]
+                    elif sigint:
+                        break
 
             finally:
-                if buf: _write_all(val_fp, buf_pos, buf)
-                if dead_block and n_new < n_chunk:
-                    for jj in range(max(0, n_new - n_dead), n_new):
-                        write_key(key_fp, dead_head + jj, *dead_block[jj % n_dead])
+                if buf:
+                    if val_fp.tell() != buf_pos:
+                        val_fp.seek(buf_pos)
 
-                    key_fp.truncate(HEADER_SIZE + n_lines * io.index_size)
+                    val_fp.write(buf)
+
+                if gap_open:
+                    # a gap that never got its rows
+                    key_fp.truncate(HEADER_SIZE + io.n_lines * io.index_size)
+                    io._KEY_rows.clear()
+                    io._DEAD_rows.clear()
 
             fail.extend(key for key, _val in items[n_done:]) # SIGINT stopped the pass
 
@@ -5850,7 +5827,9 @@ class JDb(JDbReader):
             data = io.pad(data, max_size=0)
             new_row_size = len(data)
             val_fp, new_file_id, new_offset = self.f_get_val_fp(fp_dict, req_size=new_row_size, vfile_args=vfile_args)
-            val_fp.seek(new_offset)
+            if val_fp.tell() != new_offset:
+                val_fp.seek(new_offset)
+
             _write_size = val_fp.write(data)
 
             # new_key -> DEAD[h] (=REC[t+1]) | may trigger io.resize_keys() -> io.load_keys()
@@ -6077,7 +6056,8 @@ class JDb(JDbReader):
     def f_unwrite(self, fp_dict:Dict[int,IO], key:str, \
             row:Optional[int]=None, \
             flags:Optional[JFlag]=None) -> Optional[Tuple[int,int,int,int,int]]:
-        """Internal: revert a record to its previous version (used by :meth:`unwrite`).
+        """Internal: revert a record to its previous version (used by :meth:`revert`,
+        :meth:`unmodify`, :meth:`unremove` and ``jdb ^= keys``).
 
         Args:
             fp_dict (Dict[int, IO]): Open file handles.
