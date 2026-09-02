@@ -2,7 +2,6 @@ bitarray
 brotli
 BTrees
 lz4
-msgspec
 msgpack
 orjson
 ormsgpack
@@ -12,3 +11,4 @@ zstandard
 tomli
 networkx
 pyarrow
+msgspec

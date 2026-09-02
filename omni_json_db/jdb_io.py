@@ -1772,7 +1772,11 @@ class JIo(JIoBase):
         """
         return self.z_key_limit_str(self._key_limit)
 
-    def change_APIs(self, version:Optional[int]=None, data_type:int=DEF_TYPE, zip_type:int=DEF_ZIP, reset:bool=False):
+    def change_APIs(self, \
+            version:Optional[int]=None, \
+            data_type:int=DEF_TYPE, \
+            zip_type:int=DEF_ZIP, \
+            reset:bool=False):
         """Switch the format version, serialization, and compression, re-binding the codec methods.
 
         The KEY/VAL codec objects are chosen from :data:`KEY_CODEC_lut` /
@@ -1904,7 +1908,12 @@ class JIo(JIoBase):
         except Exception as e:
             raise TypeError('invalid VAL_loads/VAL_dumps') from e
 
-    def sorted_key_table_items(self, start_row:int=0, stop_row:int=-1, copy:bool=False, reverse:bool=False, fp:IO=None) -> Generator[Tuple[str,int], None, None]:
+    def sorted_key_table_items(self, \
+            start_row:int=0, \
+            stop_row:int=-1, \
+            copy:bool=False, \
+            reverse:bool=False, \
+            fp:IO=None) -> Generator[Tuple[str,int], None, None]:
         """Iterate ``(key, row_id)`` pairs in row order.
 
         Args:
@@ -2104,7 +2113,11 @@ class JIo(JIoBase):
 
         return row_id, file_id, offset, row_size
 
-    def write_key(self, fp:IO, row_id:int, key:str, file_id:int, offset:int, row_size:int, val_size:int=0, ver:Optional[int]=None, cdays:int=-1, mdays:int=-1, ttl:int=0, flags:Optional[int]=None) -> int:
+    def write_key(self, fp:IO, row_id:int, key:str, \
+            file_id:int, offset:int, row_size:int, val_size:int=0, \
+            ver:Optional[int]=None, \
+            cdays:int=-1, mdays:int=-1, ttl:int=0, \
+            flags:Optional[int]=None) -> int:
         """Write one KEY index row at ``row_id``, growing the index row size if the key does not fit.
 
         The positional order matches :meth:`read_key`'s return value, so a row
@@ -2407,8 +2420,7 @@ class JIo(JIoBase):
         Returns:
             JIo: ``self``, updated from the header.
         """
-        if fp.tell() != 0:
-            fp.seek(0)
+        fp.seek(0)
         header = bytearray(HEADER_SIZE)
         if fp.readinto(header) == HEADER_SIZE:
             sync_id, n_records, n_lines, index_size, zip_type, data_type, swap_id, remv_id, api_ver, max_vfiles = self.HEAD_loads(header)
@@ -2691,7 +2703,7 @@ class JIo(JIoBase):
         self._remv_id   = remv_id
 
         io_groups = self.groups
-        for key in groups:
+        for key in groups: # pragma: no cover
             io_groups.setdefault(key, None)
 
         self.update_file_table() # keep the VAL layout identical to a full scan
@@ -3033,6 +3045,53 @@ class JIo(JIoBase):
 
         return n_rows
 
+    def rotate_keys(self, fp:IO, start:int, size:int, gap:int, block_size:Optional[int]=None) -> int:
+        """Free ``gap`` rows at ``start`` by rotating the head of a run past its own tail.
+
+        The run ``[start, start+size)`` is the region standing where the caller needs
+        room -- for :meth:`JDb.f_extend` that is the DEAD region and the room is for
+        the records it is about to append. Only the first ``min(gap, size)`` rows have
+        to move, and they move to the far side of the gap:
+
+        .. code-block:: text
+
+            before:  [ start ......... run ......... ][ (gap goes here) ]
+            after:   [ freed gap ][ rest of the run ][ rotated head     ]
+
+        So the cost is ``2N * index_size`` of raw I/O (``N`` rows read, ``N`` written)
+        with ``N = min(gap, size)`` -- **independent of how long the run is**. Rotating
+        30 rows out of a 1,000,000-row DEAD region costs the same as out of a 1,000-row
+        one, because the untouched middle never moves.
+
+        Source and destination can never overlap: they are ``size+gap-N >= N`` rows
+        apart. The rotated rows plus whatever the caller writes into the freed gap
+        cover ``[start, start+size+gap)`` exactly, so the KEY file is never left with a
+        hole -- but only once the caller has written that gap, which it must do before
+        raising :attr:`n_lines` (see :meth:`slide_keys` for the ordering rules).
+
+        Args:
+            fp (IO): The open KEY index file pointer.
+            start (int): First row of the run, and the row the gap opens at.
+            size (int): Rows in the run, clamped to the rows that exist below
+                :attr:`n_lines`.
+            gap (int): Rows to free at ``start``. ``0`` or less is a no-op.
+            block_size (Optional[int], optional): Rows per read/write pair, passed to
+                :meth:`slide_keys`. ``None`` uses :attr:`window_size`. Defaults to None.
+
+        Returns:
+            int: The number of rows rotated, ``min(gap, size)``.
+
+        Example:
+            >>> io.rotate_keys(key_fp, io.n_records, io.n_lines - io.n_records, n_new)
+            120
+        """
+        n_rows = min(start+size, self.n_lines) - start
+        n_move = gap if gap < n_rows else n_rows
+        if gap <= 0 or n_move <= 0:
+            return 0
+
+        return self.slide_keys(fp, start, offset=n_rows+gap-n_move, size=n_move, block_size=block_size)
+
     def resize_keys(self, fp:IO, index_size:int, min_ver:bool=False):
         """Rebuild the KEY file with a different index row size.
 
@@ -3114,7 +3173,9 @@ class JIo(JIoBase):
         self.window_size = max(1, int(KEY_ROW_WINDOW / index_size))
         self.row_bytes = index_size - self.min_value_size * (1 + self.reserved_rate)
 
-    def KEY_iter(self, fp:IO, start:int, stop:int, reverse:bool=False, n_rows:int=8192) -> Generator[Tuple[str,int,int,int,int,int,int,int,int,int], None, None]:
+    def KEY_iter(self, fp:IO, start:int, stop:int, \
+            reverse:bool=False, \
+            n_rows:int=8192) -> Generator[Tuple[str,int,int,int,int,int,int,int,int,int], None, None]:
         """Iterate decoded KEY rows in the half-open row range ``[start, stop)``,
         reading the index file in large blocks for speed.
 

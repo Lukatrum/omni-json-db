@@ -3426,7 +3426,7 @@ class JDbReader(JDbBase):
             for key,val in self.f_items(fp, reverse=reverse, with_hidden=with_hidden):
                 yield key, val
 
-    def item_iter(self, key:Optional[Any]=None, with_hidden:bool=True) -> Generator[Tuple[str,Any]]:
+    def item_iter(self, key:Optional[Any]=None, with_hidden:bool=True) -> Generator[Tuple[str,Any], None, None]:
         """Iterate over ``(key, value)`` pairs matching the given filter.
 
         Records carrying :attr:`JKeyFlag.HIDDEN` are returned like any other:
@@ -4554,7 +4554,10 @@ class JDbReader(JDbBase):
 
         return matched_keys
 
-    def get(self, key:str, default_val:Any=None, copy:bool=True, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
+    def get(self, key:str, \
+            default_val:Any=None, \
+            copy:bool=True, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> Any:
         """Safely fetch a value for a specific key, returning a default if not found.
 
         Args:
@@ -5143,8 +5146,7 @@ class JDbReader(JDbBase):
         return self.io.read_value(val_fp, offset, row_size, val_size)
 
     def f_decode_value(self, fp_dict:Dict[int,IO], key:str, \
-                file_id:int, offset:int, row_size:int, val_size:int, \
-                key_flags:int, \
+                file_id:int, offset:int, row_size:int, val_size:int, key_flags:int, \
                 update_cache:bool=True, \
                 copy:bool=False, \
                 follow_link:bool=True) -> Any:
@@ -5519,7 +5521,8 @@ class JDbReader(JDbBase):
         val = io.VAL_loads(val_bytes)
         return val, val_bytes
 
-    def f_read_dc(self, fp_dict:Dict[int,IO], key:str, data:Any, key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
+    def f_read_dc(self, fp_dict:Dict[int,IO], key:str, data:Any, \
+            key_flags:Optional[Union[str,int,JKeyFlag]]=None) -> bool:
         """Read one record and populate every member of an existing dataclass instance.
 
         The stored value is a plain ``dict`` (as written by :meth:`JDb.f_write_dc`);
@@ -5791,8 +5794,10 @@ class JDbReader(JDbBase):
         so a ``write()`` never stops short of the bytes it was given, and a run of
         appends to consecutive offsets costs one syscall per buffer rather than one
         per record. Bytes therefore reach the operating system only when the handle
-        is read from, seeked, flushed or closed -- see :meth:`f_flush_val` for the
-        cases where that matters.
+        is read from, seeked, flushed or closed. Anything that reaches the same VAL
+        file through a *different* handle -- a second :meth:`JFilesBase.VAL_open`, an
+        ``fsync``, another process -- must therefore go through this handle instead,
+        or push it out first.
 
         Args:
             fp_dict (Dict[int, IO]): The thread's open file-pointer table.
@@ -5846,27 +5851,25 @@ class JDbReader(JDbBase):
         else:
             offset = file_table.get(file_id, 0)
 
-        val_fp = fp_dict.get(file_id, MISSING)
-        if val_fp is MISSING:
+        val_fp = fp_dict.get(file_id, None)
+        if val_fp is None:
             file_lock = self.file_lock
             files_obj = self.files_obj
-
             num_fp = len(fp_dict) - max_fp
             if num_fp > 0:
-                for _id in list(fp_dict):
-                    if _id < 0:
-                        continue
+                min_value_size = io.min_value_size
+                fp_list = sorted([(fp is None, file_table.get(_id, 0), _id, fp) for _id,fp in fp_dict.items() if _id >= 0], reverse=True)
+                for is_closed, used, _id, fp in fp_list:
+                    if not is_closed and num_fp <= 0 and used+min_value_size <= max_file_size:
+                        break
 
-                    fp = fp_dict.get(_id, None)
                     if fp is not None:
                         io.max_vfiles = max(io.max_vfiles, _id+1)
-                        file_table[_id] = max(file_table[_id], fp.seek(0,2))
+                        file_table[_id] = max(file_table.get(_id, 0), fp.seek(0,2))
                         fp.close()
 
                     fp_dict.pop(_id, None)
                     num_fp -= 1
-                    if num_fp <= 0:
-                        break
 
             file_size = files_obj.VAL_size(file_id)
             if file_size >= offset:
@@ -5883,39 +5886,6 @@ class JDbReader(JDbBase):
             vfile_args[:] = [val_fp, file_id, offset+req_size]
 
         return val_fp, file_id, offset
-
-    def f_flush_val(self, fp_dict:Dict[int,IO], file_id:Optional[int]=None) -> None:
-        """Push this thread's buffered VAL bytes out to the operating system.
-
-        VAL files are opened buffered, so bytes written through ``fp_dict`` are not
-        on disk until the handle is flushed or closed. Call this before anything
-        looks at the same file through a *different* handle -- a second
-        :meth:`JFilesBase.VAL_open`, an ``fsync``, or another process -- otherwise
-        that reader sees a stale file, and a ``truncate()`` through the other handle
-        can be undone when the buffer is flushed afterwards.
-
-        Ordinary reads and writes need no flush: they go through the same handle,
-        which flushes itself before any read or seek that leaves the buffer.
-
-        Args:
-            fp_dict (Dict[int, IO]): The thread's open file-pointer table.
-            file_id (Optional[int], optional): Flush only this VAL file. ``None``
-                (the default) flushes every open VAL handle. The KEY handle
-                (``file_id`` ``-1``) is never touched. Defaults to None.
-
-        Example:
-            >>> jdb.f_flush_val(fp, file_id)   # before truncating through a new handle
-        """
-        if file_id is None:
-            for _id, fp in fp_dict.items():
-                if _id >= 0 and fp is not None and not fp.closed and fp.writable():
-                    fp.flush()
-
-            return
-
-        fp = fp_dict.get(file_id, None)
-        if file_id >= 0 and fp is not None and not fp.closed and fp.writable():
-            fp.flush()
 
     def f_key_iter(self, fp_dict:Dict[int,IO], slice_obj:Union[slice, dt_date, datetime, Condition], \
             with_hidden:bool=True, \

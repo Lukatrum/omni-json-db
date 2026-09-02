@@ -1682,18 +1682,12 @@ class JDb(JDbReader):
                         curr_end = offset + row_size
                         file_end = file_table.get(file_id, curr_end)
                         if curr_end >= file_end:
+                            # truncate through this thread's own handle
+                            val_fp, __i, __o = f_get_val_fp(fp, file_id, max_fp=128)
                             file_table[file_id] = offset = max(offset, 0)
-                            self.f_flush_val(fp, file_id)   # a second handle is about to truncate it
-                            val_fp = None
-                            try:
-                                val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
-                                val_fp.seek(offset)
-                                val_fp.truncate()
-
-                            finally:
-                                if val_fp is not None:
-                                    self.files_obj.fsync(val_fp.fileno())
-                                    val_fp.close()
+                            val_fp.seek(offset)
+                            val_fp.truncate()
+                            self.files_obj.fsync(val_fp.fileno())
 
                             if verbose:
                                 print(f'del0 K-row[{key}] -> file_id:{file_id} offset:{offset:,}:{curr_end:,} tb:{file_table[file_id]:,}')
@@ -1727,7 +1721,7 @@ class JDb(JDbReader):
                     else:
                         new_rows[prev_id,prev_start] = prev_end - prev_start
                         if fill_zero:
-                            val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
+                            val_fp, __i, __o  = f_get_val_fp(fp, prev_id, max_fp=128)
                             val_fp.seek(prev_start)
                             val_fp.write(b'\0' * (prev_end-prev_start))
 
@@ -1739,7 +1733,7 @@ class JDb(JDbReader):
                 prev_id, prev_start, prev_end, prev_row, prev_cnt = prev
                 new_rows[prev_id,prev_start] = prev_end - prev_start
                 if fill_zero:
-                    val_fp, __i, __o  = f_get_val_fp(fp, prev_id)
+                    val_fp, __i, __o  = f_get_val_fp(fp, prev_id, max_fp=128)
                     val_fp.seek(prev_start)
                     val_fp.write(b'\0' * (prev_end-prev_start))
 
@@ -1756,7 +1750,7 @@ class JDb(JDbReader):
                         if del_size > 0:
                             new_size = row_size + del_size
                             if val_size == 0: # pragma: no cover
-                                val_fp, __i, __o  = f_get_val_fp(fp, file_id)
+                                val_fp, __i, __o  = f_get_val_fp(fp, file_id, max_fp=128)
                                 val_fp.seek(offset + row_size)
                                 val_fp.write(io.pad_byte * del_size)
 
@@ -1769,22 +1763,16 @@ class JDb(JDbReader):
                 print(f'GOOD=#{io.n_records} + DEAD=#{len(new_rows):,}')
                 io.n_lines = io.n_records
                 if io.n_records > 0:
+                    files_obj = self.files_obj
                     for (file_id,offset),del_size in new_rows.items():
                         next_offset = offset+del_size
                         file_end = file_table.get(file_id, next_offset)
                         if next_offset >= file_end: # pragma: no cover
+                            val_fp, __i, __o = f_get_val_fp(fp, file_id, max_fp=128)
                             file_table[file_id] = offset = max(offset, 0)
-                            self.f_flush_val(fp, file_id)   # a second handle is about to truncate it
-                            val_fp = None
-                            try:
-                                val_fp = self.files_obj.VAL_open(file_id, 'rb+', buffering=0)
-                                val_fp.seek(offset)
-                                val_fp.truncate()
-
-                            finally:
-                                if val_fp is not None:
-                                    self.files_obj.fsync(val_fp.fileno())
-                                    val_fp.close()
+                            val_fp.seek(offset)
+                            val_fp.truncate()
+                            files_obj.fsync(val_fp.fileno())
 
                             if verbose: # pragma: no cover
                                 print(f'KILL K-row #file_id:{file_id} offset:{offset:,}:{file_end:,} tb:{file_table[file_id]:,}')
@@ -2508,14 +2496,14 @@ class JDb(JDbReader):
                                 data = offset_d
                                 val_size_d = len(data)
                                 data_d = dst_io_pad(data, max_size=0)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d), max_fp=128)
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
                                 dst_io.max_vfiles = max(dst_io.max_vfiles, file_id_d+1)
 
                     else:
-                        val_fp, __i, __o  = src_get_val_fp(src_fp, file_id)
+                        val_fp, __i, __o  = src_get_val_fp(src_fp, file_id, max_fp=128)
                         if fast_mode:
                             val_fp.seek(offset)
                             if val_size > 0:
@@ -2531,7 +2519,7 @@ class JDb(JDbReader):
                             else:
                                 val_size_d = len(data)
                                 data_d = dst_io_pad(data, max_size=0)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d), max_fp=128)
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
@@ -2552,7 +2540,7 @@ class JDb(JDbReader):
                                 data = offset_d
                                 val_size_d = len(data)
                                 data_d = dst_io_pad(data, max_size=0)
-                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d))
+                                val_fp_d, file_id_d, offset_d = dst_get_val_fp(dst_fp, req_size=len(data_d), max_fp=128)
                                 val_fp_d.seek(offset_d)
                                 row_size_d = val_fp_d.write(data_d)
                                 dst_io.file_table[file_id_d] = max(dst_io.file_table[file_id_d], offset_d + row_size_d)
@@ -2578,17 +2566,11 @@ class JDb(JDbReader):
 
                     if offset < old_offset: # pragma: no cover
                         print(f'\ntruncating VAL file -> {file_id} [{old_offset:,} -> {offset:,}]')
-                        jdb.f_flush_val(dst_fp, file_id)    # a second handle is about to truncate it
-                        val_fp = None
-                        try:
-                            val_fp = files_obj.VAL_open(file_id, 'ab+', buffering=0)
-                            val_fp.seek(offset)
-                            val_fp.truncate()
-
-                        finally:
-                            if val_fp is not None:
-                                files_obj.fsync(val_fp.fileno())
-                                val_fp.close()
+                        val_fp, __i, __o = jdb.f_get_val_fp(dst_fp, file_id, max_fp=128)
+                        dst_io.file_table[file_id] = offset  # f_get_val_fp reloads it from disk
+                        val_fp.seek(offset)
+                        val_fp.truncate()
+                        files_obj.fsync(val_fp.fileno())
 
                 if src_io.swap_id == dst_io.swap_id:
                     dst_io.swap_id += (rand_id + 1)
@@ -5466,7 +5448,7 @@ class JDb(JDbReader):
         are flushed to each VAL file in one write instead of one write per record,
         the KEY rows are encoded into one block and written with a single ``write()``
         instead of a :meth:`JIo.write_key` call each, and the DEAD rows the
-        batch displaces are relocated as raw bytes by :meth:`JIo.slide_keys` rather
+        batch displaces are rotated as raw bytes by :meth:`JIo.rotate_keys` rather
         than decoded and re-encoded row by row. The work is done in passes of at most
         ``MAX_BATCH_ROWS`` rows / ``MAX_BATCH_SIZE`` padded bytes, so memory stays
         bounded however long ``records`` is.
@@ -5559,7 +5541,7 @@ class JDb(JDbReader):
             file_table = io.file_table
             update_cache = self._update_cache
             get_val_fp = self.f_get_val_fp
-            slide_keys = io.slide_keys
+            rotate_keys = io.rotate_keys
             copy_key = io.copy_key
             KEY_dumps = io.KEY_dumps
             n_records = io.n_records
@@ -5641,11 +5623,10 @@ class JDb(JDbReader):
 
                     last_new = -1
                     if bulk:
-                        # Open the gap
-                        n_move = n_chunk if n_chunk < n_dead else n_dead
-                        if n_move > 0:
+                        # free n_chunk rows at n_records
+                        if n_dead > 0 and n_chunk > 0:
                             gap_open = True
-                            slide_keys(key_fp, n_records, offset=n_dead + n_chunk - n_move, size=n_move)
+                            rotate_keys(key_fp, n_records, n_dead, n_chunk)
 
                         if is_revert:
                             for jj, (key, _val) in enumerate(rows):
@@ -5664,10 +5645,12 @@ class JDb(JDbReader):
                                 self.safe_line = dead_h + 1
 
                             if dead_row > dead_h:
-                                copy_key(key_fp, dead_h, dead_row)      # DEAD[h] -> DEAD[t+1]
+                                # DEAD[h] -> DEAD[t+1]
+                                copy_key(key_fp, dead_h, dead_row)
 
                             if dead_h > safe_h:
-                                copy_key(key_fp, safe_h, dead_h)        # SAFE[h] -> DEAD[h]
+                                # SAFE[h] -> DEAD[h]
+                                copy_key(key_fp, safe_h, dead_h)
 
                     _offset = HEADER_SIZE + n_records * index_size
                     if key_fp.tell() != _offset:
