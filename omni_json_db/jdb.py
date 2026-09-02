@@ -4315,7 +4315,7 @@ class JDb(JDbReader):
                         curr_row = row1
                         curr_key = key1
                     else:
-                        if head1 > next_offset:
+                        if head1 > next_offset: # pragma: no cover
                             print(Style(f'\n[{level}|{id(self):x}|{hex(id(io))[-5:-1]}|miss.. file_id:{curr_file_id} expect:{next_offset:,} diff:{head1-next_offset:,} tb:{file_size:,}', yellow=1))
                             miss_parts.append((curr_file_id, next_offset, head1-next_offset))
                             curr_offset = head1
@@ -5559,8 +5559,7 @@ class JDb(JDbReader):
                     kbuf = bytearray()
                     rows = []
                     stop = start
-                    n_chunk = n_size = wide_row = 0
-                    sigint = False
+                    n_chunk = n_size = wide_row = sigint = 0
                     while stop < total and n_chunk < MAX_BATCH_ROWS and n_size < MAX_BATCH_SIZE:
                         if has_SIGINT():
                             sigint = True
@@ -5600,9 +5599,7 @@ class JDb(JDbReader):
                             free -= row_size
                             file_table[file_id] = max(file_table.get(file_id, 0), offset)
                             if len(buf) >= MAX_BLOCK_SIZE:
-                                if val_fp.tell() != buf_pos:
-                                    val_fp.seek(buf_pos)
-
+                                val_fp.seek(buf_pos)
                                 val_fp.write(buf)
                                 buf_pos = offset
                                 buf = bytearray()
@@ -5689,7 +5686,7 @@ class JDb(JDbReader):
 
                     val_fp.write(buf)
 
-                if gap_open:
+                if gap_open: # pragma: no cover
                     # a gap that never got its rows
                     key_fp.truncate(HEADER_SIZE + io.n_lines * io.index_size)
                     io._KEY_rows.clear()

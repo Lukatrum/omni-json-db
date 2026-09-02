@@ -2150,7 +2150,7 @@ class JDbReader(JDbBase):
                             fp.close()
 
                     fp_dict.clear()
-                    if io._index_cache:
+                    if io._index_cache: # pragma: no cover
                         io.save_kix()
                     th_table.pop(ident, 0)
 

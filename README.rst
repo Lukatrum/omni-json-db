@@ -114,7 +114,11 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network. [refer to `In-memory Mode`_ + `Network Mode`_ ]
 
-* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). [refer to `Unremove & Unmodify`_ + `Backup & Restore`_]
+* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). ``history()`` lists every version still reachable, and ``min_safe`` decides how many of them survive. [refer to `Unremove & Unmodify`_ + `Record History`_ + `Backup & Restore`_]
+
+* **Batch Writes**: Bulk inserts take a dedicated append path — one ``write()`` per VAL file and one encoded block for the KEY rows instead of a syscall per record — so ``jdb += rows``, ``insert()`` and every importer land 1.4x–4.5x faster with no API change. [refer to `Bulk Insert`_]
+
+* **Fast Open at Scale**: A disposable key-table snapshot (``index_cache``) cuts a cold open by ~4x, and ``warm_up`` moves what is left onto a background thread. [refer to `Faster Open`_]
 
 * **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem. [refer to `CSV Import / Export`_ + `Parquet Import`_ + `SQLite Import`_ + `INI / TOML Import`_]
 
@@ -141,7 +145,7 @@ Installation
 
    pip install omni-json-db
 
-For the fastest, full-featured build — C-accelerated serializers(``orjson`` / ``msgpack``), extra compression codecs(``zstandard`` / ``lz4`` / ``brotli``), ``YAML`` value formats, and the ``BTrees`` key-index backend — install the ``full`` extra:
+For the fastest, full-featured build — C-accelerated serializers (``orjson`` / ``ormsgpack`` / ``msgspec`` / ``msgpack`` / ``bitarray``), extra compression codecs (``zstandard`` / ``lz4`` / ``brotli``), ``YAML`` value formats, and the ``BTrees`` key-index backend — install the ``full`` extra:
 
 .. code-block:: bash
 
@@ -157,6 +161,16 @@ Or pick only what you need:
    pip install "omni-json-db[btree]"        # B-tree key-index backend
 
 .. note::
+
+   ``[speed]`` adds no features and changes no file format — it only swaps the
+   default code paths for C implementations: ``orjson`` for JSON values,
+   ``ormsgpack`` for MsgPack values, ``msgspec.msgpack`` for the KEY index rows
+   (byte-identical output, the single hottest path in the engine), ``msgpack``
+   for the value extension types and the streaming unpacker, and ``bitarray``
+   for the dead-row bitmap. Anything missing falls back to a pure-Python
+   implementation, so a clean install behaves identically — just slower. On PyPy
+   the pure-Python paths are already fast, so ``orjson`` / ``msgspec`` are
+   skipped there.
 
    The bundles (``[full]`` / ``[all]``) use self-referencing extras and need ``pip >= 21.2``. On an older pip (e.g. a stock Python 3.7), either upgrade pip (``python -m pip install -U pip``) or install the granular extras together, e.g. ``pip install "omni-json-db[speed,compression,yaml,btree]"``.
 
@@ -178,6 +192,64 @@ Basic
    print(user["name"], user["role"]) # Output: Ryan Developer
    
 All standard ``dict`` methods work: ``keys()``, ``values()``, ``items()``, ``get()``,  ``pop()``, ``setdefault()``, ``update()``.
+
+Bulk Insert
+-----------
+
+Writing many records at once goes through a dedicated append path, so there is
+nothing to switch on — every batch entry point already uses it:
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb  = JDb('users.jdb')
+   rows = {f'user{i}': {'age': i % 80} for i in range(100_000)}
+
+   jdb += rows                 # __iadd__ -> add()
+   jdb.insert(rows)            # never overwrites a key that already exists
+   jdb.update(rows)            # only touches keys already present
+   jdb.from_csv('users.csv')   # every importer streams in IMPORT_BATCH_ROWS-sized batches
+
+``add()`` splits the batch by key. A key that already exists is rewritten one at
+a time by ``f_write()``, so update semantics, dead-row reuse and history are
+unchanged. Every *new* key is collected and handed to ``f_extend()``, which
+appends the whole group in one pass: values are serialized and padded ahead of
+the writes, the padded bytes reach each VAL file in a single ``write()`` instead
+of one per record, and the KEY rows are encoded into one block and written once.
+
+A batch append never takes a row back from the DEAD area. ``n_lines`` grows by
+exactly one row per new record, and the space parked by ``f_delete()`` stays
+available for later rewrites instead of being consumed by the insert — which is
+why the gain widens on a database that has already seen deletes.
+
++----------------------------------------+----------+------------------+
+| 50,000 records, best of 4              | v3.00.00 | v3.00.10+        |
++========================================+==========+==================+
+| fresh insert                           | 0.616 s  | 0.366 s (1.7x)   |
++----------------------------------------+----------+------------------+
+| insert into a DB with 10,000 DEAD rows | 1.892 s  | 0.419 s (4.5x)   |
++----------------------------------------+----------+------------------+
+| in-memory insert                       | 0.540 s  | 0.324 s (1.7x)   |
++----------------------------------------+----------+------------------+
+| inline (KEY-row) values                | 0.305 s  | 0.215 s (1.4x)   |
++----------------------------------------+----------+------------------+
+| 500 x 20-record batches                | 0.167 s  | 0.110 s (1.5x)   |
++----------------------------------------+----------+------------------+
+
+Under an explicit file handle, ``f_extend()`` is the batch counterpart of
+``f_write()`` — it takes the write lock itself, so the caller does not have to:
+
+.. code-block:: python
+
+   with jdb.open(read_only=False) as fp:
+      new = {'a': 1, 'b': [2, 3]}
+      jdb.f_extend(fp, new, ttl=7)              # Output: True
+      # on return, `new` holds exactly the records that were written
+      jdb.f_extend(fp, {'a': 99}, replace=True) # rewrite existing keys too: a bulk upsert
+
+``ttl=`` and ``key_flags=`` are shared by every record in the call, and the work
+is done in bounded passes, so memory stays flat however long ``records`` is.
 
 In-Memory Mode
 ---------------
@@ -232,9 +304,9 @@ Query Engine
    matches = jdb.find(RE='John|Bob')
    print(matches) # {'0': {'name': 'John', 'age': 22}, '1': {'name': 'John', 'age': 37}, '2': {'name': 'Bob', 'age': 42}}
 
-Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``,  ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``NIN``, ``ANYIN``.
+Condition operators: ``EQ``, ``NE``, ``GT``, ``LT``, ``GTE``, ``LTE``, ``HAS``, ``RE``, ``RE2``, ``FUNC``, ``AND``, ``OR``, ``NOR``, ``NOT``, ``NAND``, ``SIZE``, ``ANY``, ``ALL``, ``NONE``, ``IHAS``, ``NHAS``, ``EXISTS``, ``TYPE``, ``MOD``, ``BETWEEN``, ``NEAR``, ``MATCH``, ``SW``, ``EW``, ``IN``, ``NIN``, ``ANYIN``.
 
-Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``, ``NEG``, ``STR``, ``AVG``, ``STD``, ``MAX``, ``MID``, ``MIN``, ``SUM``, ``FIRST``, ``LAST``, ``LEN``, ``SORT``, ``UNIQUE``, ``LOWER``, ``UPPER``, ``STRIP``.
+Transform operators: ``ABS``, ``CEIL``, ``FLOOR``, ``ROUND``, ``FLOAT``, ``INT``, ``NEG``, ``STR``, ``AVG``, ``STD``, ``MAX``, ``MID``, ``MIN``, ``SUM``, ``FIRST``, ``FLAT``, ``LAST``, ``LEN``, ``SORT``, ``UNIQUE``, ``LOWER``, ``UPPER``, ``STRIP``.
 
 See `More Query Examples`_ or `Pythonic Query Examples`_
 
@@ -346,6 +418,62 @@ Unremove & Unmodify
    # unremove key (equivalent to jdb.unremove())
    jdb.revert("apple")
    assert jdb["apple"] == "red"
+
+Record History
+^^^^^^^^^^^^^^
+
+A superseded version stays parked in the index's dead region for as long as
+``JFlag.REVERT`` is active. ``history()`` lists what is still reachable, newest
+first, and hands back the ``ver`` numbers that ``revert()``, ``unmodify()`` and
+``unremove()`` accept as ``version=``:
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb('fruit.jdb')      # JFlag.REVERT is what parks the old row
+   jdb['apple'] = 'red'
+   jdb['apple'] = 'green'
+   jdb['apple'] = 'blue'
+
+   versions = jdb.history('apple', with_value=True, show=True)
+   #   history[apple]
+   #   ╔═════╤═════╤══════╤════════════╤════════════╤═══════╤═════╤══════╤═══════╗
+   #   ║ ver │ row │ live │ created    │ modified   │ flags │ TTL │ size │ value ║
+   #   ╟─────┼─────┼──────┼────────────┼────────────┼───────┼─────┼──────┼───────╢
+   #   ║ 2   │ 0   │ YES  │ 2026-08-20 │ 2026-08-20 │       │     │ 5    │ blue  ║
+   #   ║ 2   │ 1   │ NO   │ 2026-08-20 │ 2026-08-20 │       │     │ 6    │ green ║
+   #   ╚═════╧═════╧══════╧════════════╧════════════╧═══════╧═════╧══════╧═══════╝
+
+   print([(v['live'], v['value']) for v in versions])
+   # Output: [(True, 'blue'), (False, 'green')]
+
+Each entry is a dict holding ``row``, ``key``, ``file_id``, ``offset``,
+``row_size``, ``val_size``, ``ver``, ``cdays``, ``mdays``, ``ttl``,
+``key_flags`` and ``live`` — plus ``value`` when ``with_value=True``. ``live``
+is True for the one record ``jdb[key]`` reads today and False for every parked
+version, so a deleted key has no live entry at all.
+
+Only two versions come back above: ``'red'``'s row had already been reclaimed to
+make room for a later write. That is the rule, not a fault — ``history()`` is a
+*best-effort* audit trail, never a write-ahead log. Treat a missing version as
+expected.
+
+.. note::
+
+   With the default ``min_safe=0``, a write to **any** key can reclaim the row
+   holding another key's previous version, so on a busy database ``history()``
+   often returns the live record alone. Construct the database with
+   ``min_safe=N`` to hold N index rows out of reach of reuse:
+
+   .. code-block:: python
+
+      jdb = JDb('fruit.jdb', min_safe=1000)   # keep ~1000 rows of history reachable
+
+   Rows beyond the reserve are recycled exactly as before, so the cost is a
+   constant rather than one that grows with the number of writes. It only
+   applies while ``JFlag.REVERT`` is active — without it there is no history to
+   protect.
 
 Backup & Restore
 ----------------
@@ -1853,6 +1981,68 @@ not a link.
    local clock, so it is a housekeeping tool, not a security deadline. A flag on
    a group row applies to that row alone, not to the records inside the group.
 
+Faster Open
+-----------
+
+Opening a database with ``key_limit='no'`` builds the key table by scanning the
+whole KEY file. Two independent options take that cost off the critical path;
+both are off by default.
+
+**Key-table snapshot —** ``index_cache=True``
+   Keeps a disposable copy of the table beside the database — ``<KEY>.KIX`` on
+   disk, a shared buffer for ``JMemFiles``, a server-side sidecar over
+   ``JNetFiles`` — so the next handle fast-forwards to the snapshot and scans
+   only the rows written since.
+
+**Warm-up —** ``warm_up=True``
+   Builds the table on a background thread the moment the instance is created,
+   so application start-up overlaps with the load instead of the first
+   ``open()`` paying for all of it.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb('data/app.KEY', key_limit='no', index_cache=True, warm_up=True)
+   with jdb.open() as fp:       # restored from the snapshot, and already warmed
+      ...
+
+   # or drive both by hand
+   jdb = JDb('data/app.KEY', key_limit='no', index_cache=True)
+   th  = jdb.warm_up()          # the Thread, or None when there is nothing to warm
+   jdb.insert(rows)
+   jdb.save_index()             # take control of when the snapshot lands, e.g. after an import
+
+Measured on 300,000 records (16-byte keys, ``key_limit='no'``):
+
++--------------------------------+-----------+---------------------+
+|                                | full scan | ``.KIX``            |
++================================+===========+=====================+
+| cold open (median)             | 326 ms    | 80 ms (**4.1x**)    |
++--------------------------------+-----------+---------------------+
+| ``save_index()``               | —         | 19.5 ms             |
++--------------------------------+-----------+---------------------+
+| sidecar size                   | —         | 7.5 MB (25 B/key)   |
++--------------------------------+-----------+---------------------+
+
+The snapshot is written on its own when a close leaves the sidecar far enough
+behind, and is skipped entirely below ``JIo.min_kix_rows`` (16,384 records),
+where a full scan is cheaper than maintaining one. A snapshot that does not
+match the KEY file — different layout or ``data_type``, a database newer than
+the sidecar, a truncated, corrupted or foreign file — is rejected and the full
+scan runs, so it can never serve a stale table. ``clear()``, an API change and
+``resize_index_size()`` delete it outright.
+
+.. note::
+
+   Both options apply to the ``dict``-backed tables only (``key_limit='no'`` and
+   ``'bt'``). ``LiteKeyTable`` (``'l0'``–``'l5'``) and ``PartialKeyTable``
+   (``+ve``) load lazily and have nothing to snapshot or warm, so they silently
+   do nothing. Warm-up *hides* latency rather than removing it: the load holds
+   the GIL, so the caller only wins while it is waiting on I/O of its own, and a
+   concurrent ``open()`` simply blocks until the table is complete — it can
+   never see a half-filled one.
+
 Advanced
 --------
 
@@ -1871,6 +2061,10 @@ Advanced
          jdb.f_write(fp, fruit, color)
 
    assert jdb == fruits
+
+   # ... or append the whole group in one pass (see the Bulk Insert section)
+   with jdb.open(read_only=False) as fp:
+      jdb.f_extend(fp, dict(fruits))
 
    # modify records
    with jdb.open() as fp:
@@ -1956,6 +2150,10 @@ Configure ``data_type`` during initialization:
 * ``J+Y`` or ``S+Y``: JSON/MsgPack Key + YAML Value
 * ``J+U`` or ``S+U``: JSON/MsgPack Key + User-Defined Value (pluggable codec, e.g. encryption)
 * ``U+U``: User-Defined Key + User-Defined Value (pluggable codec for both)
+
+Two legacy layouts are still accepted for reading databases written by early
+releases: ``L+J`` (split Key + JSON Value) and ``M+M`` (Marshal Key + Marshal
+Value). Neither is a good choice for a new database.
 
 *Data size = 70,840,580 bytes (MB = 1,000,000 bytes, no zip)*
 
@@ -2109,6 +2307,11 @@ Configure ``key_limit`` during initialization:
 * ``no``: ``dict`` for key_table (default)
 * ``bt``: ``BTree`` for key_table (save 44.3% vs ``dict``)
 * ``l0`` - ``l5``: ``LiteKeyTable`` modes (save 60-75% vs ``dict``)
+* ``+ve``: ``PartialKeyTable`` — an integer caps how many keys stay resident, the rest are read from the KEY file on demand
+
+``no`` and ``bt`` load the whole table on open, which is what ``index_cache``
+and ``warm_up`` are for (see `Faster Open`_). ``l0``–``l5`` and ``+ve`` load
+lazily and need neither.
 
 **Table size = 3,241,854 keys**
 
