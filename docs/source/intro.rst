@@ -1,67 +1,223 @@
 Introduction
 ============
 
-**omni-json-db** is a high-performance, embedded database engine designed for Python developers. It bridges the gap between the extreme speed of a Key-Value store and the powerful querying capabilities of a document database.
+**omni-json-db** is a high-performance, embedded database engine designed for
+Python developers. It combines the raw speed of a Key-Value store with the
+flexible querying of a document database and the associative power of a graph
+database.
 
-
-Built for ultra-high throughput and thread-safety, **omni-json-db** leverages modern serialization (*JSON*, *MsgPack*, *marshal*, *pickle*, *YAML*) and compression to provide a storage layer that is often significantly faster than *SQLite* for *JSON*-heavy workloads. Whether you are building a local cache, a log aggregator, or a distributed microservice, **omni-json-db** provides the tools to handle data at scale with "Zero-Config" simplicity.
+Built for high throughput and thread safety, **omni-json-db** utilizes modern
+serialization (*JSON*, *MsgPack*, *marshal*, *Pickle*, *YAML*) and efficient
+compression to provide a compact storage layer. Whether you are building a local
+cache, a log aggregator, or a complex knowledge graph, **omni-json-db** offers
+"Zero-Config" simplicity at scale.
 
 * **Schema-LESS**: Store complex, nested data without pre-defining tables.
 
-* **Server-LESS**: Direct disk access without the overhead of a database server.
+* **Server-LESS**: Access data directly on disk without a database server overhead.
 
-* **SQL-LESS**: Use native Python syntax, Regex, and Lambdas for data manipulation.
+* **SQL-LESS**: Manipulate data using standard Python syntax, Regex, and Lambdas.
 
 * **Dependency-LESS**: Runs on a clean Python install with **zero required third-party packages** — optional C-accelerators and extra formats are one ``pip install "omni-json-db[full]"`` away.
 
-🤔 Why omni-json-db?
-********************
+Why omni-json-db?
+-----------------
 
-Unlike traditional SQL or NoSQL databases, **omni-json-db** lets you use native
-Python syntax — slicing, lambdas, regex, and ``set`` operations — to query and
-manipulate data. It adds built-in "Time-Travel" (undo/redo), a property-graph
-engine, and pluggable serialization/compression.
+Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query and manipulate data using native Python syntax—including slicing, lambdas, regex, and set operations. It also features built-in "Time-Travel" (undo/redo), a property-graph engine, and pluggable serialization.
 
 ..
 
    **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
 
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-|                                  | **omni-json-db**  | TinyDB    | DiskCache | UnQLite | LMDB       | RocksDict | SQLite    | DuckDB    |
-+==================================+===================+===========+===========+=========+============+===========+===========+===========+
-| Transactions / ACID              | ⚠️ (atomic ops)   | ❌        | ❌        | ❌      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Thread-safe concurrency          | ✅ (MR/SW)        | ❌        | ✅        | ✅      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Multi-process access             | ✅ (file lock)    | ❌        | ✅        | ✅      | ✅         | ⚠️ (RO)   | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| In-memory mode                   | ✅                | ✅        | ❌        | ✅      | ❌         | ❌        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| CSV / SQLite migration built-in  | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ⚠️ (CLI)  | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Compression built-in             | ✅                | ❌        | ✅        | ❌      | ❌         | ✅        | ❌        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| No schema (Schema-less)          | ✅                | ✅        | ✅        | ✅      | ✅         | ✅        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Groups / Namespaces              | ✅                | ✅        | ⚠️        | ✅      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Nested groups + fan-out queries  | ✅                | ⚠️ (flat) | ❌        | ⚠️      | ⚠️ (flat)  | ⚠️ (CF)   | ⚠️ (SQL)  | ⚠️ (SQL)  |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Pure Python (PyPy-friendly)      | ✅                | ✅        | ✅        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Pythonic queries (Lambda/Regex)  | ✅                | ✅        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Deep nested search               | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Graph database engine            | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Undo / Redo (Time-Travel)        | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Time-series date slicing         | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Network mode (incl. groups)      | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+.. list-table::
+   :widths: 30 16 10 11 10 9 11 9 9
+   :header-rows: 1
 
+   * - 
+     - **omni-json-db**
+     - TinyDB
+     - DiskCache
+     - UnQLite
+     - LMDB
+     - RocksDict
+     - SQLite
+     - DuckDB
+   * - Transactions / ACID [t]_
+     - ⚠️ (transaction)
+     - ❌
+     - ❌
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Thread-safe concurrency
+     - ✅ (MR/SW)
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Multi-process access
+     - ✅ (file lock)
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ⚠️ (read only)
+     - ✅
+     - ✅
+   * - In-memory mode
+     - ✅
+     - ✅
+     - ❌
+     - ✅
+     - ❌
+     - ❌
+     - ✅
+     - ✅
+   * - CSV / SQLite / Parquet built-in
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ⚠️ (CLI)
+     - ✅
+   * - Compression built-in
+     - ✅
+     - ❌
+     - ✅
+     - ❌
+     - ❌
+     - ✅
+     - ❌
+     - ✅
+   * - No schema (Schema-less)
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+   * - Dataclass mapping [z]_
+     - ✅
+     - ❌
+     - ⚠️
+     - ❌
+     - ❌
+     - ⚠️
+     - ❌
+     - ❌
+   * - Groups / Namespaces
+     - ✅
+     - ✅
+     - ⚠️
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Nested groups + fan-out queries
+     - ✅
+     - ⚠️ (flat)
+     - ❌
+     - ⚠️
+     - ⚠️ (flat)
+     - ⚠️ (CF)
+     - ⚠️ (SQL)
+     - ⚠️ (SQL)
+   * - Pure Python (PyPy-friendly)
+     - ✅
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Pythonic queries (Lambda/Regex)
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Deep nested search
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Graph database engine
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Undo / Redo (Time-Travel)
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Time-series date slicing 
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Network mode (incl. groups)
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Relative speed 500K records [x]_
+     - 1.00x (baseline)
+     - 41.47x
+     - 60.95x
+     - 4.28x
+     - 0.94x
+     - 0.45x
+     - 0.13x
+     - 0.21x
+   * - Relative speed 10M records [x]_
+     - 1.00x (baseline)
+     - N/A [y]_
+     - N/A [y]_
+     - 24.07x
+     - 1.31x
+     - 0.55x
+     - 0.16x
+     - 0.05x
+
+.. [t] ``with jdb.transaction():`` undoes everything the block wrote if it raises — see :doc:`usage/transactions`. Exception-safe, not crash-safe: a ``kill -9`` is not rolled back.
+.. [x] Lower is faster. (see the `benchmark <https://github.com/lukatrum/omni-json-db/blob/main/benchmark/report.txt>`_ for the full breakdown and methodology)
+.. [y] Impractically slow
+.. [z] Write a ``@dataclass`` and read it back as an object. ⚠️ = the object can be *stored*, but only as an opaque ``pickle`` blob: its fields are invisible to queries, and the file is unreadable outside Python.
 
 Features
 --------
@@ -79,7 +235,13 @@ Features
 
 * **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network.
 
-* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``).
+* **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). ``history()`` lists every version still reachable, and ``min_safe`` decides how many of them survive.
+
+* **All-or-Nothing Writes**: ``with jdb.transaction():`` opens a write session that puts back everything it changed if the block raises — modifications, deletions, bulk inserts and renames alike. Nesting acts as a savepoint.
+
+* **Batch Writes**: Bulk inserts take a dedicated append path — one ``write()`` per VAL file and one encoded block for the KEY rows instead of a syscall per record — so ``jdb += rows``, ``insert()`` and every importer land 1.4x–4.5x faster with no API change.
+
+* **Fast Open at Scale**: A disposable key-table snapshot (``index_cache``) cuts a cold open by ~4x, and ``warm_up`` moves what is left onto a background thread.
 
 * **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem.
 
@@ -89,7 +251,7 @@ Features
 
 * **Grouping & Namespaces**: Easily isolate and manage different data modules using groups.
 
-* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups.
+* **Per-Record Flags**: Give any record file-system-like attributes with a ``chmod``-style syntax — read-only, append-only, hidden, uncached, no-history — plus symbolic links to other records or groups, and per-record TTLs from one minute to 511 days.
 
 * **Concurrency Control**: Optimized for Many-Read / Single-Write environments using a robust file-locking and Lock mechanism.
 

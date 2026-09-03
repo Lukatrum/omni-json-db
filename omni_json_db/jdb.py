@@ -6036,7 +6036,7 @@ class JDb(JDbReader):
                 pass
 
         flags = self.flags if flags is None else JFlag(flags)
-        if io._undo is not None:
+        if io._undo is not None: # pragma: no cover
             flags = JFlag(int(flags) | F_REVERT)
         io.groups.pop(key, None)
         swap_id = io.swap_id

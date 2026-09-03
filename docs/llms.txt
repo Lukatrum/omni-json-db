@@ -1,12 +1,28 @@
 # **omni-json-db** LLM Documentation Context
 - **Repository**: https://github.com/lukatrum/omni-json-db/
 
-- **Architecture**: A high-performance Python-embedded NoSQL/KV store.
+- **Docs**: https://omni-json-db.readthedocs.io
 
-- **Import**: from omni_json_db import JDb
+- **Architecture**: A high-performance, embedded Python NoSQL/KV store (Schema-LESS, Server-LESS, SQL-LESS, Dependency-LESS). Pure Python with optional C accelerators.
 
-- **Core Feature**: Time-Travel indexing via dictionary slicing jdb[yesterday:now].
+- **Import**: from omni_json_db import JDb, Query, GraphDb
 
-- **Query Mechanism**: Utilizes NoSQL-like dictionaries e.g. jdb.find({'$gt': 10}) or regex jdb[re.compile(r'^key')].
+- **Storage Config**: data_type (e.g. 'J+S', 'S+S(lz)', 'J+U' for a pluggable/encrypting codec), zip_type (e.g. 'no', 'lz', 'zs'), key_limit (e.g. 'no', 'bt', 'l0'-'l5', or an int for a partial key table).
 
-- **Storage Config**: Controlled via data_type (e.g. 'J+S') and zip_type (e.g. 'lz', 'zs').
+- **Core Write API**: jdb[k] = v, jdb += rows (update), jdb |= rows (insert), jdb &= rows (replace), jdb -= keys (remove), jdb ^= keys (revert). Bulk writes go through the f_extend() append path automatically.
+
+- **Query Mechanism**: jdb.find()/show() with NoSQL dicts (jdb.find(vals={'age': {'$gt': 10}})), keyword operators (ANY, RE, RE2, FUNC, EQ, IN, ...), regex (jdb[re.compile(r'^key')]), or the Pythonic Query object (jdb.find(Query().age > 28)).
+
+- **Time-Travel**: revert()/unmodify()/unremove(), history(key) lists reachable versions, min_safe=N reserves index rows from reuse.
+
+- **Transactions**: with jdb.transaction(): rolls back every KEY row it touched if the block raises. Exception-safe, not crash-safe. Nesting = savepoint.
+
+- **Time-Series**: slicing by datetime queries the created date, by date the modified date, e.g. jdb[yesterday:now].
+
+- **Record Flags**: chmod-style JKeyFlag strings ('r' read-only, 'a' append-only, 'p' no-delete, 'h' hidden, 'c' no-cache, 'v' no-revert), per-record TTL via ttl=, and symbolic links via set_link().
+
+- **Groups**: jdb.add_group('name'); records are addressed as 'group:::key' and queries fan out across groups.
+
+- **Migration**: from_csv/to_csv, from_sqlite, from_parquet, from_ini, from_toml.
+
+- **Fast Open**: index_cache=True keeps a <KEY>.KIX snapshot; warm_up=True builds the key table on a background thread.

@@ -28,7 +28,7 @@ Welcome to omni-json-db!
    >>> jdb = JDb('db.jdb')
    >>> jdb += [{'name': 'John', 'age': 22}]
    >>> jdb.find(ANY='John')
-   {'1': {'name': 'John', 'age': 22}}
+   {'0': {'name': 'John', 'age': 22}}
 
 
 User's Guide
@@ -39,15 +39,17 @@ User's Guide
 
    intro
    getting-started
-   usage
+   usage/index
 
 
-API Reference
+Reference
 ========================
 
 .. toctree::
    :maxdepth: 2
 
+   specifications
+   benchmark
    api/modules
 
 Additional Notes

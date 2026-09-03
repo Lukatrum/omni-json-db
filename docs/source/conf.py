@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 project = 'omni-json-db'
 copyright = '2026, omni-json-db'
 author = 'Lukatrum'
-release = '2.11.30'
+release = '3.00.11'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
