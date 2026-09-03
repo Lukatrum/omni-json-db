@@ -7185,13 +7185,15 @@ class TestJDb(unittest.TestCase):
 
     def test_batch(self):
         n_rows = IMPORT_BATCH_ROWS + 1              # every importer has to flush mid-stream
-        for data_type, zip_type in (('J+J', '--'), ('S+S', 'gz')):
+        for data_type in ('J+J(no)', 'S+S(gz)'):
             st_time = time.perf_counter()
-            filename = f'batch_{data_type}_{zip_type}'
-            jdb = JDb(data_type=data_type, zip_type=zip_type, cache_limit=16)
+            filename = f'batch_{data_type}'
+            jdb = JDb(data_type=data_type, cache_limit=16)
             print(Style(f'Testing {filename} {jdb}', yellow=1, bright=1))
             # -------------------------------------------- a group value cannot be pre-encoded
-            src = JDb(data_type=data_type, zip_type=zip_type)
+            src = JDb(data_type=data_type)
+            self.assertTrue(data_type.find(src.zip_type) > 0)
+            self.assertTrue(data_type.find(src.data_type) >= 0)
             grp = src.add_group('grp')
             grp['inner'] = 'g'
             with jdb.open(read_only=False) as fp:
@@ -7220,7 +7222,6 @@ class TestJDb(unittest.TestCase):
 
             # -------------------------------------------- one pass flushes at MAX_BLOCK_SIZE
             # hex of random bytes stays incompressible, so the padded values really do
-            # cross the 256KB block whatever the zip_type is
             blobs = {f'blob{ii:03}': os.urandom(8192).hex() for ii in range(48)}
             with jdb.open(read_only=False) as fp:
                 self.assertTrue(jdb.f_extend(fp, blobs))
@@ -7229,7 +7230,7 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not jdb.check_error(verbose=False), Style(f'{filename}:{jdb}', red=1))
 
             # -------------------------------------------- SIGINT stops the pass mid-batch
-            jdb1 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb1 = JDb(data_type=data_type)
             jdb1.set_n({f'k{ii}': ii for ii in range(8)})
             jdb1.remove('k1', 'k3', 'k5')           # DEAD rows the append must not disturb
             n_records, n_lines = jdb1.n_records, jdb1.n_lines
@@ -7261,7 +7262,7 @@ class TestJDb(unittest.TestCase):
                 for ii in range(n_rows):
                     writer.writerow([f'c{ii}', f'n{ii}', ii])
 
-            jdb2 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb2 = JDb(data_type=data_type)
             jdb2.from_csv(csv_path)
             self.assertEqual(len(jdb2), n_rows)
             self.assertEqual(jdb2['c0'], {'name': 'n0', 'val': '0'})
@@ -7275,7 +7276,7 @@ class TestJDb(unittest.TestCase):
                 parquet_path = 'db/batch.parquet'
                 pq.write_table(pa.table({'id':[f'p{ii}' for ii in range(n_rows)],
                                          'val':list(range(n_rows))}), parquet_path)
-                jdb3 = JDb(data_type=data_type, zip_type=zip_type)
+                jdb3 = JDb(data_type=data_type)
                 jdb3.from_parquet(parquet_path)
                 self.assertEqual(len(jdb3), n_rows)
                 self.assertEqual(jdb3['p0'], {'val': 0})
@@ -7284,29 +7285,29 @@ class TestJDb(unittest.TestCase):
 
             # -------------------------------------------- reinit()/add() batch the same way
             big = {f'x{ii}': ii for ii in range(n_rows)}
-            jdb4 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb4 = JDb(data_type=data_type)
             self.assertTrue(jdb4.reinit(big, agree='yes', wait_sec=0))
             self.assertEqual(len(jdb4), n_rows)
             self.assertEqual(jdb4[big], big)
 
-            jdb5 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb5 = JDb(data_type=data_type)
             jdb5['gone'] = 'cleared by reinit()'
             self.assertTrue(jdb5.reinit(jdb4, agree='yes', wait_sec=0))
             self.assertEqual(len(jdb5), n_rows)
             self.assertEqual(jdb5, jdb4)
 
-            jdb6 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb6 = JDb(data_type=data_type)
             jdb6['x1'] = -1                         # one key is already here: it is rewritten
             self.assertEqual(len(jdb6.add(jdb4)), n_rows)
             self.assertEqual(jdb6, jdb4)
 
             # clone_to() ticks its progress signal every 1000 records
-            jclone = JDb(data_type=data_type, zip_type=zip_type)
+            jclone = JDb(data_type=data_type)
             self.assertEqual(len(jdb4.clone_to(jclone)), n_rows)
             self.assertEqual(jclone, jdb4)
 
             # replace-only: only the keys this database already has are copied over
-            jdb7 = JDb(data_type=data_type, zip_type=zip_type)
+            jdb7 = JDb(data_type=data_type)
             jdb7.set_n({'x1': -1, 'own': 0})
             self.assertEqual(jdb7.add(jdb4, insert=False), {'x1': 1})
             self.assertEqual(dict(jdb7.items()), {'x1': 1, 'own': 0})
@@ -7321,7 +7322,7 @@ class TestJDb(unittest.TestCase):
             conn.execute('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)')
             conn.executemany('INSERT INTO t VALUES (?,?)', [(ii, f'v{ii}') for ii in range(n_rows)])
             conn.commit()
-            jsql = JDb(data_type=data_type, zip_type=zip_type)
+            jsql = JDb(data_type=data_type)
             jsql.from_sqlite(conn)
             self.assertEqual(len(jsql.get_group('t')), n_rows)
             jsql.from_sqlite(conn)                  # a second pass replaces the group
@@ -7341,7 +7342,7 @@ class TestJDb(unittest.TestCase):
             with open(toml_path, 'w', encoding='utf-8') as toml_fp:
                 toml_fp.write('name = "omni"\n[net]\nport = 81\n')
 
-            jcfg = JDb(data_type=data_type, zip_type=zip_type)
+            jcfg = JDb(data_type=data_type)
             jcfg.from_ini(ini_path)
             jcfg.from_toml(toml_path)
             self.assertEqual(jcfg['server/host'], '127.0.0.1')
@@ -7350,11 +7351,11 @@ class TestJDb(unittest.TestCase):
             os.remove(toml_path)
 
             # -------------------------------------------- to_csv() reports progress per 1000 rows
-            jrow = JDb(data_type=data_type, zip_type=zip_type)
+            jrow = JDb(data_type=data_type)
             jrow.set_n({f'r{ii}': {'v': ii} for ii in range(1200)})
             csv_out = 'db/batch_out.csv'
             self.assertTrue(jrow.to_csv(csv_out))
-            jgrp = JDb(data_type=data_type, zip_type=zip_type)
+            jgrp = JDb(data_type=data_type)
             jgrp['rows'] = jrow
             self.assertTrue(jgrp.to_csv(csv_out, key='rows'))
             os.remove(csv_out)
@@ -11580,6 +11581,262 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
             self.assertEqual(jdb.keys[0.:], jdb1.keys[0.:])
+
+            error = jdb.check_error()
+            self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
+    def test_transaction(self):
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            self.assertEqual(len(jdb), 0)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            # --------------------------------------------
+            test_size = 24
+            expect = {f'key{v}':list(range(v+1)) for v in range(test_size)}
+            jdb1 = JDb(jdb)
+
+            chg = jdb.insert(expect)
+            self.assertEqual(chg, expect)
+            self.assertEqual(jdb, expect)
+            self.assertEqual(jdb, jdb1)
+
+            # a block that finishes keeps every write it made
+            with jdb.transaction() as fp:
+                jdb.f_write(fp, 'key8', 8)
+                jdb.f_write(fp, 'new1', [1])
+                jdb.f_delete(fp, 'key9')
+
+            self.assertEqual(jdb['key8'], 8)
+            self.assertEqual(jdb['new1'], [1])
+            self.assertFalse('key9' in jdb)
+            self.assertNotEqual(jdb, expect)
+
+            # ... and an exception puts all three kinds of change back
+            jdb.remove('new1')
+            jdb['key8'] = expect['key8']
+            jdb['key9'] = expect['key9']
+            self.assertEqual(jdb, expect)
+
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction() as fp:
+                    jdb.f_write(fp, 'key8', -8)         # change
+                    jdb.f_write(fp, 'new1', [1])        # add
+                    jdb.f_delete(fp, 'key9')            # delete
+                    self.assertNotEqual(jdb, expect)
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb, expect)
+            self.assertEqual(jdb, jdb1)         # a second handle sees the rolled-back state
+
+            # the rollback is on disk, not only in this handle's index
+            jdb2 = JDb(jdb)
+            self.assertEqual(jdb2, expect)
+            del jdb2
+
+            # batch paths (f_extend / remove) roll back too
+            new_expect = {f'key{v}':list(range(test_size-v)) for v in range(test_size)}
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb.replace(new_expect)
+                    jdb.insert({f'n{v}':v for v in range(test_size)})
+                    jdb.remove(*[f'key{v}' for v in range(0, test_size, 7)])
+                    self.assertNotEqual(jdb, expect)
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb, expect)
+            self.assertEqual(len(jdb), test_size)
+            self.assertFalse(jdb.check_error(verbose=False))
+
+            # rename is a row rewrite, so it rolls back like any other write
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb.rename({'key3':'key3x', 'key5':'key5x'})
+                    self.assertTrue('key3x' in jdb)
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb, expect)
+            self.assertFalse('key3x' in jdb)
+
+            # the low-level f_* API inside one open() rolls back as well
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction() as fp:
+                    for key, val in new_expect.items():
+                        if not random.randint(0, 1):
+                            jdb.f_delete(fp, key)
+                        else:
+                            jdb.f_write(fp, key, val)
+
+                    jdb.f_write(fp, 'brand_new', [0])
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb, expect)
+            self.assertFalse('brand_new' in jdb)
+
+            # TTL, key flags and the modified day come back with the value
+            jdb.set('key1', [1], ttl=30)
+            jdb.set_key_flags('key1', 'r')
+            old_flags = jdb.get_key_flags('key1')
+            old_days = jdb.keys['key1']
+            old_val = jdb['key1']
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb.set('key1', [9, 9], ttl=90, key_flags='u+h')
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb['key1'], old_val)
+            self.assertEqual(jdb.get_key_flags('key1'), old_flags)
+            self.assertEqual(jdb.keys['key1'], old_days)
+            jdb.set_key_flags('key1', '-r')
+            jdb.set('key1', expect['key1'], ttl=0)
+            self.assertEqual(jdb, expect)
+
+            # nesting is a savepoint: the inner block rolls back on its own ...
+            with jdb.transaction():
+                jdb['key2'] = 'outer'
+                with self.assertRaises(RuntimeError):
+                    with jdb.transaction():
+                        jdb['key2'] = 'inner'
+                        jdb['inner_only'] = 1
+                        raise RuntimeError('rollback')
+
+                self.assertEqual(jdb['key2'], 'outer')
+                self.assertFalse('inner_only' in jdb)
+                jdb['key4'] = 'outer'
+
+            self.assertEqual(jdb['key2'], 'outer')
+            self.assertEqual(jdb['key4'], 'outer')
+
+            # ... and an inner block that succeeded still goes back with the outer one
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    with jdb.transaction():
+                        jdb['key2'] = 'inner'
+                        jdb['inner_only'] = 1
+
+                    self.assertEqual(jdb['key2'], 'inner')
+                    with jdb.transaction():
+                        with jdb.transaction():
+                            jdb['key6'] = 'deep'
+
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb['key2'], 'outer')
+            self.assertEqual(jdb['key6'], expect['key6'])
+            self.assertFalse('inner_only' in jdb)
+            jdb['key2'] = expect['key2']
+            jdb['key4'] = expect['key4']
+            self.assertEqual(jdb, expect)
+
+            # a second write to one key inside a single open() session may reuse the
+            # VAL slot in place, which no KEY-row pre-image can restore -- the write
+            # path has to fall back to a fresh slot while a transaction is open
+            jdb['key7'] = 'aaaaa'
+            with jdb.transaction():
+                jdb['key7'] = 'bbbbb'
+                with self.assertRaises(RuntimeError):
+                    with jdb.transaction():
+                        jdb['key7'] = 'ccccc'      # same size, same slot
+                        raise RuntimeError('rollback')
+
+                self.assertEqual(jdb['key7'], 'bbbbb')
+
+            self.assertEqual(jdb['key7'], 'bbbbb')
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb['key7'] = 'ddddd'
+                    jdb['key7'] = 'eeeee'
+                    jdb.set('key7', 'fffff', flags=0)   # flags=0 asks for the in-place path
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb['key7'], 'bbbbb')
+            jdb['key7'] = expect['key7']
+            self.assertEqual(jdb, expect)
+
+            # what cannot be undone is refused, not silently let through
+            for call in (lambda: jdb.add_group('grp'),
+                         lambda: jdb.del_group('grp'),
+                         lambda: jdb.recycle(verbose=False),
+                         lambda: jdb.clear(agree='yes', wait_sec=0),
+                         lambda: jdb.resize_index_size(256),
+                         lambda: jdb.change_KEY('J')):
+                with jdb.transaction():
+                    with self.assertRaises(JValueError):
+                        call()
+
+            self.assertEqual(jdb, expect)
+
+            # the handle keeps working after a rollback
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb.insert({f'n{v}':v for v in range(50)})
+                    raise RuntimeError('rollback')
+
+            jdb.insert({f'p{v}':v for v in range(50)})
+            self.assertEqual(len(jdb), test_size + 50)
+            jdb.remove(*[f'p{v}' for v in range(50)])
+            self.assertEqual(jdb, expect)
+            self.assertEqual(jdb, jdb1)
+
+            # rollback does not need JFlag.REVERT: the undo log is the KEY rows themselves
+            jmem1 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, flags=JFlag.REVERT)
+            jmem2 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, flags=0)
+            jmem1 += expect
+            jmem2 += expect
+            for jmem in (jmem1, jmem2):
+                with self.assertRaises(RuntimeError):
+                    with jmem.transaction():
+                        jmem['key0'] = 'x'
+                        jmem['brand_new'] = 1
+                        del jmem['key1']
+                        raise RuntimeError('rollback')
+
+                self.assertEqual(jmem, expect)
+
+            self.assertEqual(jmem1, jmem2)
+
+            # a rolled-back batch insert must not eat the parked history rows:
+            # f_extend writes its KEY rows straight to the file, past write_key()
+            jmem3 = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type, min_safe=64, index_size=128)
+            jmem3.insert({f'k{v}':f'v{v}-0' for v in range(40)})
+            for rev in range(1, 4):
+                jmem3.replace({f'k{v}':f'v{v}-{rev}' for v in range(40)})
+
+            hist = {k:[h['value'] for h in jmem3.history(k, with_value=True)] for k in ('k0', 'k7', 'k39')}
+            self.assertTrue(any(len(v) > 2 for v in hist.values()))
+            with self.assertRaises(RuntimeError):
+                with jmem3.transaction():
+                    jmem3.insert({f'n{v}':v for v in range(300)})
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(len(jmem3), 40)
+            self.assertEqual({k:[h['value'] for h in jmem3.history(k, with_value=True)] for k in hist}, hist)
+
+            # a group is a separate KEY file, so it is NOT part of the parent's
+            # transaction -- pinned here because it is the documented behaviour
+            grp = jdb.add_group('grp')
+            grp['g1'] = 1
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb['key0'] = 'x'
+                    grp['g1'] = 99
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb['key0'], expect['key0'])
+            self.assertEqual(grp['g1'], 99)     # NOT rolled back
+            grp.clear(agree='yes', wait_sec=0)
+            jdb.del_group('grp')
+            self.assertEqual(jdb, expect)
+            self.assertEqual(jdb, jdb1)
 
             error = jdb.check_error()
             self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))

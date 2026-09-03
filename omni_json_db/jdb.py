@@ -5,9 +5,10 @@ from re import match as re_match, Pattern
 from os.path import exists as path_exists
 from os import stat as os_stat
 from time import time, sleep
-from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, IO
+from typing import Any, Union, Optional, Tuple, Dict, List, Set, Callable, IO, Generator
 from random import randint, randrange
 from collections import OrderedDict
+from contextlib import contextmanager
 #-----------------------------------------------------------------------------
 from .jdb_lite import JDbReader, JDbKey, SEP_SYM, SEP_LEN
 from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
@@ -1586,9 +1587,11 @@ class JDb(JDbReader):
         Example:
             >>> jdb.recycle(merge=False)
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         del_rows = []
         with self.open(read_only=False) as fp:
-            io = self.io
             io, fp, key_fp = self.f_get_fp(fp)
             has_SIGINT = self.file_lock.has_SIGINT
             if level > 0:
@@ -1801,6 +1804,9 @@ class JDb(JDbReader):
         Returns:
             bool: True if the database was cleared, False otherwise.
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         if agree.lower() == 'yes':
             if wait_sec > 0:
                 print(Style(f'!!! After {wait_sec}s, all the data will be cleared !!! (Ctrl-C to stop)', cyan=1, bold=1, underscore=1))
@@ -1819,7 +1825,6 @@ class JDb(JDbReader):
             file_table = io.file_table.copy()
             swap_id += io.swap_id % 2
             remv_id += io.remv_id % 2
-            io, fp, key_fp = self.f_get_fp(fp)
             files_obj = self.files_obj
             f_get_group = self.f_get_group
             for grp_name in io.group_iter(key_fp):
@@ -1874,6 +1879,9 @@ class JDb(JDbReader):
         Returns:
             int: Calculated final index padding dimension assigned across files structures.
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         extra_size = max(1, extra_size)
         with self.open(read_only=False) as fp:
             io, fp, key_fp = self.f_get_fp(fp)
@@ -1919,6 +1927,9 @@ class JDb(JDbReader):
             >>> print(jdb.data_type)
             S+J
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         KEY_type_u = KEY_type.upper()
         if KEY_type_u not in 'JUMLS':
             raise ValueError('KEY_type must be J|U|M|L|S')
@@ -4578,6 +4589,9 @@ class JDb(JDbReader):
         Raises:
             KeyError: If ``key`` contains characters other than letters, digits, or underscores.
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         if not re_match(r'^\w+$', key):
             raise KeyError
 
@@ -4603,6 +4617,9 @@ class JDb(JDbReader):
         Returns:
             Optional[JDb]: The removed group, or ``None`` if it doesn't exist.
         """
+        if self.io._undo is not None and self.file_lock.mode == 'w':
+            raise JValueError('cannot run inside transaction(): it is not reversible')
+
         if not re_match(r'^\w+$', key):
             raise KeyError
 
@@ -4612,9 +4629,118 @@ class JDb(JDbReader):
                 self.f_delete(fp, key, read_value=False, flags=JFlag(0))
             return group
 
+    @contextmanager
+    def transaction(self) -> Generator[Dict[int,IO], None, None]:
+        """Write session with all-or-nothing rollback.
+
+        Everything written inside the block is undone if the block leaves through
+        an exception, and kept otherwise. The whole block runs under one write
+        lock, so no other thread or process ever observes a partial transaction.
+
+        Rollback is *physical*: every KEY index row the block touches has its
+        pre-image recorded the first time it changes, and the pre-images, the
+        header counters, the index length and the VAL high-water marks are put
+        back on the way out. It does not walk :meth:`revert` back over the parked
+        history rows, so it also undoes deletes, batch inserts and renames, and it
+        works on a database opened without :attr:`JFlag.REVERT`.
+
+        For that to hold, the block writes **append-only**: no dead index row and
+        no dead VAL slot is handed out while it is open (a ``flags`` argument is
+        read as if it carried :attr:`JFlag.REVERT`), because the bytes in them are
+        exactly what a rollback has to restore. A long transaction therefore grows
+        the files more than the same writes outside one would; :meth:`recycle`
+        takes the difference back.
+ 
+        Nesting is a savepoint. An inner ``transaction()`` records its own
+        pre-images, so an exception caught inside the outer block rolls back only
+        what the inner block wrote; when the inner block succeeds its pre-images
+        are handed to the outer level, so an outer rollback still reaches the
+        state from before either block.
+
+        Yields:
+            Dict[int, IO]: The thread's file-pointer table. Index ``-1`` maps
+            to the KEY file pointer; VAL file pointers are added on demand.
+
+        Raises:
+            JValueError: If an operation that cannot be undone is called inside
+                the block (see the note below).
+
+        Note:
+            **Not crash safe.** The undo log lives in memory: an exception is
+            undone, a ``kill -9`` is not. What survives a crash is unchanged
+            from writing without a transaction.
+
+            **VAL space is not reclaimed.** Rollback restores the KEY index only;
+            bytes appended to the VAL files become dead space that
+            :meth:`recycle` collects.
+
+            **Irreversible operations are refused** inside the block, because
+            they change things outside the KEY index -- :meth:`add_group`,
+            :meth:`del_group`, :meth:`recycle`, :meth:`clear`,
+            :meth:`resize_index_size` and :meth:`change_KEY` raise
+            :class:`JValueError` rather than silently escaping the rollback.
+
+            **Groups are not covered.** A group is a separate KEY file with its
+            own index, so a write routed into one -- ``jdb['grp:::k'] = v``, or
+            anything done through a group handle -- survives the rollback. Run a
+            :meth:`transaction` on the group itself for that.
+
+            **A widened index survives.** A key too long for the current
+            ``index_size`` rebuilds the KEY file through :meth:`JIo.resize_keys`;
+            the rows are rolled back but the wider row size stays, which changes
+            nothing a caller can observe.
+
+            **Rollback costs a full index reload** (``load_keys(force=True)``),
+            so it is O(``n_lines``) -- fine on an error path, not something to
+            drive a loop with.
+
+        Example:
+            >>> jdb['a'] = 1
+            >>> try:
+            ...     with jdb.transaction():
+            ...         jdb['a'] = 99
+            ...         jdb['b'] = 2
+            ...         del jdb['a']
+            ...         raise RuntimeError('nope')
+            ... except RuntimeError:
+            ...     pass
+            >>> jdb['a'], 'b' in jdb
+            (1, False)
+        """
+        error = None
+        with self.open(read_only=False) as fp: # pylint: disable=contextmanager-generator-missing-cleanup
+            io, fp, key_fp = self.f_get_fp(fp)
+            safe_line = self.safe_line
+            chg_keys = set(self.chg_keys)
+            io.undo_begin()
+            self.chg_keys.clear()
+            try:
+                yield fp
+
+            except BaseException as e: # pylint: disable=broad-except
+                # the rollback must finish *inside* open(), but the exception must leave *outside* it
+                error = e
+
+            cur_io, fp, key_fp = self.f_get_fp(fp)
+            if cur_io is not io or io._undo is None: # pragma: no cover
+                if error is None:
+                    error = JValueError('transaction(): the KEY index was re-initialized, the undo log is gone')
+            elif error is None:
+                io.undo_commit()
+            else:
+                io.undo_rollback(key_fp)
+                self._cache.clear()
+                self.chg_keys.clear()
+                self.chg_keys.update(chg_keys)
+                self.safe_line = safe_line if io.n_lines > safe_line else io.n_lines
+                self.fsize = io.file_size
+
+        if error is not None:
+            raise error
+
     def _get_dead_row(self, key_fp:IO, key:str, req_size:int, \
             flags:Optional[JFlag]=None, \
-            max_wsize:Optional[int]=None) -> Tuple[int,int,str,int,int,int]:
+            max_wsize:Optional[int]=None) -> Tuple[int,int,int,int,int]:
         """Internal: find a reusable "dead" row in the index to reuse for a new write.
 
         Args:
@@ -4653,6 +4779,9 @@ class JDb(JDbReader):
                 self.safe_line = safe_line + 1
         else:
             start_line = safe_line = n_records
+
+        if io._undo is not None:
+            return start_line, -1, 0, 0, 0
 
         extra_rows = n_lines - safe_line
         if extra_rows > 0 and req_size >= 0:
@@ -5036,6 +5165,9 @@ class JDb(JDbReader):
             mdays = (cdays + _delta) if mdays < 0 else mdays
 
         flags = int(self.flags) if flags is None else int(flags)
+        if io._undo is not None:
+            flags |= F_REVERT
+
         _cache = self._cache
         cache_limit = self._cache_limit
         checked = overwrite
@@ -5288,7 +5420,7 @@ class JDb(JDbReader):
                     if _row_info != row_info:
                         continue
 
-                if row_size >= new_val_size and (not row_revert or key in self.chg_keys):
+                if row_size >= new_val_size and io._undo is None and (not row_revert or key in self.chg_keys):
                     # use same row
                     n_lines = io.n_lines
                     val_fp, __i, __o = self.f_get_val_fp(fp_dict, file_id)
@@ -5497,6 +5629,8 @@ class JDb(JDbReader):
 
         io, fp_dict, key_fp, _sync_chg = self.f_get_write_fp(fp_dict)
         flags = int(self.flags) if flags is None else int(flags)
+        if io._undo is not None:
+            flags |= F_REVERT
         new_ttl = (0 if ttl < 0 else min(ttl, MAX_TTL_DAYS)) if ttl.__class__ is int else max(0, conv_ttl(ttl))
         if isinstance(key_flags, str):
             set_mask, clr_mask = conv_to_key_flags(key_flags)
@@ -5650,6 +5784,10 @@ class JDb(JDbReader):
                                 copy_key(key_fp, safe_h, dead_h)
 
                     _offset = HEADER_SIZE + n_records * index_size
+                    if io._undo is not None:
+                        # kbuf goes straight to the file, past write_key()'s hook
+                        io.undo_rows(key_fp, n_records, n_chunk)
+
                     if key_fp.tell() != _offset:
                         key_fp.seek(_offset)
                     key_fp.write(kbuf)
@@ -5898,6 +6036,8 @@ class JDb(JDbReader):
                 pass
 
         flags = self.flags if flags is None else JFlag(flags)
+        if io._undo is not None:
+            flags = JFlag(int(flags) | F_REVERT)
         io.groups.pop(key, None)
         swap_id = io.swap_id
         n_lines = io.n_lines
@@ -5988,6 +6128,8 @@ class JDb(JDbReader):
             break
 
         flags = self.flags if flags is None else flags
+        if io._undo is not None:
+            flags = JFlag(int(flags) | F_REVERT)
         dead_row = row
         n_lines = io.n_lines
         safe_h = n_records = io.n_records

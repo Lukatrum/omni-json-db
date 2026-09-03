@@ -1130,7 +1130,7 @@ class JIo(JIoBase):
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0',\
             'max_vfiles', '_val_codec', '_key_codec', '_now_sec', 'now',\
-            '_index_cache', '_kix_rows', 'min_kix_rows')
+            '_index_cache', '_kix_rows', 'min_kix_rows', '_undo')
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
@@ -1419,12 +1419,24 @@ class JIo(JIoBase):
         if min_kix_rows is None:
             min_kix_rows = KIX_MIN_ROWS
 
-        self._KEY_rows      = OrderedDict()
+        self.days = self.min_days = self.max_vfiles \
+            = self._swap_id = self._remv_id \
+            = self.now = self._now_sec \
+            = self._data_type = self._zip_type \
+            = self._kix_rows = -1
+        self._sync_id = self.file_size = self._key_limit \
+            = self._n_records = self._n_lines \
+            = self.n_records = self.n_lines = 0
+        self.pad_byte = self.pad0_byte = b'\x00'
+        self._undo = self.key_table = None
+
+        self.file_table     = defaultdict(int)
+        self.groups         = {}
         self._DEAD_rows     = {}
+        self._KEY_rows      = OrderedDict()
         self._val_codec     = val_codec
         self._key_codec     = key_codec
-        self._data_type     = self._zip_type = self._key_limit = -1
-        self.key_table      = DictKeyTable(self) # must before self.key_limit = key_limit
+        self._index_cache   = index_cache
         self.sync_id        = sync_id
         self.swap_id        = swap_id
         self.remv_id        = remv_id
@@ -1434,21 +1446,6 @@ class JIo(JIoBase):
         self.max_file_size  = max_file_size
         self.reserved_rate  = reserved_rate
         self.files_obj      = files_obj
-        self.data_type      = data_type
-        if self._zip_type < 0:
-            self.zip_type = zip_type
-        self.key_limit      = key_limit
-        self.file_table     = defaultdict(int)
-        self.groups         = {}
-        self.key_table      = PartialKeyTable(self) if self._key_limit > 0 else \
-                                DictKeyTable(self) if self._key_limit == 0 else \
-                                DictKeyTable(self, btree=True) if self._key_limit == -0x100 else \
-                                LiteKeyTable(self, (-self._key_limit-1) | 0x1000)
-
-        self.days = self.min_days = self._swap_id = self._remv_id = self.max_vfiles = -1
-        self.now = self._now_sec = -1
-        self._sync_id = self._n_records = self._n_lines = self.file_size = self.n_records = self.n_lines = 0
-
         self.api_ver        = api_ver
         self.HEAD_dumps     = g_HEAD.dumps_v1
         self.HEAD_loads     = g_HEAD.loads_v1
@@ -1459,28 +1456,29 @@ class JIo(JIoBase):
         self.VAL_zip        = ZIP_lut[0]
         self.VAL_unzip      = UNZIP_lut[0]
         self.VAL_unzip0     = UNZIP_lut0[0]
-        self.pad_byte       = b'\x00'
-        self.pad0_byte      = b'\x00'
+
         self.window_size = max(1, int(KEY_ROW_WINDOW / index_size))
         self.row_bytes = index_size - min_value_size * (1 + reserved_rate)
+        self.key_table = DictKeyTable(self) # before self.key_limit = key_limit
 
-        self._index_cache   = index_cache
-        self._kix_rows      = -1
-        self.update_days()
+        # setter
+        self.data_type  = data_type
+        if self._zip_type < 0:
+            self.zip_type = zip_type # data_type may already carry it, e.g. 'J+S(gz)'
+        self.key_limit  = key_limit
         self.init_APIs(api_ver)
 
+        # check after init_APIs
         if not (isinstance(self._data_type, int) and LAST_DATA_TYPE >= self._data_type >= 0):
             raise TypeError
         if not (isinstance(self._zip_type, int) and LAST_ZIP_TYPE >= self._zip_type >= 0):
             raise TypeError
-        if not isinstance(self._key_limit, int):
+        if not (isinstance(self._key_limit, int) and isinstance(self.key_table, (KeyTable, DictKeyTable))):
             raise TypeError
-        if not isinstance(self.key_table, (KeyTable, DictKeyTable)):
+        if not (isinstance(self.pad_byte, bytes) and isinstance(self.pad0_byte, bytes) and len(self.pad0_byte) == len(self.pad_byte) == 1):
             raise TypeError
-        if not (isinstance(self.pad_byte, bytes) and len(self.pad_byte) == 1):
-            raise TypeError
-        if not (isinstance(self.pad0_byte, bytes) and len(self.pad0_byte) == 1):
-            raise TypeError
+
+        self.update_days()
 
     def __repr__(self) -> str:
         """Generate structured string summary reports outlining operational engine states parameters configurations specs.
@@ -1771,6 +1769,29 @@ class JIo(JIoBase):
             str: The key-table type.
         """
         return self.z_key_limit_str(self._key_limit)
+
+    @property
+    def live_now(self) -> float:
+        """float: Today's day number with the live minute-of-day in the fraction.
+
+        Reading it also refreshes :attr:`days` and :attr:`now`, which are only as
+        fresh as the last :meth:`update_days` -- good enough for whole days but
+        not for a minute TTL, so every sub-day expiry test reads this instead.
+        The clock is read at most once a second, since the minute cannot move
+        faster than that.
+
+        A zone that observes DST repeats or skips an hour of local time twice a
+        year; a sub-day TTL crossing that hour runs one hour long or one hour
+        short, the same way any wall-clock timer does.
+        """
+        ts = int(time())
+        if ts != self._now_sec:                     # the minute only moves once every 60 s
+            self._now_sec = ts
+            lt = localtime(ts)
+            self.days = days = dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
+            self.now = days + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
+
+        return self.now
 
     def change_APIs(self, \
             version:Optional[int]=None, \
@@ -2113,10 +2134,93 @@ class JIo(JIoBase):
 
         return row_id, file_id, offset, row_size
 
+    def undo_begin(self) -> int:
+        """Open an undo level and start recording KEY row pre-images.
+
+        Returns:
+            int: Depth of the level just opened (``1`` is the outermost one).
+        """
+        undo = self._undo
+        if undo is None:
+            undo = self._undo = []
+
+        undo.append((self.n_lines, (self.sync_id, self.swap_id, self.remv_id, self.n_records, self.n_lines, dict(self.file_table)), {}))
+        return len(undo)
+
+    def undo_rows(self, fp:IO, row_id:int, n_rows:int=1) -> None:
+        """Record the pre-image of the rows a caller is about to overwrite.
+
+        Rows at or beyond the level's starting ``n_lines`` were created inside
+        the level, so they need no pre-image -- restoring ``n_lines`` drops them.
+
+        Args:
+            fp (IO): The open KEY file pointer.
+            row_id (int): First row about to change.
+            n_rows (int, optional): How many consecutive rows. Defaults to 1.
+        """
+        base, _head, log = self._undo[-1]
+        stop = base if row_id + n_rows > base else row_id + n_rows
+        read_key = self.read_key
+        for rid in range(row_id, stop):
+            if rid not in log:
+                log[rid] = read_key(fp, rid)
+
+    def undo_commit(self) -> None:
+        """Close the innermost undo level, keeping everything it wrote.
+
+        A nested level hands its pre-images up to its parent -- the parent keeps
+        the older image where both hold the same row -- so an outer rollback
+        still sees the state from before the whole transaction.
+        """
+        undo = self._undo
+        _base, _head, log = undo.pop()
+        if not undo:
+            self._undo = None
+            return
+
+        p_base, _p_head, p_log = undo[-1]
+        for row_id, args in log.items():
+            if row_id < p_base:
+                p_log.setdefault(row_id, args)
+
+    def undo_rollback(self, fp:IO) -> None:
+        """Undo every KEY row the innermost level touched, then close it.
+
+        Restores the recorded rows, the header counters and the index length,
+        and rebuilds the key table from the restored file. VAL bytes appended
+        inside the level are *not* reclaimed -- they become dead space that
+        :meth:`JDb.recycle` collects.
+
+        Args:
+            fp (IO): The open KEY file pointer.
+        """
+        undo = self._undo
+        _base, head, log = undo[-1]
+        self._undo = None # our own writes must never be logged
+        try:
+            sync_id, swap_id, remv_id, n_records, n_lines, file_table = head
+            self.n_records = n_records
+            self.n_lines = n_lines
+            write_key = self.write_key
+            for row_id, args in log.items():
+                write_key(fp, row_id, *args)
+
+            self.sync_id = sync_id
+            self.swap_id = swap_id
+            self.remv_id = remv_id
+            self.write_header(fp, truncate=True)
+            self.load_keys(fp, force=True)
+            # load_keys() re-derives the VAL high-water marks from the live rows only;
+            self.file_table.clear()
+            self.file_table.update(file_table)
+        finally:
+            undo.pop()
+            self._undo = undo or None
+
     def write_key(self, fp:IO, row_id:int, key:str, \
             file_id:int, offset:int, row_size:int, val_size:int=0, \
             ver:Optional[int]=None, \
-            cdays:int=-1, mdays:int=-1, ttl:int=0, \
+            cdays:int=-1, mdays:Union[int,float]=-1, ttl:Union[int,float]=0, \
             flags:Optional[int]=None) -> int:
         """Write one KEY index row at ``row_id``, growing the index row size if the key does not fit.
 
@@ -2151,6 +2255,9 @@ class JIo(JIoBase):
         Returns:
             int: The number of bytes written.
         """
+        if self._undo is not None:
+            self.undo_rows(fp, row_id)
+
         today = self.days
         ttl = 0 if ttl <= 0 else (ttl if ttl < MAX_TTL_DAYS else MAX_TTL_DAYS)
         cdays = today if cdays < 0 else (cdays & SUB_DAY_MASK)
@@ -2277,29 +2384,6 @@ class JIo(JIoBase):
         self.days = days = dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
         self.now = days + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
         return days
-
-    @property
-    def live_now(self) -> float:
-        """float: Today's day number with the live minute-of-day in the fraction.
-
-        Reading it also refreshes :attr:`days` and :attr:`now`, which are only as
-        fresh as the last :meth:`update_days` -- good enough for whole days but
-        not for a minute TTL, so every sub-day expiry test reads this instead.
-        The clock is read at most once a second, since the minute cannot move
-        faster than that.
-
-        A zone that observes DST repeats or skips an hour of local time twice a
-        year; a sub-day TTL crossing that hour runs one hour long or one hour
-        short, the same way any wall-clock timer does.
-        """
-        ts = int(time())
-        if ts != self._now_sec:                     # the minute only moves once every 60 s
-            self._now_sec = ts
-            lt = localtime(ts)
-            self.days = days = dt_date(lt.tm_year, lt.tm_mon, lt.tm_mday).toordinal() - 1
-            self.now = days + (lt.tm_hour * MIN_OF_HOUR + lt.tm_min) / MIN_OF_DAY
-
-        return self.now
 
     def is_updated(self) -> bool:
         """Check whether the in-memory counters match the KEY file on disk.
@@ -2968,6 +3052,9 @@ class JIo(JIoBase):
         Returns:
             Union[bytes, tuple, list]: Copied binary stream metadata chunk array, or unpacked items elements tuple.
         """
+        if self._undo is not None:
+            self.undo_rows(fp, dst_row)
+
         self._KEY_rows.pop(dst_row, None)
         self._DEAD_rows.pop(dst_row, None)
 
@@ -3026,6 +3113,9 @@ class JIo(JIoBase):
 
         if block_size is None or block_size <= 0:
             block_size = self.window_size
+
+        if self._undo is not None:
+            self.undo_rows(fp, start+offset, n_rows)
 
         dst_row = start + offset
         dst_end = dst_row + n_rows

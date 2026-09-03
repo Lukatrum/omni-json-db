@@ -51,48 +51,192 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
    **omni-json-db** has been tested with Python 3.7+ and PyPy3. (~100% test coverage)
 
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-|                                  | **omni-json-db**  | TinyDB    | DiskCache | UnQLite | LMDB       | RocksDict | SQLite    | DuckDB    |
-+==================================+===================+===========+===========+=========+============+===========+===========+===========+
-| Transactions / ACID              | ⚠️ (atomic ops)   | ❌        | ❌        | ❌      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Thread-safe concurrency          | ✅ (MR/SW)        | ❌        | ✅        | ✅      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Multi-process access             | ✅ (file lock)    | ❌        | ✅        | ✅      | ✅         | ⚠️ (RO)   | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| In-memory mode                   | ✅                | ✅        | ❌        | ✅      | ❌         | ❌        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| CSV / SQLite / Parquet built-in  | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ⚠️ (CLI)  | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Compression built-in             | ✅                | ❌        | ✅        | ❌      | ❌         | ✅        | ❌        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| No schema (Schema-less)          | ✅                | ✅        | ✅        | ✅      | ✅         | ✅        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Dataclass mapping [z]_           | ✅                | ❌        | ⚠️        | ❌      | ❌         | ⚠️        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Groups / Namespaces              | ✅                | ✅        | ⚠️        | ✅      | ✅         | ✅        | ✅        | ✅        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Nested groups + fan-out queries  | ✅                | ⚠️ (flat) | ❌        | ⚠️      | ⚠️ (flat)  | ⚠️ (CF)   | ⚠️ (SQL)  | ⚠️ (SQL)  |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Pure Python (PyPy-friendly)      | ✅                | ✅        | ✅        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Pythonic queries (Lambda/Regex)  | ✅                | ✅        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Deep nested search               | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Graph database engine            | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Undo / Redo (Time-Travel)        | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Time-series date slicing         | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Network mode (incl. groups)      | ✅                | ❌        | ❌        | ❌      | ❌         | ❌        | ❌        | ❌        |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Relative speed 500K records [x]_ | 1.00x (baseline)  | 41.47x    | 60.95x    |  4.28x  | 0.94x      | 0.45x     | 0.13x     | 0.21x     |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
-| Relative speed 10M records [x]_  | 1.00x (baseline)  | N/A [y]_  | N/A [y]_  | 24.07x  | 1.31x      | 0.55x     | 0.16x     | 0.05x     |
-+----------------------------------+-------------------+-----------+-----------+---------+------------+-----------+-----------+-----------+
+.. list-table::
+   :widths: 30 16 10 11 10 9 11 9 9
+   :header-rows: 1
 
+   * - 
+     - **omni-json-db**
+     - TinyDB
+     - DiskCache
+     - UnQLite
+     - LMDB
+     - RocksDict
+     - SQLite
+     - DuckDB
+   * - Transactions / ACID [t]_
+     - ⚠️ (transaction)
+     - ❌
+     - ❌
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Thread-safe concurrency
+     - ✅ (MR/SW)
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Multi-process access
+     - ✅ (file lock)
+     - ❌
+     - ✅
+     - ✅
+     - ✅
+     - ⚠️ (read only)
+     - ✅
+     - ✅
+   * - In-memory mode
+     - ✅
+     - ✅
+     - ❌
+     - ✅
+     - ❌
+     - ❌
+     - ✅
+     - ✅
+   * - CSV / SQLite / Parquet built-in
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ⚠️ (CLI)
+     - ✅
+   * - Compression built-in
+     - ✅
+     - ❌
+     - ✅
+     - ❌
+     - ❌
+     - ✅
+     - ❌
+     - ✅
+   * - No schema (Schema-less)
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+   * - Dataclass mapping [z]_
+     - ✅
+     - ❌
+     - ⚠️
+     - ❌
+     - ❌
+     - ⚠️
+     - ❌
+     - ❌
+   * - Groups / Namespaces
+     - ✅
+     - ✅
+     - ⚠️
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+     - ✅
+   * - Nested groups + fan-out queries
+     - ✅
+     - ⚠️ (flat)
+     - ❌
+     - ⚠️
+     - ⚠️ (flat)
+     - ⚠️ (CF)
+     - ⚠️ (SQL)
+     - ⚠️ (SQL)
+   * - Pure Python (PyPy-friendly)
+     - ✅
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Pythonic queries (Lambda/Regex)
+     - ✅
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Deep nested search
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Graph database engine
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Undo / Redo (Time-Travel)
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Time-series date slicing 
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Network mode (incl. groups)
+     - ✅
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+     - ❌
+   * - Relative speed 500K records [x]_
+     - 1.00x (baseline)
+     - 41.47x
+     - 60.95x
+     - 4.28x
+     - 0.94x
+     - 0.45x
+     - 0.13x
+     - 0.21x
+   * - Relative speed 10M records [x]_
+     - 1.00x (baseline)
+     - N/A [y]_
+     - N/A [y]_
+     - 24.07x
+     - 1.31x
+     - 0.55x
+     - 0.16x
+     - 0.05x
+
+.. [t] ``with jdb.transaction():`` undoes everything the block wrote if it raises — see `Transactions`_. Exception-safe, not crash-safe: a ``kill -9`` is not rolled back.
 .. [x] Lower is faster. (see the `benchmark <https://github.com/lukatrum/omni-json-db/blob/main/benchmark/report.txt>`_ for the full breakdown and methodology)
 .. [y] Impractically slow
 .. [z] Write a ``@dataclass`` and read it back as an object. ⚠️ = the object can be *stored*, but only as an opaque ``pickle`` blob: its fields are invisible to queries, and the file is unreadable outside Python.
@@ -115,6 +259,8 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 * **Operational Modes**: Supports In-Memory mode (``JMemFiles``) for high performance and Network mode (``JNetFiles``) to serve data over a network. [refer to `In-memory Mode`_ + `Network Mode`_ ]
 
 * **State Management**: Built-in "Time-Travel" allows you to track states, undo modifications (``unmodify()``), or recover deleted data (``unremove()``). ``history()`` lists every version still reachable, and ``min_safe`` decides how many of them survive. [refer to `Unremove & Unmodify`_ + `Record History`_ + `Backup & Restore`_]
+
+* **All-or-Nothing Writes**: ``with jdb.transaction():`` opens a write session that puts back everything it changed if the block raises — modifications, deletions, bulk inserts and renames alike. Nesting acts as a savepoint. [refer to `Transactions`_]
 
 * **Batch Writes**: Bulk inserts take a dedicated append path — one ``write()`` per VAL file and one encoded block for the KEY rows instead of a syscall per record — so ``jdb += rows``, ``insert()`` and every importer land 1.4x–4.5x faster with no API change. [refer to `Bulk Insert`_]
 
@@ -475,6 +621,77 @@ expected.
    applies while ``JFlag.REVERT`` is active — without it there is no history to
    protect.
 
+Transactions
+------------
+
+``transaction()`` is ``open(read_only=False)`` plus an undo log: it yields the
+same file-pointer table, but if the block leaves through an exception every KEY
+row it touched is put back.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb("fruit.jdb")
+   jdb["apple"] = "red"
+
+   try:
+       with jdb.transaction():
+           jdb["apple"] = "green"        # modify
+           jdb["banana"] = "yellow"      # add
+           del jdb["apple"]              # delete
+           raise RuntimeError("something went wrong")
+
+   except RuntimeError:
+       pass
+
+   assert jdb["apple"] == "red"          # every change is undone
+   assert "banana" not in jdb
+
+Anything the block writes is rolled back — ``insert()``/``+=`` bulk paths and
+``rename()`` included — and it does not need ``JFlag.REVERT``: the undo log is
+the KEY rows themselves, not the parked history ``revert()`` walks.
+
+Nesting is a savepoint. An inner block that fails rolls back only its own
+writes; an outer rollback still reaches the state from before either block.
+
+.. code-block:: python
+
+   with jdb.transaction():
+       jdb["a"] = 1
+       try:
+           with jdb.transaction():       # savepoint
+               jdb["a"] = 2
+               raise RuntimeError
+       except RuntimeError:
+           pass
+
+       assert jdb["a"] == 1              # only the inner block was undone
+
+   assert jdb["a"] == 1                  # ... and the outer block committed
+
+The block yields the file-pointer table, so the ``f_*`` API works inside it
+exactly as it does inside ``open()``:
+
+.. code-block:: python
+
+   with jdb.transaction() as fp:
+       for fruit, color in fruits.items():
+           jdb.f_write(fp, fruit, color)
+
+..
+
+   **What it does not promise.** The undo log lives in memory: an exception is
+   undone, a crash is not. Rollback restores the KEY index only, so bytes
+   appended to the VAL files stay as dead space until ``recycle()`` collects
+   them, and while the block is open no dead row or dead VAL slot is reused —
+   a long transaction therefore grows the files faster than the same writes
+   outside one would. Operations that reach outside the KEY index
+   (``add_group()``, ``del_group()``, ``recycle()``, ``clear()``,
+   ``resize_index_size()``, ``change_KEY()``) raise ``JValueError`` rather than
+   escape the rollback, and a group is a separate KEY file, so writes routed
+   into one are not covered.
+
 Backup & Restore
 ----------------
 
@@ -500,6 +717,19 @@ Backup & Restore
 
    # restore bak folder to jdb
    jdb.restore(folder='bak')
+   assert jdb == fruits
+
+   # ... or let the whole block undo itself (see the Transactions section)
+   try:
+      with jdb.transaction() as fp:
+         for fruit in fruits:
+            jdb.f_delete(fp, fruit)
+
+         raise RuntimeError
+
+   except RuntimeError:
+      pass
+
    assert jdb == fruits
 
 Groups Mode

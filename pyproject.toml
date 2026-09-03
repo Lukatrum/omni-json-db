@@ -3,15 +3,19 @@ requires = ["setuptools >= 77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-exclude = ["artwork", "tests", "benchmark", "db", "docs"]
+include = ["omni_json_db*"]
+
+# PEP 561 marker: ships the inline type hints to mypy / pyright users.
+[tool.setuptools.package-data]
+omni_json_db = ["py.typed"]
 
 [project]
 name = "omni_json_db"
-version = "3.00.10"
+version = "3.00.11"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
-description = "A powerful KV JSON DB + Graph DB with Time-Travel, concurrency and compression. The NoSQL alternative to TinyDB for effortlessly managing GB-scale data."
+description = "A powerful KV DB + Graph DB with Time-Travel, concurrency and compression. The NoSQL alternative to TinyDB for effortlessly managing GB-scale data."
 readme = "README.rst"
 requires-python = ">=3.7,<4"
 keywords = [
@@ -70,6 +74,7 @@ keywords = [
 ]
 classifiers = [
 	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3 :: Only",
 	"Programming Language :: Python :: 3.7",
 	"Programming Language :: Python :: 3.8",
 	"Programming Language :: Python :: 3.9",
@@ -91,13 +96,11 @@ classifiers = [
     "Topic :: Database :: Front-Ends",
     "Topic :: File Formats",
     "Topic :: File Formats :: JSON",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
 
-# Zero required third-party dependencies: omni-json-db runs on a clean Python
-# install using built-in pure-Python fallbacks (msgpack, JSON, bitarray, ...).
-# Everything below is optional and only makes it faster or adds extra formats.
 dependencies = []
 
 license="MIT"
@@ -105,13 +108,6 @@ license-files = ["LICEN[CS]E*"]
 
 [project.optional-dependencies]
 # --- Faster drop-in accelerators (pure-Python fallbacks are built in) --------
-# No new features; these just speed up the default code paths. On PyPy the
-# pure-Python paths are already fast, so orjson/msgpack are skipped there.
-# msgspec encodes the KEY index rows (byte-identical msgpack, ~2.2x faster than
-# the msgpack C extension). pip picks the newest build each interpreter allows:
-# py3.8 -> 0.18.6, py3.9 -> 0.20.0, py3.10+ -> 0.21.x. py3.7 and PyPy have no
-# wheels and fall back to msgpack, then to the built-in pure-Python encoder.
-# msgpack is still needed for VAL rows (set/frozenset ext codes) and Unpacker.
 speed = [
 	"orjson>=3.9.7;    platform_python_implementation != 'PyPy'",
 	"msgspec>=0.18.6;  python_version >= '3.8' and platform_python_implementation != 'PyPy'",
@@ -134,8 +130,7 @@ yaml = ["PyYAML>=6.0.3; python_version != '3.7'"]
 btree = ["BTrees>=5.2"]
 
 # --- Convenience bundles -----------------------------------------------------
-# Self-referencing extras (needs pip >= 21.2). See README note for the
-# explicit-list alternative if you must support very old pip on Python 3.7.
+# Self-referencing extras (needs pip >= 21.2).
 full = ["omni_json_db[speed,compression,yaml,btree]"]
 all  = ["omni_json_db[full]"]
 

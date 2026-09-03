@@ -2162,6 +2162,11 @@ class JDbReader(JDbBase):
         database files. Nested calls from the same thread are counted; files
         are closed and the lock released when the outermost call exits.
 
+        Only the outermost call reads its arguments. A nested call reuses the
+        session the outer one opened, so its ``read_only`` and ``no_raise`` are
+        ignored -- except that a nested ``read_only=False`` reopens the file
+        pointers in write mode.
+
         Args:
             read_only (bool, optional): Request a shared read lock instead of
                 an exclusive write lock. Defaults to ``True``.

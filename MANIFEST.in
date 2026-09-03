@@ -3,3 +3,6 @@ prune docs
 prune tests
 prune db
 prune artwork
+
+# PEP 561 marker must survive into the sdist
+include omni_json_db/py.typed
