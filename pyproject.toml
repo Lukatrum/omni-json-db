@@ -11,7 +11,7 @@ omni_json_db = ["py.typed"]
 
 [project]
 name = "omni_json_db"
-version = "3.00.12"
+version = "3.00.13"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]

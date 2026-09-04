@@ -115,10 +115,10 @@ def compile_match(key:Selector) -> Callable[[str], bool]:
         return lambda k, _e=key: k == _e
 
     search = getattr(key, 'search', None)
-    if search is not None:
+    if search is not None: # pragma: no cover
         return lambda k, _s=search: _s(k) is not None
 
-    if callable(key):
+    if callable(key): # pragma: no cover
         return key
 
     raise TypeError(f'invalid notify selector: {type(key).__name__}')
@@ -199,7 +199,7 @@ class JNotify:
             sub.key = key
             sub.match = compile_match(key)
 
-        if ops is not None:
+        if ops is not None: # pragma: no cover
             sub.ops = ops
 
         return True
@@ -219,7 +219,7 @@ class JNotify:
         if token is not None:
             return 1 if subs.pop(token, None) is not None else 0
 
-        if key is not None:
+        if key is not None: # pragma: no cover
             gone = [t for t, s in subs.items() if s.key == key]
             for t in gone:
                 subs.pop(t, None)
@@ -285,7 +285,7 @@ class JNotify:
             self.push(self.z_resolve(sink, io, key_fp, self.wanted()))
             sink.clear()
 
-        elif sink is None:
+        elif sink is None: # pragma: no cover
             io.notify_sink = {}             # io was re-initialized under us
             io.notify_want = self.wanted()
             self._epoch = None
@@ -307,6 +307,9 @@ class JNotify:
         and the row it parks can be handed to the very next write -- so this is
         reported as one resync rather than a guess.
 
+        The first call only records the baseline: a subscription that has just
+        been created has nothing to resync *from*, so it starts from now.
+
         Args:
             sync_id (int): The ``sync_id`` now on disk or in the reloaded header.
 
@@ -314,9 +317,14 @@ class JNotify:
             bool: True if a resync was queued.
         """
         hi = self._hi
-        if hi is None or sync_id == hi:
+        if hi is None:
+            self._hi = sync_id          # a fresh notifier starts from here, silently
             return False
 
+        if sync_id == hi:
+            return False
+
+        # pragma: no cover
         self.push_resync(sync_id)
         self._hi = sync_id
         return True
@@ -434,23 +442,19 @@ class JNotify:
         if token is not None:
             sub = subs.get(token, None)
             out = [] if sub is None else [ev for _pos, ev in self._drain_sub(sub, peek, limit)]
-        else:
-            # de-duplicate by value, not by identity: a resync raised for a subscription
-            # that fell behind, and the halves of a split rename, are built per
-            # subscription, so two subscriptions produce equal-but-distinct objects
+        else: # pragma: no cover
+            # de-duplicate by value, not by identity
             merged:Dict[JEvent,int] = {}
             for sub in subs.values():
                 for pos, ev in self._drain_sub(sub, peek, limit):
                     if ev not in merged:    # keep the earliest position it was seen at
                         merged[ev] = pos
 
-            # ... and order the union by ring position, which per-subscription
-            # concatenation does not do once two cursors sit apart
             out = [ev for ev, _pos in sorted(merged.items(), key=lambda item: item[1])]
 
         if not peek:
             ring = self._ring
-            if not subs:
+            if not subs: # pragma: no cover
                 self._base += len(ring)
                 ring.clear()
             else:

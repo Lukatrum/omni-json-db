@@ -17,7 +17,6 @@ from .jdb_io import JIo, MAX_INDEX_SIZE, MIN_INDEX_SIZE, MAX_KEY_SIZE, \
         g_VAL_J, g_VAL_S, g_VAL_M, g_VAL_P, g_VAL_Y, g_VAL_U, NOTIFY_SINK_LIMIT
 from .jdb_file import JFilesBase
 from .jdb_query import Condition
-from .jdb_notify import JNotify, JEvent, Selector, ALL_OPS, DEFAULT_OPS, RING_LIMIT
 from .jdb_dc import  dc_key, dc_to_dict, dc_value, dc_records, dc_keys, is_dc
 from .jdb_codec import conv_ttl, MAX_TTL_DAYS, HALF_MIN_DAYS
 from .utils import Style, JValueError, JKeyError, JTypeError, deepcopy, \
@@ -4750,224 +4749,6 @@ class JDb(JDbReader):
         if error is not None:
             raise error
 
-    def add_notify(self, key:Selector='*', ops:str=DEFAULT_OPS, limit:int=RING_LIMIT) -> int:
-        """Subscribe to changes and start recording them.
-
-        Nothing is delivered until the caller asks: :meth:`get_notify` returns
-        what this subscription has not seen yet. No thread is started, no
-        callback is registered, and the recorder is switched off again when the
-        last subscription is removed.
-
-        Args:
-            key (Selector, optional): ``'*'`` for every key, an exact key, a
-                glob (``'user:*'``), a compiled regular expression, or any
-                callable taking the key. Defaults to ``'*'``.
-            ops (str, optional): Which opcodes to deliver, any of
-                :data:`~omni_json_db.jdb_notify.ALL_OPS`. ``'Z'`` (resync) is
-                always delivered whether it is listed or not, and a rename is
-                delivered as its delete/create pair when ``'R'`` is not listed.
-                Defaults to ``'CUDXRM'``.
-            limit (int, optional): Events the ring holds for the slowest
-                subscription before the oldest are dropped and the consumer
-                that fell behind is handed a resync instead. Read once, when
-                the first subscription is created. Defaults to 65536.
-
-        Returns:
-            int: The subscription token, for :meth:`get_notify`,
-            :meth:`set_notify` and :meth:`del_notify`.
-
-        Raises:
-            JValueError: If ``ops`` holds a letter that is not an opcode.
-
-        Example:
-            >>> tok = jdb.add_notify('user:*', ops='CUD')
-            >>> jdb['user:42'] = {'name': 'ada'}
-            >>> jdb.get_notify(tok)
-            [JEvent(key='user:42', op='C', ver=1, old_key='', flags=0)]
-        """
-        ops = ''.join(dict.fromkeys(str(ops).upper()))
-        bad = set(ops).difference(ALL_OPS)
-        if bad:
-            raise JValueError(f'invalid notify ops: {"".join(sorted(bad))} (allowed: {ALL_OPS})')
-
-        with self.lock:
-            notify = self._notify
-            if notify is None:
-                notify = self._notify = JNotify(limit)
-
-            token = notify.add(key, ops)
-            io = self.io
-            if io.notify_sink is None:
-                io.notify_sink = {}
-
-            io.notify_want = notify.wanted()
-            return token
-
-    def _notify_peek(self, notify:JNotify) -> None:
-        """Read the 128-byte KEY header and queue a resync if somebody else moved it.
-
-        The read takes no lock: it is a hint, and a torn header costs at most
-        one extra resync. The authoritative comparison happens at the next
-        :meth:`open` entry.
-
-        Args:
-            notify (JNotify): This handle's event ring.
-        """
-        key_fp = None
-        try:
-            key_fp = self.files_obj.KEY_open('rb', buffering=0)
-            head = key_fp.read(HEADER_SIZE)
-            if len(head) >= HEADER_SIZE:
-                notify.check_foreign(self.io.HEAD_loads(head)[0])
-
-        except (OSError, ValueError, IndexError, TypeError): # pragma: no cover
-            pass                        # no file yet, or a header we cannot read: nothing to report
-
-        finally:
-            if key_fp is not None:
-                key_fp.close()
-
-    def get_notify(self, \
-            token:Optional[int]=None, \
-            peek:bool=False, \
-            limit:Optional[int]=None, \
-            sync:bool=True) -> List[JEvent]:
-        """Collect the changes a subscription has not seen yet.
-
-        Events become visible when the outermost :meth:`open` block that
-        produced them exits, so a write made inside a still-open block is
-        reported after the block, not during it.
-
-        Args:
-            token (Optional[int], optional): The subscription to drain.
-                ``None`` drains every subscription, merged and de-duplicated.
-                Defaults to None.
-            peek (bool, optional): Return the events without advancing the
-                cursor, so the next call sees them again. Defaults to False.
-            limit (Optional[int], optional): Stop after this many ring entries.
-                Defaults to None.
-            sync (bool, optional): Peek at the KEY header first, so a change
-                another process made while this handle was idle is reported as
-                a resync. Costs one 128-byte read. Pass ``False`` for a
-                single-process database, or when polling hard. Defaults to True.
-
-        Returns:
-            List[JEvent]: Matching events, oldest first. A leading
-            ``op='Z'`` event means the key space changed wholesale (``clear``,
-            ``recycle``, an index rebuild) or the ring dropped events this
-            subscription had not read: re-read what matters instead of
-            replaying. An unknown token returns ``[]``.
-
-        Example:
-            >>> tok = jdb.add_notify('*')
-            >>> jdb['a'] = 1
-            >>> del jdb['a']
-            >>> [(e.key, e.op) for e in jdb.get_notify(tok)]
-            [('a', 'D')]
-        """
-        with self.lock:
-            notify = self._notify
-            if notify is None:
-                return []
-
-            if sync:
-                self._notify_peek(notify)
-
-            return notify.drain(token, peek, limit)
-
-    def set_notify(self, token:int, \
-            key:Optional[Selector]=None, \
-            ops:Optional[str]=None) -> bool:
-        """Retarget a subscription without losing its place in the stream.
-
-        Args:
-            token (int): The subscription to change.
-            key (Optional[Selector], optional): New selector, ``None`` keeps
-                the current one. Defaults to None.
-            ops (Optional[str], optional): New opcode filter, ``None`` keeps
-                the current one. Defaults to None.
-
-        Returns:
-            bool: True if the subscription existed.
-
-        Raises:
-            JValueError: If ``ops`` holds a letter that is not an opcode.
-
-        Note:
-            A key no subscription matches is never recorded in the first place,
-            which is what keeps an exact-key subscription free on a bulk load.
-            *Widening* a selector therefore reaches new events only: changes
-            that happened while nothing wanted them were never buffered.
-            Narrowing takes effect on unread events as well.
-
-        Example:
-            >>> jdb.set_notify(tok, key='user:4*', ops='CUD')
-            True
-        """
-        if ops is not None:
-            ops = ''.join(dict.fromkeys(str(ops).upper()))
-            bad = set(ops).difference(ALL_OPS)
-            if bad:
-                raise JValueError(f'invalid notify ops: {"".join(sorted(bad))} (allowed: {ALL_OPS})')
-
-        with self.lock:
-            notify = self._notify
-            if notify is None or not notify.set(token, key, ops):
-                return False
-
-            self.io.notify_want = notify.wanted()
-            return True
-
-    def del_notify(self, token:Optional[int]=None, key:Optional[Selector]=None) -> int:
-        """Remove subscriptions; recording stops when the last one goes.
-
-        Args:
-            token (Optional[int], optional): Remove just this one.
-            key (Optional[Selector], optional): Remove every subscription
-                registered with an equal selector.
-
-        Returns:
-            int: How many subscriptions were removed. Passing neither argument
-            removes them all.
-
-        Example:
-            >>> jdb.del_notify(tok)
-            1
-            >>> jdb.del_notify()        # whatever is left
-            0
-        """
-        with self.lock:
-            notify = self._notify
-            if notify is None:
-                return 0
-
-            gone = notify.remove(token, key)
-            io = self.io
-            if notify:
-                io.notify_want = notify.wanted()
-            else:
-                self._notify = None
-                io.notify_sink = io.notify_want = None
-
-            return gone
-
-    def notify_stats(self) -> Dict[str,int]:
-        """Report how much the notification ring is holding.
-
-        Returns:
-            Dict[str, int]: ``subs`` (live subscriptions), ``buffered`` (events
-            retained for the slowest one), ``base`` (absolute index of the
-            oldest retained event) and ``lost`` (events the ring cap dropped).
-            All zero when notification is off.
-
-        Example:
-            >>> jdb.notify_stats()['subs']
-            1
-        """
-        with self.lock:
-            notify = self._notify
-            return {'subs': 0, 'buffered': 0, 'base': 0, 'lost': 0} if notify is None else notify.stats()
-
     def _get_dead_row(self, key_fp:IO, key:str, req_size:int, \
             flags:Optional[JFlag]=None, \
             max_wsize:Optional[int]=None) -> Tuple[int,int,int,int,int]:
@@ -6049,7 +5830,7 @@ class JDb(JDbReader):
                             if want is None or want(key):
                                 sink[key] = ('C', ver0 + jj, new_kflags, '')
 
-                        if len(sink) > NOTIFY_SINK_LIMIT:
+                        if len(sink) > NOTIFY_SINK_LIMIT: # pragma: no cover
                             sink.clear()    # a bulk load wants one re-read, not 10M events
                             sink[''] = ('Z', ver, 0, '')
 
@@ -6375,7 +6156,7 @@ class JDb(JDbReader):
             break
 
         flags = self.flags if flags is None else flags
-        if io._undo is not None:
+        if io._undo is not None: # pragma: no cover
             flags = JFlag(int(flags) | F_REVERT)
         dead_row = row
         n_lines = io.n_lines

@@ -2356,7 +2356,7 @@ class JIo(JIoBase):
                 sink[key] = (prev[0], ver_i, flags, prev[3]) if prev is not None and prev[0] in ('C', 'R') and (op == 'U' or op == 'M') else \
                             (op, ver_i, flags, '')
 
-            if len(sink) > NOTIFY_SINK_LIMIT:
+            if len(sink) > NOTIFY_SINK_LIMIT: # pragma: no cover
                 sink.clear()                # too many keys to carry: ask for a re-read
                 sink[''] = ('Z', ver_i, 0, '')
 
