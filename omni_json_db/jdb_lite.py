@@ -1033,7 +1033,7 @@ class JDbReader(JDbBase):
     """
     __slots__ = ('files_obj', 'lock', '_cache_limit', '_cache', 'file_lock', 'keys',
                 'io', 'fsize', 'th_table', 'safe_line', 'min_safe', 'chg_keys',
-                'write_hook', 'max_wsize', 'flags', '_warm_th', '_warm_err')
+                'write_hook', 'max_wsize', 'flags', '_warm_th', '_warm_err', '_notify')
 
     def __init__(self,\
                 KEY_file:Union[str,bytearray,JFilesBase,JDbReader,None]=None,\
@@ -1223,7 +1223,7 @@ class JDbReader(JDbBase):
                                         close=files_obj.LCK_close, \
                                         remove=files_obj.LCK_remove)
         self.lock = RLock() # solve iter issue [cannot use Lock]
-        self._warm_th = self._warm_err = None
+        self._warm_th = self._warm_err = self._notify = None
         self.fsize = self.safe_line = 0
         self.th_table:Dict[int,dict] = {}
         self.chg_keys:Set = set()
@@ -1882,19 +1882,23 @@ class JDbReader(JDbBase):
             expired_keys.sort(reverse=True)
             f_delete = self.f_delete
             key_table = io.key_table
-            for _row_id, key in expired_keys:
-                if has_SIGINT():
-                    break
+            io.notify_op = 'X' # these deletes are expiries, not a caller's
+            try:
+                for _row_id, key in expired_keys:
+                    if has_SIGINT():
+                        break
 
-                row_id = key_table.get(key, -1, fp=key_fp)
-                if row_id >= 0:
-                    try:
-                        jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=KF_UNLOCK)
-                        if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
-                            jdb.remove_fast(jdb, key_flags=KF_UNLOCK)
+                    row_id = key_table.get(key, -1, fp=key_fp)
+                    if row_id >= 0:
+                        try:
+                            jdb = f_delete(fp_dict, key, row=row_id, read_value=False, key_flags=KF_UNLOCK)
+                            if isinstance(jdb, JDbReader) and files_obj.is_group(jdb.files_obj, key): # pragma: no cover
+                                jdb.remove_fast(jdb, key_flags=KF_UNLOCK)
 
-                    except (OSError, KeyError): # pragma: no cover
-                        continue
+                        except (OSError, KeyError): # pragma: no cover
+                            continue
+            finally:
+                io.notify_op = None
 
         expired_keys.clear()
 
@@ -2140,6 +2144,10 @@ class JDbReader(JDbBase):
                 thd['cnt'] = cnt = thd['cnt'] - 1
                 if cnt <= 0:
                     flags = self.flags
+                    if self._notify is not None:
+                        # self.io, not io
+                        self._notify.collect(self.io, fp_dict.get(-1, None))
+
                     chg_keys.clear()
                     is_dirty = file_lock.mode == 'w'
                     for fp in fp_dict.values():
@@ -2150,8 +2158,8 @@ class JDbReader(JDbBase):
                             fp.close()
 
                     fp_dict.clear()
-                    if io._index_cache: # pragma: no cover
-                        io.save_kix()
+                    if self.io._index_cache: # pragma: no cover
+                        self.io.save_kix()
                     th_table.pop(ident, 0)
 
                 file_lock.release()
@@ -2252,6 +2260,9 @@ class JDbReader(JDbBase):
                 chg_keys.clear()
                 sync_id = io.sync_id
                 fsize = io.file_size
+                if self._notify is not None:
+                    self._notify.check_foreign(sync_id)
+
                 yield fp_dict
 
             except AttributeError as e: # pragma: no cover
@@ -2336,6 +2347,9 @@ class JDbReader(JDbBase):
                     thd['cnt'] = cnt = thd['cnt'] - 1
                     if cnt <= 0:
                         flags = self.flags
+                        if self._notify is not None:
+                            self._notify.collect(io, fp_dict.get(-1, None))
+
                         chg_keys.clear()
                         is_dirty = file_lock.mode == 'w' and (fsize != io.file_size or sync_id != io.sync_id)
                         for fp in fp_dict.values():

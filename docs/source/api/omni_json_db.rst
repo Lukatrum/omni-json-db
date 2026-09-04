@@ -103,3 +103,12 @@ omni\_json\_db.jdb\_dc
    :exclude-members:
 
 
+omni\_json\_db.jdb\_notify
+------------------------------------
+
+.. automodule:: omni_json_db.jdb_notify
+   :members:
+   :show-inheritance:
+   :undoc-members: 
+   :exclude-members:
+

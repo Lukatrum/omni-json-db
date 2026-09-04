@@ -692,6 +692,102 @@ exactly as it does inside ``open()``:
    escape the rollback, and a group is a separate KEY file, so writes routed
    into one are not covered.
 
+Change Notification
+-------------------
+
+``add_notify()`` starts recording what changes; ``get_notify()`` hands it to you
+when you ask. There is no worker thread, no queue and no callback — your code
+runs on your own stack, outside every database lock, and nothing is recorded at
+all until the first subscription exists.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb("fruit.jdb")
+   tok = jdb.add_notify("*")             # every key
+
+   jdb["apple"] = "red"
+   jdb["apple"] = "green"
+   del jdb["apple"]
+
+   for ev in jdb.get_notify(tok):
+       print(ev.op, ev.key, ev.ver)      # C apple 0 / U apple 1 / D apple 2
+
+A subscription is an exact key, a glob, a compiled regular expression or any
+callable, plus the opcodes it wants. Each one owns its own cursor, so several
+consumers can poll at different rates without getting in each other's way.
+
+.. code-block:: python
+
+   import re
+
+   cache  = jdb.add_notify("user:*", ops="CUD")     # glob
+   purge  = jdb.add_notify(re.compile(r"^tmp:"))    # regex
+   config = jdb.add_notify("config")                # exact key
+
+   jdb.set_notify(cache, key="user:4*")             # retarget, keep the cursor
+   jdb.del_notify(purge)                            # unsubscribe
+   jdb.del_notify()                                 # ... all of them: recording stops
+
+Events are **coalesced per transaction**: one event per key, in its final state.
+``set`` → ``set`` → ``delete`` inside one ``open()`` block delivers ``D``, not
+three events. A write that stores a value identical to the one already there
+delivers nothing, because the engine does not write it.
+
+======  ==========================================================================
+``C``   created
+``U``   value updated
+``D``   deleted by the caller
+``X``   dropped because its TTL ran out
+``R``   renamed — ``ev.old_key`` carries the previous name, and the event reaches
+        subscriptions matching *either* name
+``M``   metadata only (flags, ttl, dates) — the stored value did **not** change
+``Z``   resync: the key space changed wholesale, re-read what you care about
+======  ==========================================================================
+
+``Z`` arrives from ``clear()``, ``recycle()``, an index rebuild, a write by
+another process, or a consumer that fell so far behind that its events were
+dropped. It carries no key and is never filtered out by ``ops``. Treat it as
+"my snapshot is stale", not as an error.
+
+.. code-block:: python
+
+   for ev in jdb.get_notify(tok):
+       if ev.op == "Z":
+           cache.clear()                 # re-read from the database
+       elif ev.op in ("D", "X"):
+           cache.pop(ev.key, None)
+       elif ev.op == "R":
+           cache[ev.key] = cache.pop(ev.old_key, None)
+       elif ev.op != "M":
+           cache[ev.key] = jdb[ev.key]
+
+A transaction that rolls back emits nothing: events are handed over when the
+outermost ``open()`` block exits, after the commit-or-rollback decision. That
+also means a write made inside a block you are still holding is reported when
+the block ends, not while it is open.
+
+..
+
+   **Cost.** Recording is a dict entry per changed key on the writer's thread:
+   per-record writes measured **+1.4%** with an exact-key subscription and
+   **+6.5%** with a wildcard one, and one batched ``add()`` of 50 000 records
+   was free for an exact key and **+25%** for a wildcard (the price of building
+   50 000 events). ``get_notify()`` costs ~1.4 µs when idle, or ~6.3 µs with the
+   default ``sync=True``, which peeks at the 128-byte KEY header so a change
+   another process made is reported as ``Z``. Pass ``sync=False`` on a
+   single-process database or when polling hard.
+
+   **What it does not promise.** It is a change feed, not an audit log: a key
+   that changed five times in one transaction is reported once. Which keys a
+   *different process* changed is not recoverable — a delete leaves no live row
+   — so cross-process activity arrives as ``Z``. Writes routed into a group are
+   recorded by that group's own handle, not the parent's. Nothing is persisted:
+   a restarted process starts from the current state, and a consumer that never
+   calls ``get_notify()`` is eventually handed a ``Z`` instead of an unbounded
+   backlog.
+
 Backup & Restore
 ----------------
 

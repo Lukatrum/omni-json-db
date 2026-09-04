@@ -1084,6 +1084,7 @@ def grouped_by_rules(rows:List[Tuple[str,tuple]], key_parts_list:Optional[List[L
         ret_rows.append((gval, (gout, cdate, mdate, mod_id)))
 
     return ret_rows
+
 #-----------------------------------------------------------------------------
 def _apply_transform(op: str, val: Any) -> Any:
     """Apply a single in-path value-transform operator.

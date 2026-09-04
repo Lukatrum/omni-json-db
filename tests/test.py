@@ -11845,6 +11845,235 @@ class TestJDb(unittest.TestCase):
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
+    def test_notify(self):
+        def ops_of(events):
+            return [(ev.key, ev.op) for ev in events]
+
+        def data_ops(events):
+            # a key that no longer fits the index row rebuilds the whole KEY file
+            # (JIo.resize_keys), which legitimately reports a resync -- api_ver 1
+            # needs one byte more for a key flag than api_ver 2 does, so whether it
+            # happens is a property of the config, not of the write
+            return [(ev.key, ev.op) for ev in events if ev.op != 'Z']
+
+        for config in self.jdb_configs:
+            st_time = time.perf_counter()
+            filename = config['KEY_file']
+            cache_limit = config['cache_limit']
+
+            jdb = self.jdbs[filename]
+            self.assertIsNotNone(jdb)
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            self.assertEqual(len(jdb), 0)
+            print(Style(f'Testing {filename} {jdb} rate:{jdb.reserved_rate*100.:.1f}% cache:{cache_limit}', yellow=1))
+            # --------------------------------------------
+            test_size = 24
+            expect = {f'key{v}':list(range(v+1)) for v in range(test_size)}
+
+            # nothing is recorded, and nothing costs anything, until the first subscription
+            chg = jdb.insert(expect)
+            self.assertEqual(chg, expect)
+            self.assertIsNone(jdb.io.notify_sink)
+            self.assertIsNone(jdb.io.notify_want)
+            self.assertEqual(jdb.get_notify(), [])
+            self.assertEqual(jdb.notify_stats(), {'subs':0, 'buffered':0, 'base':0, 'lost':0})
+
+            all_tok = jdb.add_notify('*')
+            self.assertIsNotNone(jdb.io.notify_sink)
+            self.assertEqual(jdb.notify_stats()['subs'], 1)
+            self.assertEqual(jdb.get_notify(all_tok), [])   # a new cursor starts at 'now'
+
+            # C / U / D, one event per key per open() block
+            jdb['n1'] = [1]
+            jdb['n1'] = [2]
+            del jdb['n1']
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('n1', 'C'), ('n1', 'U'), ('n1', 'D')])
+
+            # a write that stores the value already there is not a write, so not an event
+            jdb['key3'] = expect['key3']
+            self.assertEqual(jdb.get_notify(all_tok), [])
+
+            # coalesced inside one block: the first op says whether the key is new,
+            # the last says whether it survived
+            with jdb.open(read_only=False):
+                jdb['c1'] = [1]
+                jdb['c1'] = [2]
+                jdb['c2'] = [1]
+                del jdb['c2']
+
+            self.assertEqual(sorted(data_ops(jdb.get_notify(all_tok))), [('c1', 'C'), ('c2', 'D')])
+            jdb.remove('c1')
+            jdb.get_notify(all_tok)
+
+            # the batch path writes past write_key(), so it needs its own tap
+            batch = {f'b{v}':[v] for v in range(8)}
+            self.assertEqual(jdb.insert(batch), batch)
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [(k, 'C') for k in batch])
+
+            # rename carries the old name, and reaches a subscription on either name
+            old_tok = jdb.add_notify('b0')
+            new_tok = jdb.add_notify('b0x')
+            cud_tok = jdb.add_notify('*', ops='CUD')
+            self.assertTrue(jdb.rename({'b0':'b0x'}))
+            evs = [ev for ev in jdb.get_notify(all_tok) if ev.op != 'Z']
+            self.assertEqual(len(evs), 1)
+            self.assertEqual((evs[0].key, evs[0].op, evs[0].old_key), ('b0x', 'R', 'b0'))
+            self.assertEqual(data_ops(jdb.get_notify(old_tok)), [('b0x', 'R')])
+            self.assertEqual(data_ops(jdb.get_notify(new_tok)), [('b0x', 'R')])
+            self.assertEqual(data_ops(jdb.get_notify(cud_tok)), [('b0', 'D'), ('b0x', 'C')])
+            self.assertEqual(jdb.del_notify(old_tok) + jdb.del_notify(new_tok) + jdb.del_notify(cud_tok), 3)
+            jdb.rename({'b0x':'b0'})
+            jdb.get_notify(all_tok)
+
+            # metadata-only writes must not look like a value change
+            self.assertTrue(jdb.set_key_flags('key1', '+h'))
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('key1', 'M')])
+            self.assertTrue(jdb.set_key_flags('key1', '-h'))
+            jdb.get_notify(all_tok)
+
+            # ... and a TTL that ran out is not a caller's delete
+            jdb['ttl1'] = [1]
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('ttl1', 'C')])
+            gone = dt.datetime.now() - dt.timedelta(days=10)
+            self.assertTrue(jdb.set_date('ttl1', cdate=gone, mdate=gone, ttl=1))
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('ttl1', 'M')])
+            with self.assertRaises(KeyError):
+                _ = jdb['ttl1']
+
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('ttl1', 'X')])
+            self.assertFalse('ttl1' in jdb)
+
+            # a committed transaction delivers, a rolled-back one delivers nothing
+            with jdb.transaction() as fp:
+                jdb.f_write(fp, 'key8', 8)
+                jdb.f_write(fp, 't1', [1])
+
+            self.assertEqual(sorted(data_ops(jdb.get_notify(all_tok))), [('key8', 'U'), ('t1', 'C')])
+            jdb.remove('t1')
+            jdb['key8'] = expect['key8']
+            jdb.get_notify(all_tok)
+
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction() as fp:
+                    jdb.f_write(fp, 'key8', -8)
+                    jdb.f_write(fp, 't2', [2])
+                    jdb.f_delete(fp, 'key9')
+                    raise RuntimeError('rollback')
+
+            self.assertEqual(jdb.get_notify(all_tok), [])
+            self.assertEqual(jdb['key8'], expect['key8'])
+            self.assertTrue('key9' in jdb)
+            self.assertFalse('t2' in jdb)
+
+            # a savepoint that rolls back leaves the outer block's events alone
+            with jdb.transaction():
+                jdb['s1'] = [1]
+                with self.assertRaises(RuntimeError):
+                    with jdb.transaction():
+                        jdb['s2'] = [2]
+                        raise RuntimeError('rollback')
+
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('s1', 'C')])
+            self.assertFalse('s2' in jdb)
+            jdb.remove('s1')
+            jdb.get_notify(all_tok)
+
+            # each subscription owns its cursor; peek and limit do not move it
+            slow_tok = jdb.add_notify('*')
+            jdb['p1'] = [1]
+            jdb['p2'] = [2]
+            self.assertEqual(data_ops(jdb.get_notify(all_tok, peek=True)), [('p1', 'C'), ('p2', 'C')])
+            self.assertEqual(data_ops(jdb.get_notify(all_tok, limit=1)), [('p1', 'C')])
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('p2', 'C')])
+            self.assertEqual(jdb.get_notify(all_tok), [])
+            self.assertEqual(data_ops(jdb.get_notify(slow_tok)), [('p1', 'C'), ('p2', 'C')])
+            self.assertEqual(jdb.notify_stats()['buffered'], 0)  # both drained -> collected
+            self.assertEqual(jdb.del_notify(slow_tok), 1)
+
+            # a selector narrows what is recorded at all, and retargets without losing place
+            key_tok = jdb.add_notify('p*')
+            jdb['p3'] = [3]
+            jdb['other'] = [0]
+            self.assertEqual(data_ops(jdb.get_notify(key_tok)), [('p3', 'C')])
+            self.assertTrue(jdb.set_notify(key_tok, key='other*'))
+            self.assertFalse(jdb.set_notify(-1, key='x'))
+            jdb['other2'] = [0]
+            self.assertEqual(data_ops(jdb.get_notify(key_tok)), [('other2', 'C')])
+            self.assertEqual(jdb.del_notify(key_tok), 1)
+            jdb.remove('p1', 'p2', 'p3', 'other', 'other2')
+            jdb.get_notify(all_tok)
+
+            # an unknown token is empty, and a bad opcode is refused
+            self.assertEqual(jdb.get_notify(-1), [])
+            with self.assertRaises(JValueError):
+                jdb.add_notify('*', ops='CQ')
+
+            # compaction and clear() rewrite everything, so they ask for a re-read
+            jdb.recycle(merge=True, verbose=False)
+            evs = jdb.get_notify(all_tok)
+            self.assertTrue(evs and all(ev.op == 'Z' and ev.key == '' for ev in evs), ops_of(evs))
+            self.assertEqual(jdb.del_notify(), 1)
+            self.assertIsNone(jdb.io.notify_sink)
+            self.assertIsNone(jdb.io.notify_want)
+
+            # a consumer that falls behind is handed a resync, not a silent gap
+            ring_tok = jdb.add_notify('*', limit=4)
+            for ii in range(10):
+                jdb[f'r{ii}'] = [ii]
+
+            evs = jdb.get_notify(ring_tok)
+            self.assertEqual(evs[0].op, 'Z')            # ... not a silent gap
+            self.assertLessEqual(len(evs), 5)           # a ring of 4, plus the resync
+            self.assertGreaterEqual(jdb.notify_stats()['lost'], 6)
+            jdb.remove(*[f'r{ii}' for ii in range(10)])
+            self.assertEqual(jdb.del_notify(), 1)
+
+            # replaying the whole stream must land on the live key set, exactly
+            replay_tok = jdb.add_notify('*')
+            mirror = set(jdb.keys)
+            step = 0
+            for vv in range(0, test_size, 2):
+                jdb[f'key{vv}'] = [step]                        # update
+                jdb[f'w{vv}'] = [step]                          # create
+                if vv:
+                    jdb.remove(f'key{vv-1}')                    # delete
+
+                if vv % 6 == 0:
+                    jdb.insert({f'x{vv}':[vv], f'y{vv}':[vv]})  # batch create
+                    jdb.set_key_flags(f'key{vv}', '+h')         # metadata only
+                    jdb.rename({f'w{vv}': f'z{vv}'})            # rename
+
+                step += 1
+                for ev in jdb.get_notify(replay_tok):
+                    if ev.op == 'Z':            # what a real consumer does with a resync
+                        mirror = set(jdb.keys)
+                    elif ev.op == 'R':
+                        mirror.discard(ev.old_key)
+                        mirror.add(ev.key)
+                    elif ev.op in ('D', 'X'):
+                        mirror.discard(ev.key)
+                    elif ev.op != 'M':
+                        mirror.add(ev.key)
+
+            self.assertEqual(mirror, set(jdb.keys))
+            self.assertEqual(jdb.del_notify(), 1)
+
+            # clear() drops every key at once: one Z, never 30 000 D events
+            last_tok = jdb.add_notify('*')
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            evs = jdb.get_notify(last_tok)
+            self.assertTrue(evs and all(ev.op == 'Z' and ev.key == '' for ev in evs), ops_of(evs))
+            self.assertEqual(len(jdb), 0)
+            self.assertEqual(jdb.del_notify(), 1)
+            self.assertEqual(jdb.notify_stats(), {'subs':0, 'buffered':0, 'base':0, 'lost':0})
+
+            error = jdb.check_error()
+            self.assertTrue(not error, Style(f'{filename}:{jdb}', red=1))
+
+            used_s = time.perf_counter() - st_time
+            fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
+            print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
+
     def test_date(self):
         now = dt.datetime.now()
         cdate = now - dt.timedelta(days=10)

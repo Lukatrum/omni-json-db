@@ -12,6 +12,7 @@ from .jdb_lite import JDbReader, SEP_SYM
 from .jdb import JDb, IMPORT_BATCH_ROWS
 from .jdb_server import run_files_server
 from .jdb_query import Query
+from .jdb_notify import JEvent, JNotify, ALL_OPS as NOTIFY_OPS
 from .jdb_graph import GraphDb
 from .jdb_io import JIoVAL_U, JIoKEY_U, API_LATEST, \
                     register_user_key_codec, unregister_user_key_codec, \
@@ -23,7 +24,7 @@ __author__          = 'Lukatrum'
 __email__           = 'lukatrum@gmail.com'
 __description__     = 'A zero-config, powerful KV JSON database with compression/Time-travel/Concurrency. No schema, no setup, just data.'
 __url__             = 'https://github.com/Lukatrum/omni-json-db'
-__version__         = '3.00.11'
+__version__         = '3.00.12'
 
 __all__ = (
     'GraphDb',
@@ -37,6 +38,9 @@ __all__ = (
     'JLockError',
     'JKeyFlag',
     'JFlag',
+    'JEvent',
+    'JNotify',
+    'NOTIFY_OPS',
     'JBytesIO',
     'JIoVAL_U',
     'JIoKEY_U',

@@ -90,6 +90,8 @@ MAX_RATIO       = 256.
 DEF_KEY_LIMIT   = 0             # 0=DictKeyTable(dict)
 HEADER_SIZE     = 128
 
+NOTIFY_SINK_LIMIT = 1 << 16     # distinct keys one open() block buffers before it asks for a re-read
+
 KIX_MAGIC       = 0x4B495801    # 'KIX' + format rev
 KIX_MIN_ROWS    = 0x4000        # below this a full KEY scan is cheaper than the snapshot
 
@@ -1130,7 +1132,8 @@ class JIo(JIoBase):
             'KEY_dumps', 'KEY_loads', 'VAL_dumps', 'VAL_loads',\
             'HEAD_dumps', 'HEAD_loads','VAL_zip', 'VAL_unzip', 'VAL_unzip0',\
             'max_vfiles', '_val_codec', '_key_codec', '_now_sec', 'now',\
-            '_index_cache', '_kix_rows', 'min_kix_rows', '_undo')
+            '_index_cache', '_kix_rows', 'min_kix_rows', '_undo',\
+            'notify_sink', 'notify_op', 'notify_want')
 
     @staticmethod
     def z_zip_type_str(zip_type:int) -> str:
@@ -1429,6 +1432,9 @@ class JIo(JIoBase):
             = self.n_records = self.n_lines = 0
         self.pad_byte = self.pad0_byte = b'\x00'
         self._undo = self.key_table = None
+        self.notify_sink:Optional[dict] = None  # None = notification off
+        self.notify_op:Optional[str] = None     # forces the opcode of the next writes
+        self.notify_want:Optional[Callable[[str],bool]] = None  # None = every key is wanted
 
         self.file_table     = defaultdict(int)
         self.groups         = {}
@@ -2144,7 +2150,10 @@ class JIo(JIoBase):
         if undo is None:
             undo = self._undo = []
 
-        undo.append((self.n_lines, (self.sync_id, self.swap_id, self.remv_id, self.n_records, self.n_lines, dict(self.file_table)), {}))
+        sink = self.notify_sink
+        undo.append((self.n_lines, (self.sync_id, self.swap_id, self.remv_id, self.n_records, self.n_lines, dict(self.file_table)), {},
+                    None if sink is None else dict(sink)))
+
         return len(undo)
 
     def undo_rows(self, fp:IO, row_id:int, n_rows:int=1) -> None:
@@ -2158,7 +2167,7 @@ class JIo(JIoBase):
             row_id (int): First row about to change.
             n_rows (int, optional): How many consecutive rows. Defaults to 1.
         """
-        base, _head, log = self._undo[-1]
+        base, _head, log, _sink = self._undo[-1]
         stop = base if row_id + n_rows > base else row_id + n_rows
         read_key = self.read_key
         for rid in range(row_id, stop):
@@ -2173,12 +2182,12 @@ class JIo(JIoBase):
         still sees the state from before the whole transaction.
         """
         undo = self._undo
-        _base, _head, log = undo.pop()
+        _base, _head, log, _sink = undo.pop()
         if not undo:
             self._undo = None
             return
 
-        p_base, _p_head, p_log = undo[-1]
+        p_base, _p_head, p_log, _sink = undo[-1]
         for row_id, args in log.items():
             if row_id < p_base:
                 p_log.setdefault(row_id, args)
@@ -2195,8 +2204,9 @@ class JIo(JIoBase):
             fp (IO): The open KEY file pointer.
         """
         undo = self._undo
-        _base, head, log = undo[-1]
+        _base, head, log, sink = undo[-1]
         self._undo = None # our own writes must never be logged
+        notify_sink, self.notify_sink = self.notify_sink, None # ... nor notified
         try:
             sync_id, swap_id, remv_id, n_records, n_lines, file_table = head
             self.n_records = n_records
@@ -2214,6 +2224,12 @@ class JIo(JIoBase):
             self.file_table.clear()
             self.file_table.update(file_table)
         finally:
+            if notify_sink is not None:
+                notify_sink.clear()         # the block's events are undone with its rows
+                if sink:
+                    notify_sink.update(sink)
+                self.notify_sink = notify_sink
+
             undo.pop()
             self._undo = undo or None
 
@@ -2323,6 +2339,27 @@ class JIo(JIoBase):
                 _DEAD_rows.pop(next(iter(_DEAD_rows)), None)
 
         wr_size = fp.write(data + b' ' * pad_size + b'\n') if pad_size > 0 else fp.write(data + b'\n')
+        sink = self.notify_sink
+        if sink is not None and key:        # '' is the DEAD-row sentinel, not a record
+            want = self.notify_want
+            if want is not None and not want(key): # pylint: disable=not-callable
+                return wr_size              # no subscription covers this key
+
+            forced = self.notify_op
+            if row_id > self.n_records:
+                # parking an old version in the DEAD region: news only if nothing else is
+                sink.setdefault(key, (forced or 'D', ver_i, flags, ''))
+            else:
+                # a create and a delete's own row both land on n_records
+                op = forced or ('U' if key in self.key_table else 'C')
+                prev = sink.get(key, None)
+                sink[key] = (prev[0], ver_i, flags, prev[3]) if prev is not None and prev[0] in ('C', 'R') and (op == 'U' or op == 'M') else \
+                            (op, ver_i, flags, '')
+
+            if len(sink) > NOTIFY_SINK_LIMIT:
+                sink.clear()                # too many keys to carry: ask for a re-read
+                sink[''] = ('Z', ver_i, 0, '')
+
         return wr_size
 
     def read_key(self, fp:IO, row_id:int) -> Tuple[str,int,int,int,int,int,int,int,int,int]:
