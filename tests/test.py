@@ -17,6 +17,7 @@ from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     register_user_val_codec, register_user_key_codec, \
                     unregister_user_val_codec, unregister_user_key_codec, \
                     MAX_TTL_DAYS, MIN_OF_DAY, IMPORT_BATCH_ROWS, INT_manager, \
+                    JEvent, JNotify, \
                     conv_ttl, JValueError, JTypeError, JLockError
 try:
     import resource
@@ -11846,14 +11847,39 @@ class TestJDb(unittest.TestCase):
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
     def test_notify(self):
+        # a notifier with no subscription at all
+        notify = JNotify(limit=4)
+        self.assertIsNone(notify.wanted())
+        self.assertEqual(len(notify), 0)
+        self.assertEqual(notify.drain(None), [])
+        notify.push([JEvent('a', 'C', 1), JEvent('b', 'C', 2)])
+        self.assertEqual(notify.stats()['buffered'], 2)
+        self.assertEqual(notify.drain(None), [], 'nothing wants these events')
+        self.assertEqual(notify.stats(), {'subs':0, 'buffered':0, 'base':2, 'lost':0})
+        self.assertEqual(notify.remove(), 0)
+
+        # a resync is not repeated while one is still the newest thing in the ring
+        notify.push_resync(5)
+        notify.push_resync(6)
+        self.assertEqual(notify.stats()['buffered'], 1)
+
+        # split() off anything but a rename hands the event back twice, so a caller can splat it unconditionally
+        plain = JEvent('a', 'U', 7)
+        self.assertEqual(plain.split(), (plain, plain))
+        self.assertEqual(JEvent('z', 'R', 7, 'b').split(), (JEvent('b', 'D', 7), JEvent('z', 'C', 7)))
+
+        # a selector that is neither a string, a regex nor a callable is refused
+        with self.assertRaises(TypeError):
+            notify.add(42, 'CUD')
+
+        repr_tok = notify.add('a*', 'CUD')
+        self.assertIn('a*', repr(notify._subs[repr_tok]))
+        self.assertEqual(notify.remove(repr_tok), 1)
+
         def ops_of(events):
             return [(ev.key, ev.op) for ev in events]
 
         def data_ops(events):
-            # a key that no longer fits the index row rebuilds the whole KEY file
-            # (JIo.resize_keys), which legitimately reports a resync -- api_ver 1
-            # needs one byte more for a key flag than api_ver 2 does, so whether it
-            # happens is a property of the config, not of the write
             return [(ev.key, ev.op) for ev in events if ev.op != 'Z']
 
         for config in self.jdb_configs:
@@ -11893,8 +11919,7 @@ class TestJDb(unittest.TestCase):
             jdb['key3'] = expect['key3']
             self.assertEqual(jdb.get_notify(all_tok), [])
 
-            # coalesced inside one block: the first op says whether the key is new,
-            # the last says whether it survived
+            # coalesced inside one block
             with jdb.open(read_only=False):
                 jdb['c1'] = [1]
                 jdb['c1'] = [2]
@@ -11999,14 +12024,80 @@ class TestJDb(unittest.TestCase):
             self.assertFalse(jdb.set_notify(-1, key='x'))
             jdb['other2'] = [0]
             self.assertEqual(data_ops(jdb.get_notify(key_tok)), [('other2', 'C')])
+            self.assertTrue(jdb.set_notify(key_tok, ops='CUD'))      # ops alone, key kept
+            jdb['other3'] = [0]
+            self.assertEqual(data_ops(jdb.get_notify(key_tok)), [('other3', 'C')])
+            self.assertEqual(jdb.del_notify(key=lambda _k: False), 0)  # by selector, no match
             self.assertEqual(jdb.del_notify(key_tok), 1)
-            jdb.remove('p1', 'p2', 'p3', 'other', 'other2')
+            jdb.remove('p1', 'p2', 'p3', 'other', 'other2', 'other3')
             jdb.get_notify(all_tok)
 
-            # an unknown token is empty, and a bad opcode is refused
+            # a selector may also be a compiled regex, a callable, or a repeated one
+            re_tok = jdb.add_notify(re.compile(r'^re[0-9]$'))
+            fn_tok = jdb.add_notify(lambda kk: kk.endswith('!'))
+            dup1 = jdb.add_notify('dup*')
+            jdb.add_notify('dup*')
+            jdb['re7'] = [7]
+            jdb['bang!'] = [8]
+            jdb['dup1'] = [9]
+            self.assertEqual(data_ops(jdb.get_notify(re_tok)), [('re7', 'C')])
+            self.assertEqual(data_ops(jdb.get_notify(fn_tok)), [('bang!', 'C')])
+            self.assertEqual(data_ops(jdb.get_notify(dup1)), [('dup1', 'C')])
+            self.assertEqual(jdb.del_notify(key='dup*'), 2)          # both, by selector
+            self.assertEqual(jdb.notify_stats()['subs'], 3)          # all_tok, re_tok, fn_tok
+            self.assertEqual(jdb.del_notify(re_tok) + jdb.del_notify(fn_tok), 2)
+            self.assertIsNotNone(jdb.io.notify_sink)                 # all_tok is still there
+            jdb.remove('re7', 'bang!', 'dup1')
+            jdb.get_notify(all_tok)
+
+            # a 'CUD' subscription on the old name alone sees the delete half only
+            jdb['half'] = [1]
+            jdb.get_notify(all_tok)
+            half_tok = jdb.add_notify('half', ops='CUD')
+            self.assertTrue(jdb.rename({'half':'halfx'}))
+            self.assertEqual(data_ops(jdb.get_notify(half_tok)), [('half', 'D')])
+            self.assertEqual(jdb.del_notify(half_tok), 1)
+            jdb.remove('halfx')
+            jdb.get_notify(all_tok)
+
+            # get_notify() with no token merges every subscription, once per event
+            m_tok = jdb.add_notify('m*')
+            jdb['m1'] = [1]
+            jdb['q1'] = [1]
+            self.assertEqual(data_ops(jdb.get_notify()), [('m1', 'C'), ('q1', 'C')])
+            self.assertEqual(jdb.get_notify(), [])
+            self.assertEqual(jdb.get_notify(m_tok), [])              # its cursor moved too
+            self.assertEqual(jdb.del_notify(m_tok), 1)
+            jdb.remove('m1', 'q1')
+            jdb.get_notify(all_tok)
+
+            jdb.io.notify_sink = None
+            jdb.io.notify_want = None
+            jdb['rearm'] = [1]
+            self.assertIsNotNone(jdb.io.notify_sink)
+            jdb['rearm'] = [2]
+            self.assertEqual(data_ops(jdb.get_notify(all_tok)), [('rearm', 'U')])
+            jdb.remove('rearm')
+            jdb.get_notify(all_tok)
+
             self.assertEqual(jdb.get_notify(-1), [])
             with self.assertRaises(JValueError):
                 jdb.add_notify('*', ops='CQ')
+
+            with self.assertRaises(TypeError):
+                jdb.add_notify(42)
+
+            self.assertEqual(jdb.notify_stats()['subs'], 1)
+
+            # narrowing a selector
+            with jdb.open(read_only=False):
+                jdb['dropped'] = [1]
+                self.assertTrue(jdb.set_notify(all_tok, key='keep*'))
+
+            self.assertEqual(jdb.get_notify(all_tok), [])
+            self.assertTrue(jdb.set_notify(all_tok, key='*'))
+            jdb.remove('dropped')
+            jdb.get_notify(all_tok)
 
             # compaction and clear() rewrite everything, so they ask for a re-read
             jdb.recycle(merge=True, verbose=False)
@@ -12015,6 +12106,56 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb.del_notify(), 1)
             self.assertIsNone(jdb.io.notify_sink)
             self.assertIsNone(jdb.io.notify_want)
+
+            self.assertFalse(jdb.set_notify(1, key='*'))
+            self.assertEqual(jdb.del_notify(), 0)
+            jdb.recycle(merge=True, verbose=False)
+            with self.assertRaises(RuntimeError):
+                with jdb.transaction():
+                    jdb['gone'] = [1]
+                    raise RuntimeError('rollback')
+
+            self.assertFalse('gone' in jdb)
+            self.assertEqual(jdb.get_notify(), [])
+
+            off_tok = jdb.add_notify('*')
+            with self.assertRaises(JValueError):
+                jdb.set_notify(off_tok, ops='CQ')
+
+            # the other flush point: f_open()/f_close() without the context manager
+            jdb.f_open(read_only=False)
+            try:
+                jdb['f_open1'] = [1]
+            finally:
+                jdb.f_close()
+
+            self.assertEqual(data_ops(jdb.get_notify(off_tok)), [('f_open1', 'C')])
+            jdb.remove('f_open1')
+            self.assertEqual(jdb.del_notify(), 1)
+            jdb.f_open(read_only=False)
+            try:
+                jdb['f_open2'] = [2]
+            finally:
+                jdb.f_close()
+
+            self.assertEqual(jdb['f_open2'], [2])
+            self.assertEqual(jdb.get_notify(), [])
+            jdb.remove('f_open2')
+            
+            a_tok = jdb.add_notify('ua*')
+            b_tok = jdb.add_notify('ub*')
+            self.assertIsNotNone(jdb.io.notify_want)
+            with jdb.open(read_only=False):
+                jdb['ua1'] = [1]
+                jdb['ub1'] = [1]
+                jdb['uc1'] = [1]
+                self.assertEqual(sorted(jdb.io.notify_sink), ['ua1', 'ub1'])
+
+            self.assertEqual(data_ops(jdb.get_notify(a_tok)), [('ua1', 'C')])
+            self.assertEqual(data_ops(jdb.get_notify(b_tok)), [('ub1', 'C')])
+            self.assertEqual(jdb.del_notify(), 2)
+            self.assertIsNone(jdb.io.notify_want)
+            jdb.remove('ua1', 'ub1', 'uc1')
 
             # a consumer that falls behind is handed a resync, not a silent gap
             ring_tok = jdb.add_notify('*', limit=4)
@@ -12057,6 +12198,26 @@ class TestJDb(unittest.TestCase):
 
             self.assertEqual(mirror, set(jdb.keys))
             self.assertEqual(jdb.del_notify(), 1)
+
+            # a read-only handle gets the same API, but only ever reports 'Z':
+            reader = JDbReader(jdb)
+            r_tok = reader.add_notify('*')
+            self.assertIsNotNone(reader.io.notify_sink)
+            self.assertEqual(reader.notify_stats()['subs'], 1)
+            self.assertEqual(reader.get_notify(r_tok), [])
+            jdb['seen_by_reader'] = [1]
+            evs = reader.get_notify(r_tok)
+            self.assertTrue(evs and all(ev.op == 'Z' and ev.key == '' for ev in evs), ops_of(evs))
+            self.assertEqual(reader['seen_by_reader'], [1])
+            self.assertEqual(reader.get_notify(r_tok), [])       # quiet while nothing moves
+            for _ in range(3):
+                self.assertEqual(reader['seen_by_reader'], [1])  # reads produce nothing
+
+            self.assertEqual(reader.get_notify(r_tok), [])
+            self.assertEqual(reader.del_notify(), 1)
+            self.assertIsNone(reader.io.notify_sink)
+            del reader
+            jdb.remove('seen_by_reader')
 
             # clear() drops every key at once: one Z, never 30 000 D events
             last_tok = jdb.add_notify('*')

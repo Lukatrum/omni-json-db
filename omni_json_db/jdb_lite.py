@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any, Union, Optional, Tuple, Set, List, Dict, Callable, Generator, IO
 #-----------------------------------------------------------------------------
 from .jdb_io import JIo, DictKeyTable, KEY_FILE_BUF_SIZE, VAL_FILE_BUF_SIZE, THE_1ST_DATE, HEADER_SIZE
-from .jdb_notify import JNotify, JEvent, Selector, ALL_OPS, DEFAULT_OPS, RING_LIMIT
+from .jdb_notify import JNotify, JEvent, Selector, compile_match, ALL_OPS, DEFAULT_OPS, RING_LIMIT
 from .jdb_file import JFilesBase, JMemFiles, JDiskFiles
 from .jdb_net import JNetFiles
 from .jdb_dc import dc_fill, is_dc
@@ -2145,7 +2145,7 @@ class JDbReader(JDbBase):
                 thd['cnt'] = cnt = thd['cnt'] - 1
                 if cnt <= 0:
                     flags = self.flags
-                    if self._notify is not None: # pragma: no cover
+                    if self._notify is not None:
                         # self.io, not io
                         self._notify.collect(self.io, fp_dict.get(-1, None))
 
@@ -2407,6 +2407,8 @@ class JDbReader(JDbBase):
 
         Raises:
             JValueError: If ``ops`` holds a letter that is not an opcode.
+            TypeError: If ``key`` is not a string, a compiled regular expression
+                or a callable. Nothing is armed when it is refused.
 
         Note:
             The baseline for foreign changes is taken here, from the KEY header.
@@ -2426,6 +2428,7 @@ class JDbReader(JDbBase):
         if bad:
             raise JValueError(f'invalid notify ops: {"".join(sorted(bad))} (allowed: {ALL_OPS})')
 
+        compile_match(key)              # reject a bad selector before anything is armed
         with self.lock:
             notify = self._notify
             if notify is None:
@@ -2543,7 +2546,7 @@ class JDbReader(JDbBase):
             >>> jdb.set_notify(tok, key='user:4*', ops='CUD')
             True
         """
-        if ops is not None: # pragma: no cover
+        if ops is not None:
             ops = ''.join(dict.fromkeys(str(ops).upper()))
             bad = set(ops).difference(ALL_OPS)
             if bad:

@@ -2,7 +2,7 @@
    :members:
    :show-inheritance:
    :undoc-members:
-   :exclude-members:
+   :exclude-members: flags, key, old_key, op, ver
    
 omni\_json\_db.jdb
 ------------------------------------
@@ -110,5 +110,5 @@ omni\_json\_db.jdb\_notify
    :members:
    :show-inheritance:
    :undoc-members: 
-   :exclude-members:
+   :exclude-members: flags, key, old_key, op, ver
 

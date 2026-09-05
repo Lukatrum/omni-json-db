@@ -115,10 +115,10 @@ def compile_match(key:Selector) -> Callable[[str], bool]:
         return lambda k, _e=key: k == _e
 
     search = getattr(key, 'search', None)
-    if search is not None: # pragma: no cover
+    if search is not None:
         return lambda k, _s=search: _s(k) is not None
 
-    if callable(key): # pragma: no cover
+    if callable(key):
         return key
 
     raise TypeError(f'invalid notify selector: {type(key).__name__}')
@@ -199,7 +199,7 @@ class JNotify:
             sub.key = key
             sub.match = compile_match(key)
 
-        if ops is not None: # pragma: no cover
+        if ops is not None:
             sub.ops = ops
 
         return True
@@ -219,7 +219,7 @@ class JNotify:
         if token is not None:
             return 1 if subs.pop(token, None) is not None else 0
 
-        if key is not None: # pragma: no cover
+        if key is not None:
             gone = [t for t, s in subs.items() if s.key == key]
             for t in gone:
                 subs.pop(t, None)
@@ -285,7 +285,7 @@ class JNotify:
             self.push(self.z_resolve(sink, io, key_fp, self.wanted()))
             sink.clear()
 
-        elif sink is None: # pragma: no cover
+        elif sink is None:
             io.notify_sink = {}             # io was re-initialized under us
             io.notify_want = self.wanted()
             self._epoch = None
@@ -324,7 +324,6 @@ class JNotify:
         if sync_id == hi:
             return False
 
-        # pragma: no cover
         self.push_resync(sync_id)
         self._hi = sync_id
         return True
@@ -442,7 +441,7 @@ class JNotify:
         if token is not None:
             sub = subs.get(token, None)
             out = [] if sub is None else [ev for _pos, ev in self._drain_sub(sub, peek, limit)]
-        else: # pragma: no cover
+        else:
             # de-duplicate by value, not by identity
             merged:Dict[JEvent,int] = {}
             for sub in subs.values():
@@ -454,7 +453,7 @@ class JNotify:
 
         if not peek:
             ring = self._ring
-            if not subs: # pragma: no cover
+            if not subs:
                 self._base += len(ring)
                 ring.clear()
             else:
