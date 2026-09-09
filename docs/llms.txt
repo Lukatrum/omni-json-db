@@ -23,6 +23,6 @@
 
 - **Groups**: jdb.add_group('name'); records are addressed as 'group:::key' and queries fan out across groups.
 
-- **Migration**: from_csv/to_csv, from_sqlite, from_parquet, from_ini, from_toml.
+- **Migration**: from_csv/to_csv, from_pandas/to_pandas, from_polars/to_polars, from_sqlite, from_parquet, from_ini, from_toml.
 
 - **Fast Open**: index_cache=True keeps a <KEY>.KIX snapshot; warm_up=True builds the key table on a background thread.

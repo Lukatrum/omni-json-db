@@ -11,6 +11,8 @@ import sqlite3
 import networkx as nx
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pandas as pd
+import polars as pl
 from omni_json_db import JDb, JDbReader, JMemFiles, JFlag, JKeyFlag, \
                     JNetFiles, JDiskFiles, run_files_server, LOCKED, \
                     GraphDb, loads, dumps, Query, JIoVAL_U, API_LATEST, \
@@ -2954,44 +2956,139 @@ class TestJDb(unittest.TestCase):
             logs = log_jdb.find(FUNC=lambda v:v.get('project_id') == 3)
             self.assertEqual([log for _id,log in logs.items()], [{'project_id': 3, 'action': 'setup environment', 'log_date': '2024-01-01'}])
 
-            if pa is None: # pragma: no cover
-                print(Style(f'{filename}: pyarrow not installed, skipping from_parquet test', yellow=1))
-            else:
-                parquet_path = 'db/sample.parquet'
-                table = pa.table({
-                    '_id': ['p1', 'p2', 'p3', 'p4'],
-                    'name': ['Alice', 'Bob', 'Charlie', 'Diana'],
-                    'age': [30, 25, 35, 28],
-                    'active': [True, False, True, True],
-                })
-                pq.write_table(table, parquet_path)
+            parquet_path = 'db/sample.parquet'
+            table = pa.table({
+                '_id': ['p1', 'p2', 'p3', 'p4'],
+                'name': ['Alice', 'Bob', 'Charlie', 'Diana'],
+                'age': [30, 25, 35, 28],
+                'active': [True, False, True, True],
+            })
+            pq.write_table(table, parquet_path)
 
-                before = len(jdb)
-                jdb.from_parquet(parquet_path)
-                self.assertEqual(len(jdb), before + 4)
-                self.assertEqual(jdb['p1'], {'name': 'Alice', 'age': 30, 'active': True})
-                self.assertEqual(jdb['p3']['name'], 'Charlie')
+            before = len(jdb)
+            jdb.from_parquet(parquet_path)
+            self.assertEqual(len(jdb), before + 4)
+            self.assertEqual(jdb['p1'], {'name': 'Alice', 'age': 30, 'active': True})
+            self.assertEqual(jdb['p3']['name'], 'Charlie')
 
-                matches = jdb.find(ANY={'name': 'Diana'})
-                self.assertEqual(len(matches), 1)
+            matches = jdb.find(ANY={'name': 'Diana'})
+            self.assertEqual(len(matches), 1)
 
-                jdb.remove(['p1', 'p2', 'p3', 'p4'])
-                self.assertEqual(len(jdb), before)
+            jdb.remove(['p1', 'p2', 'p3', 'p4'])
+            self.assertEqual(len(jdb), before)
 
-                # explicit key column + column pruning (only 'name' imported)
-                jdb.from_parquet(parquet_path, key='_id', columns=['name'])
-                self.assertEqual(jdb['p2'], {'name': 'Bob'})
-                self.assertNotIn('age', jdb['p2'])
+            # explicit key column + column pruning (only 'name' imported)
+            jdb.from_parquet(parquet_path, key='_id', columns=['name'])
+            self.assertEqual(jdb['p2'], {'name': 'Bob'})
+            self.assertNotIn('age', jdb['p2'])
 
-                jdb.remove(['p1', 'p2', 'p3', 'p4'])
-                self.assertEqual(len(jdb), before)
+            jdb.remove(['p1', 'p2', 'p3', 'p4'])
+            self.assertEqual(len(jdb), before)
 
-                # streaming with a tiny batch_size still yields correct results
-                jdb.from_parquet(parquet_path, batch_size=1)
-                self.assertEqual(len(jdb), before + 4)
+            # streaming with a tiny batch_size still yields correct results
+            jdb.from_parquet(parquet_path, batch_size=1)
+            self.assertEqual(len(jdb), before + 4)
 
-                jdb.remove(['p1', 'p2', 'p3', 'p4'])
-                self.assertEqual(len(jdb), before)
+            jdb.remove(['p1', 'p2', 'p3', 'p4'])
+            self.assertEqual(len(jdb), before)
+
+            before = len(jdb)
+            pdf = pd.DataFrame({
+                '_id': ['d1', 'd2', 'd3'],
+                'name': ['Alice', 'Bob', 'Charlie'],
+                'age': [30, 25, 35],
+            })
+            jdb.from_pandas(pdf)
+            self.assertEqual(len(jdb), before + 3)
+            self.assertEqual(jdb['d1'], {'name': 'Alice', 'age': 30})
+            self.assertEqual(jdb['d3']['name'], 'Charlie')
+
+            jdb.remove(['d1', 'd2', 'd3'])
+            self.assertEqual(len(jdb), before)
+
+            # a named index is materialised as a column, so key= can name it
+            jdb.from_pandas(pdf.set_index('_id'), key='_id')
+            self.assertEqual(jdb['d2'], {'name': 'Bob', 'age': 25})
+
+            jdb.remove(['d1', 'd2', 'd3'])
+            self.assertEqual(len(jdb), before)
+
+            # NaN/None import as None, not as a float nan; tiny batch_size still streams right
+            na_df = pd.DataFrame({'_id': ['n1', 'n2'], 'v': [1.0, None], 'w': ['x', None]})
+            jdb.from_pandas(na_df, batch_size=1)
+            self.assertEqual(jdb['n1'], {'v': 1.0, 'w': 'x'})
+            self.assertIsNone(jdb['n2']['v'], Style(f'{filename}: NaN must import as None', red=1))
+            self.assertIsNone(jdb['n2']['w'])
+
+            jdb.remove(['n1', 'n2'])
+            self.assertEqual(len(jdb), before)
+
+            # a frame with nothing but the key column stores empty records
+            # (the column-at-a-time reader must not silently drop them)
+            jdb.from_pandas(pd.DataFrame({'_id': ['e1', 'e2']}))
+            self.assertEqual(len(jdb), before + 2, Style(f'{filename}: key-only frame dropped rows', red=1))
+            self.assertEqual(jdb['e1'], {})
+
+            jdb.remove(['e1', 'e2'])
+            self.assertEqual(len(jdb), before)
+
+            # an all-empty frame is a no-op, not an error
+            jdb.from_pandas(pd.DataFrame())
+            self.assertEqual(len(jdb), before)
+
+            with self.assertRaises(KeyError):
+                jdb.from_pandas(pdf, key='no_such_column')
+
+            with self.assertRaises(TypeError):
+                jdb.from_pandas({'_id': ['d1']})
+
+            self.assertEqual(len(jdb), before)
+
+            before = len(jdb)
+            ldf = pl.DataFrame({
+                '_id': ['q1', 'q2', 'q3'],
+                'name': ['Alice', 'Bob', 'Charlie'],
+                'age': [30, 25, 35],
+            })
+            jdb.from_polars(ldf)
+            self.assertEqual(len(jdb), before + 3)
+            self.assertEqual(jdb['q1'], {'name': 'Alice', 'age': 30})
+
+            jdb.remove(['q1', 'q2', 'q3'])
+            self.assertEqual(len(jdb), before)
+
+            # a LazyFrame is collected first, and iter_slices() honours batch_size
+            jdb.from_polars(ldf.lazy(), key='_id', batch_size=1)
+            self.assertEqual(jdb['q3'], {'name': 'Charlie', 'age': 35})
+
+            jdb.remove(['q1', 'q2', 'q3'])
+            self.assertEqual(len(jdb), before)
+
+            # polars nulls import as None
+            jdb.from_polars(pl.DataFrame({'_id': ['m1', 'm2'], 'v': [1, None]}))
+            self.assertEqual(jdb['m1'], {'v': 1})
+            self.assertIsNone(jdb['m2']['v'])
+
+            jdb.remove(['m1', 'm2'])
+            self.assertEqual(len(jdb), before)
+
+            jdb.from_polars(pl.DataFrame({'_id': ['e1', 'e2']}))
+            self.assertEqual(len(jdb), before + 2)
+            self.assertEqual(jdb['e1'], {})
+
+            jdb.remove(['e1', 'e2'])
+            self.assertEqual(len(jdb), before)
+
+            jdb.from_polars(pl.DataFrame())
+            self.assertEqual(len(jdb), before)
+
+            with self.assertRaises(KeyError):
+                jdb.from_polars(ldf, key='no_such_column')
+
+            with self.assertRaises(TypeError):
+                jdb.from_polars([{'_id': 'q1'}])
+
+            self.assertEqual(len(jdb), before)
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -5101,6 +5198,35 @@ class TestJDb(unittest.TestCase):
                 jdb.to_csv(fp)
                 jmem2.from_csv(fp)
             self.assertEqual(jdb, jmem2)
+
+            # -------------------------------------------- to_pandas()/to_polars() share to_csv()'s table
+            with io.StringIO() as fp:
+                jdb.to_csv(fp)
+                csv_text = fp.getvalue()
+
+            pdf = jdb.to_pandas(dtype=object)
+            self.assertEqual(len(pdf), len(jdb))
+            self.assertEqual(list(pdf.columns)[0], '_id')
+            self.assertEqual(pdf.to_csv(index=False, lineterminator='\r\n'), csv_text,
+                    Style(f'{filename}: to_pandas() must lay out the same table as to_csv()', red=1))
+
+            jpd = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
+            jpd.from_pandas(pdf)
+            self.assertEqual(jpd, jdb, Style(f'{filename}: to_pandas()/from_pandas() must round-trip', red=1))
+
+            self.assertEqual(list(jdb.to_pandas(key='row_id').columns)[0], 'row_id')
+            self.assertTrue(JDb(data_type=jdb.data_type).to_pandas().empty)
+
+            ldf = jdb.to_polars()
+            self.assertEqual(ldf.height, len(jdb))
+            self.assertEqual(ldf.columns[0], '_id')
+
+            jpl = JDb(data_type=jdb.data_type, zip_type=jdb.zip_type)
+            jpl.from_polars(ldf)
+            self.assertEqual(jpl, jdb, Style(f'{filename}: to_polars()/from_polars() must round-trip', red=1))
+
+            self.assertEqual(jdb.to_polars(key='row_id').columns[0], 'row_id')
+            self.assertEqual(JDb(data_type=jdb.data_type).to_polars().width, 0)
 
             self.assertEqual(jdb, jdb1)
             self.assertEqual(jdb.keys[:], jdb1.keys[:])
@@ -7271,18 +7397,46 @@ class TestJDb(unittest.TestCase):
             self.assertTrue(not jdb2.check_error(verbose=False), Style(f'{filename}:{jdb2}', red=1))
             os.remove(csv_path)
 
-            if pa is None: # pragma: no cover
-                print(Style(f'{filename}: pyarrow not installed, skipping from_parquet test', yellow=1))
-            else:
-                parquet_path = 'db/batch.parquet'
-                pq.write_table(pa.table({'id':[f'p{ii}' for ii in range(n_rows)],
-                                         'val':list(range(n_rows))}), parquet_path)
-                jdb3 = JDb(data_type=data_type)
-                jdb3.from_parquet(parquet_path)
-                self.assertEqual(len(jdb3), n_rows)
-                self.assertEqual(jdb3['p0'], {'val': 0})
-                self.assertEqual(jdb3[f'p{n_rows-1}'], {'val': n_rows-1})
-                os.remove(parquet_path)
+            parquet_path = 'db/batch.parquet'
+            pq.write_table(pa.table({'id':[f'p{ii}' for ii in range(n_rows)],
+                                     'val':list(range(n_rows))}), parquet_path)
+            jdb3 = JDb(data_type=data_type)
+            jdb3.from_parquet(parquet_path)
+            self.assertEqual(len(jdb3), n_rows)
+            self.assertEqual(jdb3['p0'], {'val': 0})
+            self.assertEqual(jdb3[f'p{n_rows-1}'], {'val': n_rows-1})
+            os.remove(parquet_path)
+
+            frame = pd.DataFrame({'id': [f'w{ii}' for ii in range(n_rows)],
+                                  'name': [f'n{ii}' for ii in range(n_rows)],
+                                  'val': list(range(n_rows))})
+            jpd = JDb(data_type=data_type)
+            # batch_size<=0 falls back to the default, so one slice covers the frame
+            # and the IMPORT_BATCH_ROWS flush inside it still has to fire
+            jpd.from_pandas(frame, batch_size=0)
+            self.assertEqual(len(jpd), n_rows)
+            self.assertEqual(jpd['w0'], {'name': 'n0', 'val': 0})
+            self.assertEqual(jpd[f'w{n_rows-1}']['val'], n_rows-1)
+            self.assertTrue(not jpd.check_error(verbose=False), Style(f'{filename}:{jpd}', red=1))
+
+            # a slice boundary that is not a multiple of IMPORT_BATCH_ROWS
+            jpd2 = JDb(data_type=data_type)
+            jpd2.from_pandas(frame, batch_size=1000)
+            self.assertEqual(jpd2, jpd)
+
+            lframe = pl.DataFrame({'id': [f'w{ii}' for ii in range(n_rows)],
+                                   'name': [f'n{ii}' for ii in range(n_rows)],
+                                   'val': list(range(n_rows))})
+            jpl = JDb(data_type=data_type)
+            jpl.from_polars(lframe, batch_size=0)
+            self.assertEqual(len(jpl), n_rows)
+            self.assertEqual(jpl['w0'], {'name': 'n0', 'val': 0})
+            self.assertEqual(jpl[f'w{n_rows-1}']['val'], n_rows-1)
+            self.assertTrue(not jpl.check_error(verbose=False), Style(f'{filename}:{jpl}', red=1))
+
+            jpl2 = JDb(data_type=data_type)
+            jpl2.from_polars(lframe, batch_size=1000)
+            self.assertEqual(jpl2, jpl)
 
             # -------------------------------------------- reinit()/add() batch the same way
             big = {f'x{ii}': ii for ii in range(n_rows)}
@@ -12141,7 +12295,7 @@ class TestJDb(unittest.TestCase):
             self.assertEqual(jdb['f_open2'], [2])
             self.assertEqual(jdb.get_notify(), [])
             jdb.remove('f_open2')
-            
+
             a_tok = jdb.add_notify('ua*')
             b_tok = jdb.add_notify('ub*')
             self.assertIsNotNone(jdb.io.notify_want)

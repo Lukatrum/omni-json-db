@@ -11,7 +11,7 @@ omni_json_db = ["py.typed"]
 
 [project]
 name = "omni_json_db"
-version = "3.00.14"
+version = "3.00.15"
 authors = [
 	{ name="Lukatrum", email="lukatrum@gmail.com"}
 ]
@@ -31,6 +31,7 @@ keywords = [
 	"data",
 	"database",
 	"dataclass",
+	"dataframe",
 	"date-lookup",
 	"db",
 	"dict",
@@ -54,8 +55,10 @@ keywords = [
 	"network",
 	"networkx",
 	"nosql",
+	"pandas",
 	"persistence",
 	"pickle",
+	"polars",
 	"restore",
 	"revertable",
 	"search",

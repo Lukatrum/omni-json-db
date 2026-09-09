@@ -266,7 +266,7 @@ Unlike traditional SQL or NoSQL databases, **omni-json-db** allows you to query 
 
 * **Fast Open at Scale**: A disposable key-table snapshot (``index_cache``) cuts a cold open by ~4x, and ``warm_up`` moves what is left onto a background thread. [refer to `Faster Open`_]
 
-* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem. [refer to `CSV Import / Export`_ + `Parquet Import`_ + `SQLite Import`_ + `INI / TOML Import`_]
+* **Data Migration**: Effortlessly migrate from SQLite or import/export via CSV, Parquet, INI, and TOML with simple commands. Parquet imports stream in constant memory via ``pyarrow`` record batches, so multi-GB files are no problem. [refer to `CSV Import / Export`_ + `Parquet Import`_ + `SQLite Import`_ + `INI / TOML Import`_ + `DataFrame Import / Export`_]
 
 * **Time-Series Ready**: Native timestamping allows for efficient date-based slicing (e.g., ``jdb[yesterday:now]``). [refer to `Time-Series`_]
 
@@ -1081,6 +1081,66 @@ Requires the optional ``pyarrow`` dependency (``pip install pyarrow``).
 
    # pick a different key column, and prune to only the columns you need
    jdb.from_parquet('sample.parquet', key='_id', columns=['name'])
+
+DataFrame Import / Export
+-------------------------
+
+``to_pandas()`` / ``to_polars()`` export the same table ``to_csv()`` writes, and
+``from_pandas()`` / ``from_polars()`` read it back. Only the export side needs
+the optional package installed (``pip install pandas`` / ``pip install polars``);
+the importers just consume the object you hand them.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb(data_type='J+J')
+   jdb.set_n({'p1': {'name': 'Alice',   'age': 30},
+              'p2': {'name': 'Bob',     'age': 25},
+              'p3': {'name': 'Charlie', 'age': 35}})
+
+   df = jdb.to_pandas()
+   print(df)
+   #   _id     name  age
+   # 0  p1    Alice   30
+   # 1  p2      Bob   25
+   # 2  p3  Charlie   35
+
+   # the record key is the first column, named '_id' unless you rename it
+   print(jdb.to_pandas(key='uid').columns.tolist())  # ['uid', 'name', 'age']
+
+   # round-trip: the first column becomes the record key again
+   jdb2 = JDb()
+   jdb2.from_pandas(df)
+   print(jdb2['p1'])   # Output: {'name': 'Alice', 'age': 30}
+
+   # polars works the same way, and accepts a LazyFrame
+   pdf = jdb.to_polars()
+   jdb3 = JDb()
+   jdb3.from_polars(pdf.lazy(), key='_id')
+
+Unlike CSV, both formats are typed, so ``age`` comes back as an ``int``.
+
+A ``pandas`` index that has a name is materialised as a column before the
+import, so ``df.set_index('_id')`` round-trips and ``key='_id'`` still finds it;
+an unnamed ``RangeIndex`` is dropped, exactly as ``DataFrame.to_csv(index=False)``
+would drop it. Missing values (``NaN``, ``NaT``, ``pd.NA``, polars ``null``) are
+stored as ``None``.
+
+Both importers stream: the frame is converted to Python objects one
+``batch_size`` slice at a time and flushed through the same
+``IMPORT_BATCH_ROWS`` append path as every other importer, so a frame far larger
+than the batch never becomes a full list-of-dicts copy.
+
+.. note::
+
+   Export flattens each record into columns: a ``dict`` record contributes its
+   own keys, a scalar record lands in ``__1__``, and any other iterable spreads
+   over ``__V1__`` ... ``__Vn__``. A database whose records have different
+   shapes therefore produces a sparse frame — the union of all columns, with
+   ``None``/``NaN`` where a record has nothing to put there. ``to_polars()``
+   builds with ``strict=False`` so a column holding more than one type widens
+   instead of raising; pass ``strict=True`` to get that error back.
 
 Network Mode
 ------------

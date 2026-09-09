@@ -194,9 +194,70 @@ Requires the optional ``pyarrow`` dependency (``pip install pyarrow``).
 
 Unlike CSV, Parquet is typed, so ``age`` comes back as an ``int``.
 
+pandas / polars
+---------------
+
+:meth:`~omni_json_db.JDb.to_pandas` and :meth:`~omni_json_db.JDb.to_polars`
+export the same table :meth:`~omni_json_db.JDb.to_csv` writes;
+:meth:`~omni_json_db.JDb.from_pandas` and
+:meth:`~omni_json_db.JDb.from_polars` read it back. Only the export side needs
+the optional package installed (``pip install pandas`` / ``pip install
+polars``) — the importers consume an object the caller already holds and never
+import the library themselves.
+
+.. code-block:: python
+
+   from omni_json_db import JDb
+
+   jdb = JDb(data_type='J+J')
+   jdb.set_n({'p1': {'name': 'Alice',   'age': 30},
+              'p2': {'name': 'Bob',     'age': 25},
+              'p3': {'name': 'Charlie', 'age': 35}})
+
+   df = jdb.to_pandas()
+   print(df)
+   #   _id     name  age
+   # 0  p1    Alice   30
+   # 1  p2      Bob   25
+   # 2  p3  Charlie   35
+
+   # the record key leads, named '_id' unless you rename it
+   print(jdb.to_pandas(key='uid').columns.tolist())
+   # Output: ['uid', 'name', 'age']
+
+   # round-trip: the first column becomes the record key again
+   jdb2 = JDb()
+   jdb2.from_pandas(df)
+   print(jdb2['p1'])
+   # Output: {'name': 'Alice', 'age': 30}
+
+   # polars works the same way, and accepts a LazyFrame
+   jdb3 = JDb()
+   jdb3.from_polars(jdb.to_polars().lazy(), key='_id')
+
+Like Parquet and unlike CSV, both formats are typed, so ``age`` comes back as
+an ``int``.
+
+Export flattens each record into columns exactly as CSV export does: a ``dict``
+record contributes its own keys, a scalar record lands in ``__1__``, and any
+other iterable spreads over ``__V1__`` ... ``__Vn__``. A database whose records
+have different shapes therefore produces a sparse frame — the union of all
+columns, with ``None``/``NaN`` where a record has nothing to put there.
+``to_polars()`` builds with ``strict=False``, so a column holding more than one
+type widens instead of raising; pass ``strict=True`` to get that error back.
+
+On the import side, a ``pandas`` index that has a name is materialised as a
+column first, so ``df.set_index('_id')`` round-trips and ``key='_id'`` still
+finds it; an unnamed ``RangeIndex`` is dropped, exactly as
+``DataFrame.to_csv(index=False)`` would drop it. Missing values (``NaN``,
+``NaT``, ``pd.NA``, polars ``null``) are stored as ``None``.
+
 .. note::
 
    Every importer streams in ``IMPORT_BATCH_ROWS``-sized batches through the
    same append path described in :doc:`writing`, so import speed and memory use
-   do not depend on the size of the source file.
+   do not depend on the size of the source file. ``from_pandas()`` and
+   ``from_polars()`` additionally convert the frame one ``batch_size`` slice at
+   a time, so a large frame never becomes a full list-of-dicts copy.
+ 
    
