@@ -16,6 +16,20 @@ try:
 except ImportError:
     debug_break = breakpoint
 
+#-----------------------------------------------------------------------------
+# Optional Rust accelerator (``pip install omni_json_db_rs``). Every function in it
+# is a drop-in for a pure-Python path here and produces identical bytes/values;
+# anything non-canonical is handed back to the Python implementation. Set
+# ``OMNI_JSON_DB_RUST=0`` before the first import to force the pure-Python paths.
+try:
+    from os import environ as _environ
+    if _environ.get('OMNI_JSON_DB_RUST', '1') == '0':
+        raise ImportError('omni_json_db_rs disabled by OMNI_JSON_DB_RUST=0')
+    import omni_json_db_rs as _rs
+
+except ImportError:
+    _rs = None
+
 class JError(Exception):
     pass
 

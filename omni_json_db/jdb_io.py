@@ -18,10 +18,10 @@ except ImportError:
 
 gzip_compress = lambda _bytes : _gzip_compress(_bytes, compresslevel=1)
 #-----------------------------------------------------------------------------
-from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP, KF_EXCL
+from .utils import Style, JIoBase, KeyTableBase, bitarray, JValueError, KEY_FLAG_MASK, KF_EXPIRE, KF_GROUP, KF_EXCL, _rs
 from .jdb_file import JFilesBase
 from .jdb_codec import Unpacker, json_loads, msg_dumps, msg_loads, \
-        JIoKEY_J, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
+        JIoKEY_J, JIoKEY_JR, JIoKEY_S, JIoKEY_M, JIoKEY_L, JIoKEY_U, JIoHEAD, \
         JIoVAL_J, JIoVAL_S, JIoVAL_M, JIoVAL_P, JIoVAL_Y, JIoVAL_U, \
         yaml_dumps, yaml_loads, UserCodecNotRegisteredError, \
         NEW_DAY_SHIFT, OLD_DAY_MASK, NEW_DAY_MASK, MAX_TTL_DAYS, \
@@ -992,7 +992,10 @@ class LiteKeyTable(KeyTable):
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
-g_KEY_J = JIoKEY_J()
+g_KEY_J = JIoKEY_JR() if _rs is not None else JIoKEY_J()
+# KEY_loads builtin -> api_ver, for the load_keys() bulk path (empty without Rust)
+_RS_LOAD_VER = {g_KEY_J.loads_v0: 0, g_KEY_J.loads_v1: 1, g_KEY_J.loads_v2: 2} if _rs is not None else {}
+_rs_load_rows_j = _rs.load_rows_j if _rs is not None else None
 g_KEY_S = JIoKEY_S()
 g_KEY_M = JIoKEY_M()
 g_KEY_L = JIoKEY_L()
@@ -2890,6 +2893,8 @@ class JIo(JIoBase):
         remv_id         = self.remv_id
         sync_id         = self.sync_id
         fast_mode       = isinstance(key_table, KeyTable)
+        # Rust bulk fill: plain-dict DictKeyTable + a Rust JSON KEY codec (-1 = off)
+        rs_ver = _RS_LOAD_VER.get(self.KEY_loads, -1) if key_table.__class__ is DictKeyTable and key_table.table.__class__ is dict else -1
         rec_diff  = n_records - prev_n_records          # new/del records
         line_diff = n_lines - prev_n_lines              # new rows
         self.file_size = records = 0
@@ -2980,9 +2985,12 @@ class JIo(JIoBase):
                             key_table.pop(key, 0)
 
                 if records < n_records:
-                    for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
-                        key_table.set(key, records, flags|KF_EXCL)
-                        records += 1
+                    if rs_ver >= 0:
+                        self.rs_fill_keys(fp, records, n_records, rs_ver)
+                    else:
+                        for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
+                            key_table.set(key, records, flags|KF_EXCL)
+                            records += 1
 
                 if n_records == 0:
                     groups.clear()
@@ -3064,6 +3072,8 @@ class JIo(JIoBase):
 
         if n_records == 0:
             groups.clear()
+        elif rs_ver >= 0:
+            self.rs_fill_keys(fp, records, n_records, rs_ver)
         else:
             for (key, _file_id, _offset, _row_size, _val_size, _ver, _cdays, _mdays, _ttl, flags) in self.KEY_iter(fp, records, n_records):
                 key_table.set(key, records, flags | KF_EXCL)
@@ -3076,6 +3086,72 @@ class JIo(JIoBase):
         self._n_records = n_records
         self._n_lines   = n_lines
         self.file_size  = fp.seek(0, 2)
+
+    def rs_fill_keys(self, fp:IO, start:int, stop:int, rs_ver:int) -> int:
+        """Rust bulk path of :meth:`load_keys`: index rows ``[start, stop)`` into a
+        plain-dict :class:`DictKeyTable`.
+
+        Same result as ``for row in KEY_iter(fp, start, stop): key_table.set(key,
+        row, flags | KF_EXCL)``, including where it stops: the range is clamped to
+        :attr:`n_lines`, a short read ends it, and so does the first row the
+        Python codec cannot decode. The Rust loop (``omni_json_db_rs.load_rows_j``)
+        returns at the first row it would rather not interpret; that one row is
+        decoded by :attr:`KEY_loads` (which itself falls back to
+        :class:`JIoKEY_J`) and the Rust loop resumes after it.
+
+        Only called when ``rs_ver >= 0``, i.e. the key table is a
+        :class:`DictKeyTable` over a plain ``dict`` and :attr:`KEY_loads` is the
+        Rust JSON codec for ``api_ver == rs_ver``.
+
+        Args:
+            fp (IO): The open KEY file pointer.
+            start (int): First row to index.
+            stop (int): End row (exclusive).
+            rs_ver (int): The layout version of :attr:`KEY_loads`.
+
+        Returns:
+            int: The row the scan ended at.
+        """
+        n_lines = self.n_lines
+        stop = n_lines if stop >= n_lines else stop
+        if start >= stop or start < 0:
+            return start
+
+        index_size = self.index_size
+        key_table = self.key_table
+        table = key_table.table
+        groups = self.groups
+        n_records = self.n_records
+        KEY_loads = self.KEY_loads
+        load_rows = _rs_load_rows_j
+        n_rows = min(8192, (2**22) // index_size, stop - start)
+        buf = bytearray(index_size * n_rows)
+        mv_buf = memoryview(buf)
+        row_id = start
+        while row_id < stop:
+            _n_rows = min(stop - row_id, n_rows)
+            fp.seek(HEADER_SIZE + row_id * index_size)
+            n_bytes = fp.readinto(buf if _n_rows == n_rows else mv_buf[:_n_rows * index_size])
+            if n_bytes < index_size or n_bytes % index_size != 0: # pragma: no cover
+                break
+
+            n_got = n_bytes // index_size
+            done = 0
+            while done < n_got:
+                done += load_rows(mv_buf[done * index_size:n_bytes], index_size, rs_ver, row_id + done, n_records, table, groups)
+                if done < n_got:
+                    # a row the accelerator handed back: decode it the Python way
+                    try:
+                        rec = KEY_loads(mv_buf[done * index_size:(done + 1) * index_size])
+                    except ValueError:
+                        return row_id + done
+
+                    key_table.set(rec[0], row_id + done, rec[9] | KF_EXCL)
+                    done += 1
+
+            row_id += n_got
+
+        return row_id
 
     def copy_key(self, fp:IO, src_row:int, dst_row:int, decode:bool=False) -> Union[bytes,tuple,list]:
         """Duplicate an exact slice of row metadata bytes from one slot address to another slot index line.

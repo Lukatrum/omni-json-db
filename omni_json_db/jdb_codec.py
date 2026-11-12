@@ -625,7 +625,7 @@ def _msg_decode(code:int, data:bytes):
 
     raise TypeError(f'code={code} data={data}')
 
-from .utils import JValueError, KEY_FLAG_MASK, KF_GROUP, KF_EXPIRE
+from .utils import JValueError, KEY_FLAG_MASK, KF_GROUP, KF_EXPIRE, _rs
 
 FULL_DAY_MASK = 0xFFFF_FFFF_FFFF
 KEY_FLAG_SHIFT = 48
@@ -1172,6 +1172,28 @@ class JIoKEY_J(JIoKEY):
 
         except (ValueError, TypeError, RuntimeError, AttributeError, EOFError, ArithmeticError, IndexError, JSONDecodeError) as e: # pragma: no cover
             raise JValueError from e
+
+class JIoKEY_JR(JIoKEY_J):
+    """:class:`JIoKEY_J` with the Rust decoder (``omni_json_db_rs``) bound in.
+
+    ``loads_v0`` / ``loads_v1`` / ``loads_v2`` are the Rust builtins themselves
+    (instance slots shadow the inherited methods, so ``getattr(obj, 'loads_v2')``
+    hands :meth:`JIo.change_APIs` the builtin with no bound-method layer). They
+    return exactly the tuples of :class:`JIoKEY_J`, and hand any row that is not
+    in the canonical shape the writer produces (whitespace inside the array,
+    floats, ints beyond 64 bits, lone surrogates, invalid UTF-8, the sub-day TTL
+    layout, ...) to the :class:`JIoKEY_J` method they replace -- so every error
+    is still raised by the same Python code. ``dumps_v*`` stay the inherited
+    Python methods. Only built when ``omni_json_db_rs`` imports.
+    """
+    __slots__ = ('loads_v0', 'loads_v1', 'loads_v2')
+
+    def __init__(self):
+        py = JIoKEY_J()
+        _rs.set_key_j_fallbacks((py.loads_v0, py.loads_v1, py.loads_v2))
+        self.loads_v0 = _rs.key_j_loads_v0
+        self.loads_v1 = _rs.key_j_loads_v1
+        self.loads_v2 = _rs.key_j_loads_v2
 
 #-----------------------------------------------------------------------------
 # KEY row msgpack accelerator: msgspec > whatever the VAL chain picked above
