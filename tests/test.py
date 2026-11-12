@@ -14862,7 +14862,9 @@ class TestJDb(unittest.TestCase):
             fp.seek(128 + 10 * 64)
             fp.write(loose + b' ' * (63 - len(loose)) + b'\n')
 
-        self.assertEqual(_rs.load_rows_j(open(path, 'rb').read()[128:128 + 64 * 50], 64, 2, 0, 50, {}, {}), 10)
+        with open(path, 'rb') as fp:
+            raw = fp.read()
+        self.assertEqual(_rs.load_rows_j(raw[128:128 + 64 * 50], 64, 2, 0, 50, {}, {}), 10)
         reader = JDb(path)
         with reader.open():
             pass
