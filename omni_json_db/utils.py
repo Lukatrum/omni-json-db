@@ -24,7 +24,7 @@ except ImportError:
 try:
     from os import environ as _environ
     if _environ.get('OMNI_JSON_DB_RUST', '1') == '0':
-        raise ImportError('omni_json_db_rs disabled by OMNI_JSON_DB_RUST=0')
+        raise ImportError('omni_json_db_rs disabled by OMNI_JSON_DB_RUST=0') # pragma: no cover  (env escape hatch; CI runs with Rust on)
     import omni_json_db_rs as _rs
 
 except ImportError:

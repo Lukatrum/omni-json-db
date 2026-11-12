@@ -14872,6 +14872,18 @@ class TestJDb(unittest.TestCase):
         self.assertEqual(dict(reader.key_table.table), py_table(path)[0])
         self.assertEqual(reader['r10'], 10)
         self.assertEqual(reader['r49'], 49)
+
+        # a row neither side can decode: the index stops there, exactly as KEY_iter() does
+        with open(path, 'r+b') as fp:
+            fp.seek(128 + 20 * 64)
+            fp.write(b'["r20",broken' + b' ' * 50 + b'\n')
+
+        reader = JDb(path)
+        with reader.open():
+            pass
+        table = py_table(path)[0]
+        self.assertEqual(dict(reader.key_table.table), table)
+        self.assertEqual(len(table), 20, 'old behaviour: load_keys() stops at the first undecodable KEY row')
         jdb.clear(agree='yes', wait_sec=0)
 
 if __name__ == '__main__':
