@@ -318,6 +318,13 @@ Or pick only what you need:
    the pure-Python paths are already fast, so ``orjson`` / ``msgspec`` are
    skipped there.
 
+   **Optional Rust accelerator (experimental).** ``rust/`` in the repository builds
+   ``omni_json_db_rs``, a PyO3 extension that replaces the JSON KEY-row decoder
+   and the index rebuild in ``open()`` (~3x faster on 1M records). It is not on
+   PyPI yet; build it with ``pip install ./rust`` (needs a Rust toolchain).
+   Like ``[speed]`` it changes no file format and falls back to pure Python for
+   anything it does not recognise. Set ``OMNI_JSON_DB_RUST=0`` to turn it off.
+
    The bundles (``[full]`` / ``[all]``) use self-referencing extras and need ``pip >= 21.2``. On an older pip (e.g. a stock Python 3.7), either upgrade pip (``python -m pip install -U pip``) or install the granular extras together, e.g. ``pip install "omni-json-db[speed,compression,yaml,btree]"``.
 
 Basic

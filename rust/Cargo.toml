@@ -1,0 +1,19 @@
+[package]
+name = "omni_json_db_rs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Optional Rust accelerator for omni-json-db (byte-identical to the pure-Python paths)"
+publish = false
+
+[lib]
+name = "omni_json_db_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

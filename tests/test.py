@@ -14768,6 +14768,124 @@ class TestJDb(unittest.TestCase):
             fsize = sum(jdb.file_table.values()) if jdb.file_table else 0
             print(f'{filename}|{jdb}| size:{fsize//1024:,}KB used:{used_s:.4f}s')
 
+    def test_rust_accel(self):
+        """omni_json_db_rs: same KEY bytes, same key table, Python fallback on every bail."""
+        from omni_json_db import jdb_io
+        from omni_json_db.utils import _rs
+        from omni_json_db.jdb_codec import JIoKEY_J
+        if _rs is None:
+            # off: nothing is rebound, load_keys() pays one class check + one dict.get
+            self.assertIs(jdb_io.g_KEY_J.__class__, JIoKEY_J)
+            self.assertEqual(jdb_io._RS_LOAD_VER, {})
+            return
+
+        from omni_json_db.jdb_codec import JIoKEY_JR
+        py, rs = JIoKEY_J(), jdb_io.g_KEY_J
+        self.assertIs(rs.__class__, JIoKEY_JR)
+
+        def call(f, *args):
+            try:
+                return ('ok', f(*args))
+            except Exception as e: # pylint: disable=broad-except
+                return ('err', type(e))
+
+        # canonical rows from every TTL layout, keys that need escaping, non-int args
+        rows = [('k1', 0, 60, 60, 48, 3, 739931, 739931, 0, 0), ('中文鍵', 1, 2, 3, 4, 5, 739931, 739940, 0, 0),
+                ('a"b\\c\t', 0, 0, 0, 0, 0, 739931, 739931, 0, 0x4), ('ttl', 0, 0, 0, 0, 0, 739931, 739935, 5, 0x80),
+                ('ttl9', 0, 0, 0, 0, 0, 739931, 739931 + 9000, 700, 0x80), ('sub', 0, 0, 0, 0, 0, 739931, 739931.5, 0.01, 0x80),
+                ('f', 0, 0, 0, 0, 0, 739931, 739931.25, 0, 0), ('b', True, 0, 0, 0, 0, 739931, 739931, 0, 0),
+                ('big', 1 << 70, 0, 0, 0, 0, 0, 0, 0, 0), ('neg', -1, -2, -3, -4, -5, -6, -7, -1, 0), ('\ud800', 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                ('', 0x10, 0, 0, 0, 0, 739931, 739931, 0, 0x4), ('flag', 0, 0, 0, 0, 0, 739931, 739931, 0, JKeyFlag.GROUP)]
+        for ver in (0, 1, 2):
+            for row in rows:
+                a = call(getattr(py, f'dumps_v{ver}'), *row)
+                if a[0] == 'ok':
+                    for data in (a[1], a[1] + b'   \n', bytearray(a[1] + b' '), memoryview(a[1])):
+                        self.assertEqual(call(getattr(py, f'loads_v{ver}'), data), call(getattr(rs, f'loads_v{ver}'), data), f'v{ver} loads {data}')
+
+        # loads: non-canonical rows must reach the Python codec (same value / same error)
+        odd = [b'[ "a",1,2,3,4,5,6,7]', b'["a", 1,2,3,4,5,6,7]', b'["a",1.0,2,3,4,5,6,7]', b'["a",01,2,3,4,5,6,7]', b'["a",1e3,2,3,4,5,6,7]',
+               b'["\\ud83d\\ude00",1,2,3,4,5,6,7]', b'["\\ud83d",1,2,3,4,5,6,7]', b'["\xff",1,2,3,4,5,6,7]', b'["a",1,2,3,4,5,6,7]\0',
+               b'["a",1,2,3,4,5,6,7,8]', b'["a",1,2,3,4,5,6]', b'["a",99999999999999999999,2,3,4,5,6,7]', b'["a",true,2,3,4,5,6,7]', b'']
+        for ver in (0, 1, 2):
+            for data in odd:
+                self.assertEqual(call(getattr(py, f'loads_v{ver}'), data), call(getattr(rs, f'loads_v{ver}'), data), f'v{ver} loads {data}')
+
+        def py_table(src):
+            saved = jdb_io._RS_LOAD_VER
+            jdb_io._RS_LOAD_VER = {}
+            try:
+                ref = JDb(src)
+                with ref.open():
+                    pass
+                return dict(ref.key_table.table), set(ref.groups)
+            finally:
+                jdb_io._RS_LOAD_VER = saved
+
+        n_compared = 0
+        for config in self.jdb_configs:
+            filename = config['KEY_file']
+            jdb = self.jdbs[filename]
+            jdb.clear(agree='yes', wait_sec=0, **config)
+            print(Style(f'Testing {filename} {jdb}', yellow=1, bright=1))
+            keys = [f'k{i}' for i in range(500)] + ['中文鍵', 'a"b', 'back\\slash', 'tab\tkey', 'é' * 9]
+            jdb.update({key: {'i': i} for i, key in enumerate(keys)})
+            for i in range(0, 60, 3):
+                jdb.set(f'ttl{i}', i, ttl=5)
+            jdb.remove(*[f'k{i}' for i in range(1, 100, 7)])
+            jdb.add_group('grp1')
+            reader = JDb(jdb)
+            with reader.open():
+                pass
+            kt = reader.key_table
+            if kt.__class__ is not jdb_io.DictKeyTable or kt.table.__class__ is not dict:
+                continue
+
+            table, groups = py_table(jdb)
+            self.assertEqual(dict(kt.table), table, f'{filename}: Rust load_keys() != Python load_keys()')
+            self.assertEqual(set(reader.groups), groups, f'{filename}')
+            n_compared += 1
+
+        self.assertGreater(n_compared, 0, 'no DictKeyTable config took the Rust load_keys() path')
+        print(Style(f'Rust vs Python load_keys(): {n_compared}/{len(self.jdb_configs)} configs compared', green=1))
+
+        # a row the Rust loop hands back mid-block: decoded by Python, then the Rust loop resumes
+        path = 'db/test_rust_accel.jdb'
+        jdb = JDb(path, data_type='J+J', api_ver=2, index_size=64)
+        jdb.clear(agree='yes', wait_sec=0)
+        jdb.update({f'r{i}': i for i in range(50)})
+        with open(path, 'r+b') as fp:
+            fp.seek(128 + 10 * 64)
+            row = fp.read(64)
+            self.assertTrue(row.startswith(b'["r10",'))
+            loose = row.rstrip(b' \n').replace(b',', b', ', 1)
+            fp.seek(128 + 10 * 64)
+            fp.write(loose + b' ' * (63 - len(loose)) + b'\n')
+
+        with open(path, 'rb') as fp:
+            raw = fp.read()
+        self.assertEqual(_rs.load_rows_j(raw[128:128 + 64 * 50], 64, 2, 0, 50, {}, {}), 10)
+        reader = JDb(path)
+        with reader.open():
+            pass
+        self.assertEqual(len(reader.key_table), 50)
+        self.assertEqual(dict(reader.key_table.table), py_table(path)[0])
+        self.assertEqual(reader['r10'], 10)
+        self.assertEqual(reader['r49'], 49)
+
+        # a row neither side can decode: the index stops there, exactly as KEY_iter() does
+        with open(path, 'r+b') as fp:
+            fp.seek(128 + 20 * 64)
+            fp.write(b'["r20",broken' + b' ' * 50 + b'\n')
+
+        reader = JDb(path)
+        with reader.open():
+            pass
+        table = py_table(path)[0]
+        self.assertEqual(dict(reader.key_table.table), table)
+        self.assertEqual(len(table), 20, 'old behaviour: load_keys() stops at the first undecodable KEY row')
+        jdb.clear(agree='yes', wait_sec=0)
+
 if __name__ == '__main__':
     print(Style('JDb Unit Testing ...', blink=1, cyan=1))
     unittest.main(verbosity=2)

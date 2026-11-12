@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "omni_json_db_rs"
+version = "0.1.0"
+description = "Optional Rust accelerator for omni-json-db. omni-json-db works without it."
+requires-python = ">=3.8"
+license = { text = "MIT" }
+
+[tool.maturin]
+module-name = "omni_json_db_rs"

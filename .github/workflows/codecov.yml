@@ -8,6 +8,8 @@ on:
       - 'tests/**'
       - 'pyproject.toml'
       - '.github/workflows/codecov.yml'
+      - 'omni_json_db/**'
+      - 'rust/**'
 
 permissions:
   contents: read
@@ -36,6 +38,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-cov 
           pip install -r ./requirements.txt
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the optional Rust accelerator (omni_json_db_rs)
+        run: |
+          pip install ./rust
+          python -c "import omni_json_db_rs; print('omni_json_db_rs', omni_json_db_rs.__version__)"
 
       - name: Run tests
         run: |
